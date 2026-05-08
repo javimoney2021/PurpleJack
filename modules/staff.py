@@ -8,7 +8,7 @@ from core.database import (
     upsert_collect_config_db, delete_collect_config_db
 )
 from core import cache
-from core.config import ruleta_config
+from core.config import game_config
 
 STAFF_ROLE = "Equipo de Eventos"
 COIN = "<:PurpleCoin:1501855737842892941>"
@@ -412,7 +412,7 @@ class Staff(commands.Cog):
     async def ruleta_apuesta_max(self, interaction: discord.Interaction, valor: int):
         if valor <= 0:
             return await interaction.response.send_message("❌ El valor debe ser mayor a 0.", ephemeral=True)
-        ruleta_config["max_apuesta"] = valor
+        game_config["ruleta"]["max_apuesta"] = valor
         await interaction.response.send_message(
             f"✅ Apuesta máxima de la ruleta actualizada a **{valor}** {COIN}.", ephemeral=False
         )
@@ -420,8 +420,8 @@ class Staff(commands.Cog):
     @app_commands.command(name="ruleta_alternar", description="Activa o desactiva la ruleta")
     @is_staff()
     async def ruleta_alternar(self, interaction: discord.Interaction):
-        ruleta_config["activa"] = not ruleta_config["activa"]
-        estado = "✅ activada" if ruleta_config["activa"] else "🔧 desactivada"
+        game_config["ruleta"]["activa"] = not game_config["ruleta"]["activa"]
+        estado = "✅ activada" if game_config["ruleta"]["activa"] else "🔧 desactivada"
         await interaction.response.send_message(f"La ruleta ha sido **{estado}**.", ephemeral=False)
 
     @app_commands.command(name="item_new", description="Agrega un nuevo item a la tienda")
@@ -473,50 +473,75 @@ class Staff(commands.Cog):
         )
 
 
+    def parse_cooldown(self, value: str):
+        value = value.lower().strip()
+
+        if value.endswith("h"):
+            return int(value[:-1]) * 3600
+
+        if value.endswith("m"):
+            return int(value[:-1]) * 60
+
+        raise ValueError("Formato inválido")
+
+    @app_commands.command(name="work_edit", description="Edita configuración de !work")
+    @is_staff()
+    async def work_edit(
+        self,
+        interaction: discord.Interaction,
+        minimo: int,
+        maximo: int,
+        cooldown: str
+    ):
+        try:
+            seconds = self.parse_cooldown(cooldown)
+        except:
+            return await interaction.response.send_message(
+                "❌ Formato inválido. Usa ejemplos como: 6h o 30m",
+                ephemeral=True
+            )
+
+        game_config["work"]["min"] = minimo
+        game_config["work"]["max"] = maximo
+        game_config["work"]["cooldown"] = seconds
+
+        await interaction.response.send_message(
+            f"✅ Work actualizado:\n"
+            f"• Min: {minimo}\n"
+            f"• Max: {maximo}\n"
+            f"• Cooldown: {cooldown}",
+            ephemeral=False
+        )
+
+    @app_commands.command(name="crime_edit", description="Edita configuración de !crime")
+    @is_staff()
+    async def crime_edit(
+        self,
+        interaction: discord.Interaction,
+        minimo: int,
+        maximo: int,
+        cooldown: str
+    ):
+        try:
+            seconds = self.parse_cooldown(cooldown)
+        except:
+            return await interaction.response.send_message(
+                "❌ Formato inválido. Usa ejemplos como: 6h o 30m",
+                ephemeral=True
+            )
+
+        game_config["crime"]["min"] = minimo
+        game_config["crime"]["max"] = maximo
+        game_config["crime"]["cooldown"] = seconds
+
+        await interaction.response.send_message(
+            f"✅ Crime actualizado:\n"
+            f"• Min: {minimo}\n"
+            f"• Max: {maximo}\n"
+            f"• Cooldown: {cooldown}",
+            ephemeral=False
+        )
+
+
 async def setup(bot):
     await bot.add_cog(Staff(bot))
-
-
-from core.config import game_config
-from core.database import save_game_config
-
-def parse_cooldown(value: str):
-    value = value.lower().strip()
-
-    if value.endswith("h"):
-        return int(value[:-1]) * 3600
-
-    if value.endswith("m"):
-        return int(value[:-1]) * 60
-
-    raise ValueError("Formato inválido")
-
-@app_commands.command(name="work_edit", description="Edita configuración de !work")
-async def work_edit(interaction: discord.Interaction, minimo: int, maximo: int, cooldown: str):
-    seconds = parse_cooldown(cooldown)
-
-    game_config["work"]["min"] = minimo
-    game_config["work"]["max"] = maximo
-    game_config["work"]["cooldown"] = seconds
-
-    await save_game_config()
-
-    await interaction.response.send_message(
-        f"✅ Work actualizado: {minimo}-{maximo} | {cooldown}",
-        ephemeral=True
-    )
-
-@app_commands.command(name="crime_edit", description="Edita configuración de !crime")
-async def crime_edit(interaction: discord.Interaction, minimo: int, maximo: int, cooldown: str):
-    seconds = parse_cooldown(cooldown)
-
-    game_config["crime"]["min"] = minimo
-    game_config["crime"]["max"] = maximo
-    game_config["crime"]["cooldown"] = seconds
-
-    await save_game_config()
-
-    await interaction.response.send_message(
-        f"✅ Crime actualizado: {minimo}-{maximo} | {cooldown}",
-        ephemeral=True
-    )
