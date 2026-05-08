@@ -9,6 +9,17 @@ work_counter = {}
 
 WORK_MESSAGES = [
     "🔧 Trabajaste duro y ganaste **{monto}** " + COIN,
+    "🔧 Encontraste fallas graves en el Motor Superior de la nave, obtienes **{monto}** " + COIN,
+    "⛽ Llenaste el combustible exitosamente, ganas **{monto}** " + COIN,
+    "🗑️ La basura espacial ya estaba causando problemas, gracias por encargarte, obtienes **{monto}** " + COIN,
+    "☄️ Meteoritos a la vista! Gracias por encargarte de ellos, ganas **{monto}** " + COIN,
+    "🪣 Alcantarillas limpias, impostores a la vista, obtienes por la limpieza de ductos, **{monto}** " + COIN,
+    "⚡ Has reparado el cableado exitosamente y la nave ha vuelto a funcionar, ganas **{monto}** " + COIN,
+    "🛡️ Los Escudos de la nave han sido reparados, por tu trabajo obtienes **{monto}** " + COIN,
+    "👻 Buen trabajo has atrapado al fantasma merodeando en la nave, ganas **{monto}** " + COIN,
+    "🚀 Saboteadora a la vista, por descubrirla y echarla de la nave obtienes **{monto}** " + COIN,
+    "📡 Las Comunicaciones vuelven a estar estables gracias a tu labor, ganas **{monto}** " + COIN,
+    "💧 Hey! Buen trabajo en la sala de calderas necesitabamos agua, obtienes **{monto}** " + COIN,
 ]
 
 CRIME_SUCCESS = [
