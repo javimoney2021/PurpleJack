@@ -70,8 +70,8 @@ async def on_ready():
 def run_bot():
     async def main():
         await init_db()
-    await create_game_config_table()
-    await load_game_config()
+        await create_game_config_table()
+        await load_game_config()
         await load_items_to_cache()
         await load_cargos_to_cache()
         await load_collect_config_to_cache()
