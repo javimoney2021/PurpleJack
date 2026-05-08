@@ -3,9 +3,9 @@ import discord
 import random
 import time
 import asyncio
-from core.database import get_user, update_balance
 
-from core.config import ruleta_config
+from core.database import get_user, update_balance
+from core.config import game_config
 
 COIN = "<:PurpleCoin:1501855737842892941>"
 
@@ -32,55 +32,84 @@ class Roulette(commands.Cog):
 
     @commands.command()
     async def ruleta(self, ctx, apuesta: int = None, espacio: str = None):
-        if not ruleta_config["activa"]:
-            return await ctx.send("🔧 La Ruleta se encuentra en mantenimiento, intentalo más tarde...!")
+        if not game_config["ruleta"]["activa"]:
+            return await ctx.send(
+                "🔧 La Ruleta se encuentra en mantenimiento, inténtalo más tarde...!"
+            )
 
         if apuesta is None or espacio is None:
             return await ctx.send(
-                f"❌ {ctx.author.mention} Formato correcto: `!ruleta {{apuesta}} {{opción}}`\n"
-                f"Opciones: `black`, `red`, `par`, `impar`, o un número del `0` al `36`"
+                f"❌ {ctx.author.mention} Formato correcto: "
+                f"`!ruleta {{apuesta}} {{opción}}`\n"
+                f"Opciones: `black`, `red`, `par`, `impar`, "
+                f"o un número del `0` al `36`"
             )
 
         espacio = espacio.lower().strip()
 
         if espacio not in OPCIONES_VALIDAS:
             return await ctx.send(
-                f"❌ {ctx.author.mention} Opción inválida. Usa: `black`, `red`, `par`, `impar` o un número del `0` al `36`."
+                f"❌ {ctx.author.mention} Opción inválida. "
+                f"Usa: `black`, `red`, `par`, `impar` "
+                f"o un número del `0` al `36`."
             )
 
         if apuesta <= 0:
-            return await ctx.send(f"❌ {ctx.author.mention} La apuesta debe ser mayor a 0.")
-
-        if apuesta > ruleta_config["max_apuesta"]:
             return await ctx.send(
-                f"❌ {ctx.author.mention} No puedes apostar más de **{ruleta_config['max_apuesta']}** {COIN}."
+                f"❌ {ctx.author.mention} La apuesta debe ser mayor a 0."
+            )
+
+        if apuesta > game_config["ruleta"]["max_apuesta"]:
+            return await ctx.send(
+                f"❌ {ctx.author.mention} "
+                f"No puedes apostar más de "
+                f"**{game_config['ruleta']['max_apuesta']}** {COIN}."
             )
 
         user_id = ctx.author.id
         now = time.time()
+
         if user_id in roulette_cooldowns:
             elapsed = now - roulette_cooldowns[user_id]
+
             if elapsed < ROULETTE_COOLDOWN:
                 remaining = int(ROULETTE_COOLDOWN - elapsed)
                 minutos = remaining // 60
                 segundos = remaining % 60
+
                 return await ctx.send(
-                    f"⏳ {ctx.author.mention} Espera **{minutos}m {segundos}s** para jugar de nuevo.",
+                    f"⏳ {ctx.author.mention} "
+                    f"Espera **{minutos}m {segundos}s** "
+                    f"para jugar de nuevo.",
                     delete_after=10
                 )
 
         user = await get_user(user_id)
+
         if apuesta > user["balance"]:
-            return await ctx.send(f"❌ {ctx.author.mention} No tienes suficiente balance para esta apuesta.")
+            return await ctx.send(
+                f"❌ {ctx.author.mention} "
+                f"No tienes suficiente balance para esta apuesta."
+            )
 
         roulette_cooldowns[user_id] = now
 
         embed = discord.Embed(
-            description=f"🎰 {ctx.author.mention} apostó **{apuesta}** {COIN} en `{espacio}`.",
+            description=(
+                f"🎰 {ctx.author.mention} apostó "
+                f"**{apuesta}** {COIN} en `{espacio}`."
+            ),
             color=discord.Color.purple()
         )
-        embed.set_footer(text="🌀 Girando la ruleta... Espera 10 segundos")
-        embed.set_thumbnail(url=ctx.author.display_avatar.url)
+
+        embed.set_footer(
+            text="🌀 Girando la ruleta... Espera 10 segundos"
+        )
+
+        embed.set_thumbnail(
+            url=ctx.author.display_avatar.url
+        )
+
         await ctx.send(embed=embed)
 
         await asyncio.sleep(10)
@@ -96,40 +125,54 @@ class Roulette(commands.Cog):
 
         if espacio == "black":
             gano = color_resultado == "black"
+
         elif espacio == "red":
             gano = color_resultado == "red"
+
         elif espacio == "par":
             gano = resultado_int != 0 and resultado_int % 2 == 0
+
         elif espacio == "impar":
             gano = resultado_int % 2 != 0
+
         else:
             gano = espacio == resultado
 
         if gano:
             ganancia = apuesta * multiplicador
+
             await update_balance(user_id, ganancia)
+
             embed_resultado = discord.Embed(
                 title="🎰 Resultado de la Ruleta",
                 description=(
-                    f"🟢 La bola cayó en: **{color_resultado} {resultado}**!\n\n"
+                    f"🟢 La bola cayó en: "
+                    f"**{color_resultado} {resultado}**!\n\n"
                     f"🎉 **¡Ganaste!** {ctx.author.mention}\n"
-                    f"Recibes **{ganancia}** {COIN} (x{multiplicador})"
+                    f"Recibes **{ganancia}** "
+                    f"{COIN} (x{multiplicador})"
                 ),
                 color=discord.Color.green()
             )
+
         else:
             await update_balance(user_id, -apuesta)
+
             embed_resultado = discord.Embed(
                 title="🎰 Resultado de la Ruleta",
                 description=(
-                    f"🟢 La bola cayó en: **{color_resultado} {resultado}**!\n\n"
+                    f"🟢 La bola cayó en: "
+                    f"**{color_resultado} {resultado}**!\n\n"
                     f"💸 **Perdiste** {ctx.author.mention}\n"
                     f"Pierdes **{apuesta}** {COIN}."
                 ),
                 color=discord.Color.red()
             )
 
-        embed_resultado.set_thumbnail(url=ctx.author.display_avatar.url)
+        embed_resultado.set_thumbnail(
+            url=ctx.author.display_avatar.url
+        )
+
         await ctx.send(embed=embed_resultado)
 
 
