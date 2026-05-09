@@ -21,11 +21,17 @@ WORK_MESSAGES = [
 ]
 
 CRIME_SUCCESS = [
-    "🕶️ El crimen salió bien. Ganaste **{monto}** " + COIN,
+    "🔥 El crimen cometido en **Castillo Magico** salió bien 🔫 Ganaste **{monto}** " + COIN,
+    "🔥 Un Bandido experto en robar Roles 🥸 Ganaste **{monto}** " + COIN,
+    "🔥 No todos los Payasos son buenos, este se robo tu sonrisa 🤡 Ganaste **{monto}** " + COIN,
+    "🔥 Has conseguido con exito acceder a la boveda del tesoro 💰 Ganaste **{monto}** " + COIN,
 ]
 
 CRIME_FAIL = [
-    "🚔 La policía te atrapó y perdiste **{monto}** " + COIN,
+    "🚔 El Sheriff se lleva el MVP 🤠 Pierdes **-{monto}** " + COIN,
+    "🚔 Fallas al intentar secuestar al Alcalde 😭 Pieres **-{monto}** " + COIN,
+    "🚔 Te encuentran Irrumpiendo el sistema electrico 💡 Pierdes **-{monto}** " + COIN,
+    "🚔 Te pillaron eliminando evidencias en Sala de Seguridad 🎥 Pierdes **-{monto}** " + COIN,
 ]
 
 
@@ -43,7 +49,7 @@ class BasicGames(commands.Cog):
 
         if now - last < cooldown:
             remaining = cooldown - (now - last)
-            return await ctx.send(f"⏳ Debes esperar **{remaining//60}** minutos.")
+            return await ctx.send(f"⏳ Puedes volver a trabajar <t:{now + remaining}:R>.")
 
         amount = random.randint(
             game_config["work"]["min"],
@@ -64,7 +70,7 @@ class BasicGames(commands.Cog):
 
         if now - last < cooldown:
             remaining = cooldown - (now - last)
-            return await ctx.send(f"⏳ Debes esperar **{remaining//60}** minutos.")
+            return await ctx.send(f"⏳ Puedes volver a cometer un crimen <t:{now + remaining}:R>.")
 
         amount = random.randint(
             game_config["crime"]["min"],
