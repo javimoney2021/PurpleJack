@@ -5,7 +5,8 @@ import time
 from settings import TOKEN
 from core.database import (
     init_db, load_items_to_cache, load_cargos_to_cache,
-    load_collect_config_to_cache, delete_cargo_temporal
+    load_collect_config_to_cache, delete_cargo_temporal,
+    create_game_config_table, load_game_config
 )
 from core import cache
 
@@ -72,6 +73,8 @@ async def on_ready():
 def run_bot():
     async def main():
         await init_db()
+        await create_game_config_table()  # crea tabla si no existe + inserta defaults
+        await load_game_config()          # sobrescribe config.py con valores de DB
         await load_items_to_cache()
         await load_cargos_to_cache()
         await load_collect_config_to_cache()
@@ -79,3 +82,5 @@ def run_bot():
         await bot.start(TOKEN)
 
     asyncio.run(main())
+
+

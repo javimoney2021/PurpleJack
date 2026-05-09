@@ -5,7 +5,8 @@ from core.database import (
     get_user, update_balance, update_bank, pool,
     add_item, edit_item, delete_item,
     get_item_by_name, load_items_to_cache,
-    upsert_collect_config_db, delete_collect_config_db
+    upsert_collect_config_db, delete_collect_config_db,
+    save_game_config
 )
 from core import cache
 from core.config import ruleta_config, game_config, COIN
@@ -462,7 +463,8 @@ class Staff(commands.Cog):
         game_config["work"]["min"] = minimo
         game_config["work"]["max"] = maximo
         game_config["work"]["cooldown"] = seconds
-        await interaction.response.send_message(
+        await save_game_config()  # persiste en DB
+        await interaction.response.send_message(...)
             f"✅ Work actualizado:\n• Min: {minimo}\n• Max: {maximo}\n• Cooldown: {cooldown}",
             ephemeral=False
         )
@@ -480,7 +482,8 @@ class Staff(commands.Cog):
         game_config["crime"]["min"] = minimo
         game_config["crime"]["max"] = maximo
         game_config["crime"]["cooldown"] = seconds
-        await interaction.response.send_message(
+        await save_game_config()  # persiste en DB
+        await interaction.response.send_message(...)
             f"✅ Crime actualizado:\n• Min: {minimo}\n• Max: {maximo}\n• Cooldown: {cooldown}",
             ephemeral=False
         )

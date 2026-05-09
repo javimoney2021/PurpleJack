@@ -318,3 +318,65 @@ async def save_collect_cooldowns(user_id, cobros: dict):
                 VALUES ($1, $2, $3)
                 ON CONFLICT (user_id, rol_id) DO UPDATE SET ultima_vez=$3
             """, user_id, rol_id, ultima_vez)
+            
+            *-*
+# ── GAME CONFIG ────────────────────────────────────────
+
+async def create_game_config_table():
+    from core.config import game_config
+    async with pool.acquire() as conn:
+        await conn.execute("""
+        CREATE TABLE IF NOT EXISTS game_config (
+            id SERIAL PRIMARY KEY,
+            work_min INTEGER,
+            work_max INTEGER,
+            work_cooldown INTEGER,
+            crime_min INTEGER,
+            crime_max INTEGER,
+            crime_cooldown INTEGER
+        )
+        """)
+        exists = await conn.fetchrow("SELECT * FROM game_config LIMIT 1")
+        if not exists:
+            await conn.execute("""
+            INSERT INTO game_config (
+                work_min, work_max, work_cooldown,
+                crime_min, crime_max, crime_cooldown
+            ) VALUES ($1, $2, $3, $4, $5, $6)
+            """,
+            game_config["work"]["min"],
+            game_config["work"]["max"],
+            game_config["work"]["cooldown"],
+            game_config["crime"]["min"],
+            game_config["crime"]["max"],
+            game_config["crime"]["cooldown"]
+        )
+
+async def load_game_config():
+    from core.config import game_config
+    async with pool.acquire() as conn:
+        row = await conn.fetchrow("SELECT * FROM game_config LIMIT 1")
+        if not row:
+            return
+        game_config["work"]["min"]      = row["work_min"]
+        game_config["work"]["max"]      = row["work_max"]
+        game_config["work"]["cooldown"] = row["work_cooldown"]
+        game_config["crime"]["min"]     = row["crime_min"]
+        game_config["crime"]["max"]     = row["crime_max"]
+        game_config["crime"]["cooldown"]= row["crime_cooldown"]
+
+async def save_game_config():
+    from core.config import game_config
+    async with pool.acquire() as conn:
+        await conn.execute("""
+        UPDATE game_config SET
+            work_min=$1, work_max=$2, work_cooldown=$3,
+            crime_min=$4, crime_max=$5, crime_cooldown=$6
+        """,
+        game_config["work"]["min"],
+        game_config["work"]["max"],
+        game_config["work"]["cooldown"],
+        game_config["crime"]["min"],
+        game_config["crime"]["max"],
+        game_config["crime"]["cooldown"]
+        )
