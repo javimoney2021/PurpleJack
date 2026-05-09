@@ -1,18 +1,19 @@
 COIN = "<:PurpleCoin:1501855737842892941>"
 
+ruleta_config = {
+    "max_apuesta": 100,
+    "activa": True
+}
+
 game_config = {
-    "ruleta": {
-        "max_apuesta": 100,
-        "activa": True
-    },
     "work": {
-        "min": 100,
-        "max": 500,
-        "cooldown": 3600
+        "min": 250,
+        "max": 550,
+        "cooldown": 14400  # 4 horas en segundos
     },
     "crime": {
-        "min": 100,
-        "max": 500,
-        "cooldown": 3600
+        "min": 800,
+        "max": 1500,
+        "cooldown": 28800  # 8 horas en segundos
     }
 }

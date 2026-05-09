@@ -5,8 +5,6 @@ import time
 from core.database import get_user, update_bank, update_cooldown
 from core.config import game_config, COIN
 
-work_counter = {}
-
 WORK_MESSAGES = [
     "🔧 Trabajaste duro y ganaste **{monto}** " + COIN,
     "🔧 Encontraste fallas graves en el Motor Superior de la nave, obtienes **{monto}** " + COIN,
@@ -30,6 +28,7 @@ CRIME_FAIL = [
     "🚔 La policía te atrapó y perdiste **{monto}** " + COIN,
 ]
 
+
 class BasicGames(commands.Cog):
     def __init__(self, bot):
         self.bot = bot
@@ -44,7 +43,7 @@ class BasicGames(commands.Cog):
 
         if now - last < cooldown:
             remaining = cooldown - (now - last)
-            return await ctx.send(f"⏳ Debes esperar {remaining//60} minutos.")
+            return await ctx.send(f"⏳ Debes esperar **{remaining//60}** minutos.")
 
         amount = random.randint(
             game_config["work"]["min"],
@@ -53,7 +52,6 @@ class BasicGames(commands.Cog):
 
         await update_bank(ctx.author.id, amount)
         await update_cooldown(ctx.author.id, "work", now)
-
         await ctx.send(random.choice(WORK_MESSAGES).format(monto=amount))
 
     @commands.command()
@@ -66,7 +64,7 @@ class BasicGames(commands.Cog):
 
         if now - last < cooldown:
             remaining = cooldown - (now - last)
-            return await ctx.send(f"⏳ Debes esperar {remaining//60} minutos.")
+            return await ctx.send(f"⏳ Debes esperar **{remaining//60}** minutos.")
 
         amount = random.randint(
             game_config["crime"]["min"],
@@ -84,6 +82,7 @@ class BasicGames(commands.Cog):
 
         await update_cooldown(ctx.author.id, "crime", now)
         await ctx.send(msg.format(monto=amount))
+
 
 async def setup(bot):
     await bot.add_cog(BasicGames(bot))

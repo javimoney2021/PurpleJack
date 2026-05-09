@@ -6,12 +6,9 @@ from core.database import (
     reduce_stock, add_cargo_temporal
 )
 from core import cache
+from core.config import COIN
 import time
 
-COIN = "<:PurpleCoin:1501855737842892941>"
-
-
-# ── VISTA DE TIENDA ────────────────────────────────────
 
 class TiendaView(discord.ui.View):
     def __init__(self, items, author_id):
@@ -41,64 +38,65 @@ class ItemBoton(discord.ui.Button):
         self.author_id = author_id
 
     async def callback(self, interaction: discord.Interaction):
-        if interaction.user.id != self.author_id:
-            return await interaction.response.send_message(
-                "❌ Este panel no fue generado por ti.", ephemeral=True
-            )
+        try:
+            if interaction.user.id != self.author_id:
+                return await interaction.response.send_message(
+                    "❌ Este panel no fue generado por ti.", ephemeral=True
+                )
 
-        item = self.item
+            items_fresh = await get_all_items()
+            item_fresh = next((i for i in items_fresh if i["id"] == self.item["id"]), None)
+            if not item_fresh:
+                return await interaction.response.send_message(
+                    "❌ El item ya no existe en la tienda.", ephemeral=True
+                )
+            if item_fresh["stock"] == 0:
+                return await interaction.response.send_message(
+                    f"**{item_fresh['nombre']}** Sin Stock por el momento, vuelve después...",
+                    ephemeral=False
+                )
 
-        # Refresco stock desde caché
-        items_fresh = await get_all_items()
-        item_fresh = next((i for i in items_fresh if i["id"] == item["id"]), None)
-        if not item_fresh:
-            return await interaction.response.send_message(
-                "❌ El item ya no existe en la tienda.", ephemeral=True
-            )
-        if item_fresh["stock"] == 0:
-            return await interaction.response.send_message(
-                f"**{item_fresh['nombre']}** Sin Stock por el momento, vuelve después...",
+            cantidad_compra = item_fresh.get("cantidad", 1)
+            total = item_fresh["precio"]
+            user = await get_user(interaction.user.id)
+
+            if user["balance"] < total:
+                return await interaction.response.send_message(
+                    f"❌ No tienes suficiente balance. Necesitas **{total}** {COIN}.",
+                    ephemeral=False
+                )
+
+            await update_balance(interaction.user.id, -total)
+            await add_to_inventory(interaction.user.id, item_fresh["id"], cantidad_compra)
+
+            cache.add_to_inventory_cache(interaction.user.id, {
+                "id": item_fresh["id"],
+                "nombre": item_fresh["nombre"],
+                "icono": item_fresh["icono"],
+                "utilizable": item_fresh["utilizable"],
+                "mensaje_uso": item_fresh["mensaje_uso"],
+                "rol_id": item_fresh["rol_id"],
+                "duracion": item_fresh.get("duracion", 0),
+                "cantidad": cantidad_compra
+            })
+
+            if item_fresh["stock"] != -1:
+                await reduce_stock(item_fresh["id"])
+
+            icono = item_fresh["icono"] if item_fresh["icono"] else "🔹"
+            nombre_display = interaction.user.nick or interaction.user.display_name
+            await interaction.response.send_message(
+                f"**{nombre_display}** Has comprado **{cantidad_compra}x {icono} {item_fresh['nombre']}** "
+                f"exitosamente... Consulta tu `!inventario` para verificarlo.",
                 ephemeral=False
             )
+        except Exception as e:
+            print(f"ERROR ItemBoton callback: {e}")
+            try:
+                await interaction.response.send_message("❌ Ocurrió un error al procesar la compra.", ephemeral=True)
+            except:
+                pass
 
-        cantidad_compra = item_fresh.get("cantidad", 1)
-        total = item_fresh["precio"]
-        user = await get_user(interaction.user.id)
-
-        if user["balance"] < total:
-            return await interaction.response.send_message(
-                f"❌ No tienes suficiente balance. Necesitas **{total}** {COIN}.",
-                ephemeral=False
-            )
-
-        await update_balance(interaction.user.id, -total)
-        await add_to_inventory(interaction.user.id, item_fresh["id"], cantidad_compra)
-
-        # Actualizar caché de inventario
-        cache.add_to_inventory_cache(interaction.user.id, {
-            "id": item_fresh["id"],
-            "nombre": item_fresh["nombre"],
-            "icono": item_fresh["icono"],
-            "utilizable": item_fresh["utilizable"],
-            "mensaje_uso": item_fresh["mensaje_uso"],
-            "rol_id": item_fresh["rol_id"],
-            "duracion": item_fresh.get("duracion", 0),
-            "cantidad": cantidad_compra
-        })
-
-        if item_fresh["stock"] != -1:
-            await reduce_stock(item_fresh["id"])
-
-        icono = item_fresh["icono"] if item_fresh["icono"] else "🔹"
-        nombre_display = interaction.user.nick or interaction.user.display_name
-        await interaction.response.send_message(
-            f"**{nombre_display}** Has comprado **{cantidad_compra}x {icono} {item_fresh['nombre']}** "
-            f"exitosamente... Consulta tu `!inventario` para verificarlo.",
-            ephemeral=False
-        )
-
-
-# ── SHOP COG ───────────────────────────────────────────
 
 class Shop(commands.Cog):
     def __init__(self, bot):
@@ -107,7 +105,6 @@ class Shop(commands.Cog):
     @commands.command()
     async def tienda(self, ctx):
         items = await get_all_items()
-
         if not items:
             return await ctx.send("🛒 La tienda está vacía por ahora.")
 
@@ -210,7 +207,6 @@ class Shop(commands.Cog):
 
         await remove_from_inventory(ctx.author.id, nombre)
 
-        # Asignar cargo si el item tiene rol configurado
         if item.get("rol_id"):
             role = ctx.guild.get_role(int(item["rol_id"]))
             if role:
@@ -223,8 +219,8 @@ class Shop(commands.Cog):
                         ctx.guild.id,
                         int(item["rol_id"]),
                         expira_en
-                    )            
-                
+                    )
+
         icono = item["icono"] if item["icono"] else "🔹"
         mensaje = item["mensaje_uso"] if item["mensaje_uso"] else f"Usaste {icono} **{item['nombre']}**."
 

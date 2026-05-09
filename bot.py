@@ -3,7 +3,10 @@ from discord.ext import commands
 import asyncio
 import time
 from settings import TOKEN
-from core.database import init_db, load_items_to_cache, load_cargos_to_cache, load_collect_config_to_cache, delete_cargo_temporal, create_game_config_table, load_game_config
+from core.database import (
+    init_db, load_items_to_cache, load_cargos_to_cache,
+    load_collect_config_to_cache, delete_cargo_temporal
+)
 from core import cache
 
 intents = discord.Intents.default()
@@ -22,7 +25,6 @@ async def load_modules():
 
 
 async def check_cargos_loop():
-    """Verifica cargos temporales vencidos cada 12 horas — solo lee de caché."""
     await bot.wait_until_ready()
     while not bot.is_closed():
         await asyncio.sleep(43200)
@@ -70,8 +72,6 @@ async def on_ready():
 def run_bot():
     async def main():
         await init_db()
-        await create_game_config_table()
-        await load_game_config()
         await load_items_to_cache()
         await load_cargos_to_cache()
         await load_collect_config_to_cache()
