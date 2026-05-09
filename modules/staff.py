@@ -439,7 +439,53 @@ class Staff(commands.Cog):
             return await interaction.response.send_message(f"❌ {rol.mention} no tiene collect configurado.", ephemeral=True)
         await delete_collect_config_db(rol.id)
         await interaction.response.send_message(f"✅ Collect de {rol.mention} eliminado.", ephemeral=False)
+        )
 
+    def parse_cooldown(self, value: str):
+        value = value.lower().strip()
+        if value.endswith("h"):
+            return int(value[:-1]) * 3600
+        if value.endswith("m"):
+            return int(value[:-1]) * 60
+        raise ValueError("Formato inválido")
+
+    @app_commands.command(name="work_edit", description="Edita configuración de !work")
+    @app_commands.describe(minimo="Mínimo de coins", maximo="Máximo de coins", cooldown="Cooldown: ej 4h o 30m")
+    @is_staff()
+    async def work_edit(self, interaction, minimo: int, maximo: int, cooldown: str):
+        try:
+            seconds = self.parse_cooldown(cooldown)
+        except:
+            return await interaction.response.send_message(
+                "❌ Formato inválido. Usa ejemplos como: 6h o 30m", ephemeral=True
+            )
+        game_config["work"]["min"] = minimo
+        game_config["work"]["max"] = maximo
+        game_config["work"]["cooldown"] = seconds
+        await interaction.response.send_message(
+            f"✅ Work actualizado:\n• Min: {minimo}\n• Max: {maximo}\n• Cooldown: {cooldown}",
+            ephemeral=False
+        )
+
+    @app_commands.command(name="crime_edit", description="Edita configuración de !crime")
+    @app_commands.describe(minimo="Mínimo de coins", maximo="Máximo de coins", cooldown="Cooldown: ej 8h o 30m")
+    @is_staff()
+    async def crime_edit(self, interaction, minimo: int, maximo: int, cooldown: str):
+        try:
+            seconds = self.parse_cooldown(cooldown)
+        except:
+            return await interaction.response.send_message(
+                "❌ Formato inválido. Usa ejemplos como: 6h o 30m", ephemeral=True
+            )
+        game_config["crime"]["min"] = minimo
+        game_config["crime"]["max"] = maximo
+        game_config["crime"]["cooldown"] = seconds
+        await interaction.response.send_message(
+            f"✅ Crime actualizado:\n• Min: {minimo}\n• Max: {maximo}\n• Cooldown: {cooldown}",
+            ephemeral=False
+        )
 
 async def setup(bot):
     await bot.add_cog(Staff(bot))
+
+
