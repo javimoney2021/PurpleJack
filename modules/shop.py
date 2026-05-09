@@ -171,7 +171,7 @@ class Shop(commands.Cog):
 
         await ctx.send(embed=embed)
 
-    @commands.command()
+    @commands.command(name="inv")
     async def inventario(self, ctx):
         items = await get_inventory(ctx.author.id)
         if not items:

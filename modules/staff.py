@@ -404,7 +404,7 @@ class Staff(commands.Cog):
         estado = "✅ activada" if ruleta_config["activa"] else "🔧 desactivada"
         await interaction.response.send_message(f"La ruleta ha sido **{estado}**.", ephemeral=False)
 
-    @app_commands.command(name="item_new", description="Agrega un nuevo item a la tienda")
+    @app_commands.command(name="add_item", description="Agrega un nuevo item a la tienda")
     @is_staff()
     async def item_new(self, interaction):
         view = ItemNewView(interaction.user.id)
