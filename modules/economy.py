@@ -2,9 +2,19 @@ from discord.ext import commands
 from discord import ui, ButtonStyle, Interaction
 import discord
 import time
-from core.database import get_user, update_balance, update_bank
+
+from core.database import (
+    get_user,
+    update_balance,
+    update_bank
+)
 
 from core import cache
+
+# Cooldown del comando top
+TOP_COOLDOWN = 30
+top_cooldowns = {}
+
 
 class FinanceView(ui.View):
     def __init__(self, user_id):
@@ -14,18 +24,33 @@ class FinanceView(ui.View):
     @ui.button(label="Depositar", style=ButtonStyle.green)
     async def depositar(self, interaction: Interaction, button: ui.Button):
         if interaction.user.id != self.user_id:
-            return await interaction.response.send_message("❌ No es tu menú.", ephemeral=True)
-        await interaction.response.send_modal(DepositModal(self.user_id))
+            return await interaction.response.send_message(
+                "❌ No es tu menú.",
+                ephemeral=True
+            )
+
+        await interaction.response.send_modal(
+            DepositModal(self.user_id)
+        )
 
     @ui.button(label="Retirar", style=ButtonStyle.red)
     async def retirar(self, interaction: Interaction, button: ui.Button):
         if interaction.user.id != self.user_id:
-            return await interaction.response.send_message("❌ No es tu menú.", ephemeral=True)
-        await interaction.response.send_modal(WithdrawModal(self.user_id))
+            return await interaction.response.send_message(
+                "❌ No es tu menú.",
+                ephemeral=True
+            )
+
+        await interaction.response.send_modal(
+            WithdrawModal(self.user_id)
+        )
 
 
 class DepositModal(ui.Modal, title="Depositar al Banco"):
-    amount = ui.TextInput(label="¿Cuánto deseas depositar?", placeholder="Ej: 500")
+    amount = ui.TextInput(
+        label="¿Cuánto deseas depositar?",
+        placeholder="Ej: 500"
+    )
 
     def __init__(self, user_id):
         super().__init__()
@@ -34,20 +59,42 @@ class DepositModal(ui.Modal, title="Depositar al Banco"):
     async def on_submit(self, interaction: Interaction):
         try:
             amount = int(self.amount.value)
+
             if amount <= 0:
-                return await interaction.response.send_message("❌ Cantidad inválida.", ephemeral=True)
+                return await interaction.response.send_message(
+                    "❌ Cantidad inválida.",
+                    ephemeral=True
+                )
+
             user = await get_user(self.user_id)
+
             if amount > user["balance"]:
-                return await interaction.response.send_message("❌ No tienes suficiente balance.", ephemeral=True)
+                return await interaction.response.send_message(
+                    "❌ No tienes suficiente balance.",
+                    ephemeral=True
+                )
+
             await update_balance(self.user_id, -amount)
             await update_bank(self.user_id, amount)
-            await interaction.response.send_message(f"✅ Depositaste **{amount}**<:PurpleCoin:1501855737842892941> al banco.", ephemeral=False)
+
+            await interaction.response.send_message(
+                f"✅ Depositaste **{amount}**"
+                f"<:PurpleCoin:1501855737842892941> al banco.",
+                ephemeral=False
+            )
+
         except ValueError:
-            await interaction.response.send_message("❌ Ingresa un número válido.", ephemeral=True)
+            await interaction.response.send_message(
+                "❌ Ingresa un número válido.",
+                ephemeral=True
+            )
 
 
 class WithdrawModal(ui.Modal, title="Retirar del Banco"):
-    amount = ui.TextInput(label="¿Cuánto deseas retirar?", placeholder="Ej: 500")
+    amount = ui.TextInput(
+        label="¿Cuánto deseas retirar?",
+        placeholder="Ej: 500"
+    )
 
     def __init__(self, user_id):
         super().__init__()
@@ -56,16 +103,35 @@ class WithdrawModal(ui.Modal, title="Retirar del Banco"):
     async def on_submit(self, interaction: Interaction):
         try:
             amount = int(self.amount.value)
+
             if amount <= 0:
-                return await interaction.response.send_message("❌ Cantidad inválida.", ephemeral=True)
+                return await interaction.response.send_message(
+                    "❌ Cantidad inválida.",
+                    ephemeral=True
+                )
+
             user = await get_user(self.user_id)
+
             if amount > user["bank"]:
-                return await interaction.response.send_message("❌ No tienes suficiente en el banco.", ephemeral=True)
+                return await interaction.response.send_message(
+                    "❌ No tienes suficiente en el banco.",
+                    ephemeral=True
+                )
+
             await update_bank(self.user_id, -amount)
             await update_balance(self.user_id, amount)
-            await interaction.response.send_message(f"✅ Retiraste **{amount}**<:PurpleCoin:1501855737842892941> del banco.", ephemeral=True)
+
+            await interaction.response.send_message(
+                f"✅ Retiraste **{amount}**"
+                f"<:PurpleCoin:1501855737842892941> del banco.",
+                ephemeral=True
+            )
+
         except ValueError:
-            await interaction.response.send_message("❌ Ingresa un número válido.", ephemeral=True)
+            await interaction.response.send_message(
+                "❌ Ingresa un número válido.",
+                ephemeral=True
+            )
 
 
 class Economy(commands.Cog):
@@ -91,7 +157,9 @@ class Economy(commands.Cog):
                 segundos = remaining % 60
 
                 return await ctx.send(
-                    f"⏳ {ctx.author.mention} Espera **{minutos}m {segundos}s** para ver el top de nuevo.",
+                    f"⏳ {ctx.author.mention} "
+                    f"Espera **{minutos}m {segundos}s** "
+                    f"para ver el top de nuevo.",
                     delete_after=10
                 )
 
@@ -101,7 +169,8 @@ class Economy(commands.Cog):
 
         async with pool.acquire() as conn:
             rows = await conn.fetch(
-                "SELECT id, balance FROM users ORDER BY balance DESC LIMIT 10"
+                "SELECT id, balance FROM users "
+                "ORDER BY balance DESC LIMIT 10"
             )
 
         print(f"DEBUG top: {len(rows)} filas obtenidas")
@@ -110,11 +179,19 @@ class Economy(commands.Cog):
 
         for row in rows:
             uid = row["id"]
-            balance = _cache[uid]["balance"] if uid in _cache else row["balance"]
+
+            balance = (
+                _cache[uid]["balance"]
+                if uid in _cache
+                else row["balance"]
+            )
 
             resultados.append((uid, balance))
 
-        resultados.sort(key=lambda x: x[1], reverse=True)
+        resultados.sort(
+            key=lambda x: x[1],
+            reverse=True
+        )
 
         print(f"DEBUG top: armando embed")
 
@@ -133,11 +210,16 @@ class Economy(commands.Cog):
             except:
                 nombre = "Usuario desconocido"
 
-            posicion = medallas[i] if i < 3 else f"**#{i+1}**"
+            posicion = (
+                medallas[i]
+                if i < 3
+                else f"**#{i+1}**"
+            )
 
             descripcion += (
                 f"{posicion} {nombre} —— "
-                f"<:PurpleCoin:1501855737842892941> **{balance}** \n"
+                f"<:PurpleCoin:1501855737842892941> "
+                f"**{balance}**\n"
             )
 
         print(f"DEBUG top: enviando embed")
@@ -157,3 +239,10 @@ class Economy(commands.Cog):
         )
 
         await ctx.send(embed=embed)
+
+
+# IMPORTANTE:
+# Esto era lo que faltaba y causaba el crash.
+
+async def setup(bot):
+    await bot.add_cog(Economy(bot))
