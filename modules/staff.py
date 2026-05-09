@@ -464,7 +464,7 @@ class Staff(commands.Cog):
         game_config["work"]["max"] = maximo
         game_config["work"]["cooldown"] = seconds
         await save_game_config()  # persiste en DB
-        await interaction.response.send_message(...)
+        await interaction.response.send_message(
             f"✅ Work actualizado:\n• Min: {minimo}\n• Max: {maximo}\n• Cooldown: {cooldown}",
             ephemeral=False
         )
@@ -483,7 +483,7 @@ class Staff(commands.Cog):
         game_config["crime"]["max"] = maximo
         game_config["crime"]["cooldown"] = seconds
         await save_game_config()  # persiste en DB
-        await interaction.response.send_message(...)
+        await interaction.response.send_message(
             f"✅ Crime actualizado:\n• Min: {minimo}\n• Max: {maximo}\n• Cooldown: {cooldown}",
             ephemeral=False
         )
