@@ -49,7 +49,7 @@ class BasicGames(commands.Cog):
 
         if now - last < cooldown:
             remaining = cooldown - (now - last)
-            return await ctx.send(f"⏳ Puedes volver a trabajar <t:{now + remaining}:R>.")
+            return await ctx.send(f"⏳ Puedes volver a trabajar <t:{int(now + remaining)}:R>.")
 
         amount = random.randint(
             game_config["work"]["min"],
@@ -70,7 +70,7 @@ class BasicGames(commands.Cog):
 
         if now - last < cooldown:
             remaining = cooldown - (now - last)
-            return await ctx.send(f"⏳ Puedes volver a cometer un crimen <t:{now + remaining}:R>.")
+            return await ctx.send(f"⏳ Puedes volver a cometer un crimen <t:{int(now + remaining)}:R>.")
 
         amount = random.randint(
             game_config["crime"]["min"],
