@@ -319,7 +319,7 @@ async def save_collect_cooldowns(user_id, cobros: dict):
                 ON CONFLICT (user_id, rol_id) DO UPDATE SET ultima_vez=$3
             """, user_id, rol_id, ultima_vez)
             
-            *-*
+            
 # ── GAME CONFIG ────────────────────────────────────────
 
 async def create_game_config_table():
