@@ -439,7 +439,7 @@ class Staff(commands.Cog):
             return await interaction.response.send_message(f"❌ {rol.mention} no tiene collect configurado.", ephemeral=True)
         await delete_collect_config_db(rol.id)
         await interaction.response.send_message(f"✅ Collect de {rol.mention} eliminado.", ephemeral=False)
-        )
+        
 
     def parse_cooldown(self, value: str):
         value = value.lower().strip()
