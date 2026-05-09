@@ -85,57 +85,51 @@ class Economy(commands.Cog):
         await ctx.send(embed=embed, view=FinanceView(ctx.author.id))
 
     @commands.command()
-    async def top(self, ctx):
-        from core.cache import _cache
-        from core.database import pool
-
-        now = time.time()
-        user_id = ctx.author.id
-
-        if user_id in top_cooldowns:
-            elapsed = now - top_cooldowns[user_id]
-            if elapsed < TOP_COOLDOWN:
-                remaining = int(TOP_COOLDOWN - elapsed)
-                minutos = remaining // 60
-                segundos = remaining % 60
-                return await ctx.send(
-                    f"⏳ {ctx.author.mention} Espera **{minutos}m {segundos}s** para ver el top de nuevo.",
-                    delete_after=10
-                )
-
-        top_cooldowns[user_id] = now
-
-        async with pool.acquire() as conn:
-            rows = await conn.fetch("SELECT id, balance FROM users ORDER BY balance DESC LIMIT 10")
-
-        resultados = []
-        for row in rows:
-            uid = row["id"]
-            balance = _cache[uid]["balance"] if uid in _cache else row["balance"]
-            resultados.append((uid, balance))
-
-        resultados.sort(key=lambda x: x[1], reverse=True)
-
-        medallas = ["🥇", "🥈", "🥉"]
-        descripcion = ""
-
-        for i, (uid, balance) in enumerate(resultados):
-            try:
+async def top(self, ctx):
+    print(f"DEBUG top: invocado por {ctx.author.id}")
+    from core.cache import _cache
+    from core.database import pool
+    now = time.time()
+    user_id = ctx.author.id
+    if user_id in top_cooldowns:
+        elapsed = now - top_cooldowns[user_id]
+        if elapsed < TOP_COOLDOWN:
+            remaining = int(TOP_COOLDOWN - elapsed)
+            minutos = remaining // 60
+            segundos = remaining % 60
+            return await ctx.send(
+                f"⏳ {ctx.author.mention} Espera **{minutos}m {segundos}s** para ver el top de nuevo.",
+                delete_after=10
+            )
+    top_cooldowns[user_id] = now
+    print(f"DEBUG top: consultando DB")
+    async with pool.acquire() as conn:
+        rows = await conn.fetch("SELECT id, balance FROM users ORDER BY balance DESC LIMIT 10")
+    print(f"DEBUG top: {len(rows)} filas obtenidas")
+    resultados = []
+    for row in rows:
+        uid = row["id"]
+        balance = _cache[uid]["balance"] if uid in _cache else row["balance"]
+        resultados.append((uid, balance))
+    resultados.sort(key=lambda x: x[1], reverse=True)
+    print(f"DEBUG top: armando embed")
+    medallas = ["🥇", "🥈", "🥉"]
+    descripcion = ""
+    for i, (uid, balance) in enumerate(resultados):
+        try:
+            member = ctx.guild.get_member(uid)
+            if not member:
                 member = await ctx.guild.fetch_member(uid)
-                nombre = member.display_name
-            except:
-                nombre = "Usuario desconocido"
-            posicion = medallas[i] if i < 3 else f"**#{i+1}**"
-            descripcion += f"{posicion} {nombre} —— <:PurpleCoin:1501855737842892941> **{balance}** \n"
-
-        embed = discord.Embed(
-            title="<:PurpleCoin:1501855737842892941> TOP GLOBAL MÁS RICOS <:PurpleCoin:1501855737842892941>",
-            description=descripcion,
-            color=discord.Color.blue()
-        )
-        embed.set_footer(text="Solo se muestra el Top 10 de los más ricos.")
-        await ctx.send(embed=embed)
-
-
-async def setup(bot):
-    await bot.add_cog(Economy(bot))
+            nombre = member.display_name
+        except:
+            nombre = "Usuario desconocido"
+        posicion = medallas[i] if i < 3 else f"**#{i+1}**"
+        descripcion += f"{posicion} {nombre} —— <:PurpleCoin:1501855737842892941> **{balance}** \n"
+    print(f"DEBUG top: enviando embed")
+    embed = discord.Embed(
+        title="<:PurpleCoin:1501855737842892941> TOP GLOBAL MÁS RICOS <:PurpleCoin:1501855737842892941>",
+        description=descripcion,
+        color=discord.Color.blue()
+    )
+    embed.set_footer(text="Solo se muestra el Top 10 de los más ricos.")
+    await ctx.send(embed=embed)
