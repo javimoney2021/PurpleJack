@@ -98,7 +98,7 @@ class NaveConfirmView(discord.ui.View):
         super().__init__(timeout=60)
         self.user_id = user_id
         self.contenido = contenido
-        self.author_message = author_message  # mensaje de texto del autor a borrar
+        self.author_message = author_message
 
     @discord.ui.button(label="✅ Enviar", style=discord.ButtonStyle.success)
     async def enviar(self, interaction: discord.Interaction, button: discord.ui.Button):
@@ -108,7 +108,6 @@ class NaveConfirmView(discord.ui.View):
         await save_nave_contenido(self.contenido)
         for item in self.children:
             item.disabled = True
-        # Edita el embed efímero de confirmación a estado procesando
         await interaction.response.edit_message(
             embed=discord.Embed(
                 description="⏳ Guardando...",
@@ -116,14 +115,12 @@ class NaveConfirmView(discord.ui.View):
             ),
             view=self
         )
-        # Espera 5s y borra el mensaje del autor con el contenido
         await asyncio.sleep(5)
         try:
             await self.author_message.delete()
         except Exception:
             pass
         _pending_nave.pop(self.user_id, None)
-        # Mensaje público de confirmación
         await interaction.channel.send(
             embed=discord.Embed(
                 title="📋 Guía de la Nave-Sus Actualizada",
@@ -380,7 +377,6 @@ class ItemNewView(discord.ui.View):
             duracion=self.state.duracion
         )
         self.stop()
-        # Solo una respuesta — edit_message es suficiente
         await interaction.response.edit_message(
             content=f"✅ Item **{self.state.nombre}** agregado a la tienda exitosamente.", view=None
         )
@@ -427,6 +423,16 @@ class Staff(commands.Cog):
     def __init__(self, bot):
         self.bot = bot
 
+    def parse_cooldown(self, value: str):
+        value = value.lower().strip()
+        if value.endswith("h"):
+            return int(value[:-1]) * 3600
+        if value.endswith("m"):
+            return int(value[:-1]) * 60
+        if value.endswith("s"):
+            return int(value[:-1])
+        raise ValueError("Formato inválido")
+
     @app_commands.command(name="balance", description="Ver balance y banco de un miembro")
     @app_commands.describe(usuario="Miembro a consultar")
     @is_staff()
@@ -452,7 +458,6 @@ class Staff(commands.Cog):
             await update_balance(usuario.id, cantidad)
         else:
             await update_bank(usuario.id, cantidad)
-        # Flush inmediato para operaciones administrativas
         async with pool.acquire() as conn:
             data = cache.get_cached(usuario.id)
             if data:
@@ -494,14 +499,27 @@ class Staff(commands.Cog):
     async def resetallcoins(self, interaction):
         await interaction.response.send_modal(ResetAllModal())
 
-    @app_commands.command(name="ruleta_apuesta_max", description="Configura la apuesta máxima de la ruleta")
-    @app_commands.describe(valor="Nuevo valor máximo")
+    @app_commands.command(name="ruleta_apuesta_max", description="Configura la ruleta")
+    @app_commands.describe(monto="Apuesta máxima", cooldown="Cooldown: ej 30s, 5m, 1h")
     @is_staff()
-    async def ruleta_apuesta_max(self, interaction, valor: int):
-        if valor <= 0:
-            return await interaction.response.send_message("❌ El valor debe ser mayor a 0.", ephemeral=True)
-        ruleta_config["max_apuesta"] = valor
-        await interaction.response.send_message(f"✅ Apuesta máxima actualizada a **{valor}** {COIN}.", ephemeral=False)
+    async def ruleta_apuesta_max(self, interaction, monto: int, cooldown: str):
+        if monto <= 0:
+            return await interaction.response.send_message("❌ El monto debe ser mayor a 0.", ephemeral=True)
+        try:
+            cooldown_seconds = self.parse_cooldown(cooldown)
+        except ValueError:
+            return await interaction.response.send_message(
+                "❌ Formato inválido. Usa ejemplos como: 30s, 5m, 1h", ephemeral=True
+            )
+        ruleta_config["max_apuesta"] = monto
+        ruleta_config["cooldown"] = cooldown_seconds
+        await save_ruleta_config()
+        await clear_game_cooldowns("ruleta")
+        cache.clear_game_cooldowns_cache("ruleta")
+        await interaction.response.send_message(
+            f"✅ Ruleta configurada:\n• Apuesta máxima: **{monto}** {COIN}\n• Cooldown: **{cooldown}**",
+            ephemeral=False
+        )
 
     @app_commands.command(name="ruleta_alternar", description="Activa o desactiva la ruleta")
     @is_staff()
@@ -519,31 +537,14 @@ class Staff(commands.Cog):
         perder_prob="Probabilidad de pérdida (%)"
     )
     @is_staff()
-    async def rr_max_apuesta(
-        self,
-        interaction,
-        monto: int,
-        cooldown: str,
-        ganar_prob: float = None,
-        perder_prob: float = None
-    ):
+    async def rr_max_apuesta(self, interaction, monto: int, cooldown: str, ganar_prob: float = None, perder_prob: float = None):
         if monto <= 0:
             return await interaction.response.send_message("❌ El monto debe ser mayor a 0.", ephemeral=True)
-
         try:
             cooldown_seconds = self.parse_cooldown(cooldown)
         except ValueError:
             return await interaction.response.send_message(
                 "❌ Formato inválido. Usa ejemplos como: 30s, 5m, 1h", ephemeral=True
-            )
-
-        if ganar_prob is not None and ganar_prob <= 0:
-            return await interaction.response.send_message(
-                "❌ Gan_Prob debe ser mayor a 0.", ephemeral=True
-            )
-        if perder_prob is not None and perder_prob <= 0:
-            return await interaction.response.send_message(
-                "❌ Perd_Prob debe ser mayor a 0.", ephemeral=True
             )
 
         def parse_probability(value: float):
@@ -562,8 +563,7 @@ class Staff(commands.Cog):
             perder = parse_probability(perder_prob)
         except ValueError:
             return await interaction.response.send_message(
-                "❌ Probabilidades inválidas. Usa valores en % como 70 o en fracción 0.7.",
-                ephemeral=True
+                "❌ Probabilidades inválidas. Usa valores en % como 70 o en fracción 0.7.", ephemeral=True
             )
 
         if ganar is None and perder is None:
@@ -586,7 +586,6 @@ class Staff(commands.Cog):
         await save_rr_config()
         await clear_game_cooldowns("rr")
         cache.clear_game_cooldowns_cache("rr")
-
         await interaction.response.send_message(
             f"✅ Ruleta Rusa configurada:\n"
             f"• Apuesta máxima: **{monto}** {COIN}\n"
@@ -603,36 +602,6 @@ class Staff(commands.Cog):
         await save_rr_config()
         estado = "✅ activada" if rr_config["activa"] else "🔧 desactivada"
         await interaction.response.send_message(f"La Ruleta Rusa ha sido **{estado}**.", ephemeral=False)
-
-    @app_commands.command(name="ruleta_apuesta_max", description="Configura la ruleta")
-    @app_commands.describe(
-        monto="Apuesta máxima",
-        cooldown="Cooldown: ej 30s, 5m, 1h"
-    )
-    @is_staff()
-    async def ruleta_apuesta_max(self, interaction, monto: int, cooldown: str):
-        if monto <= 0:
-            return await interaction.response.send_message("❌ El monto debe ser mayor a 0.", ephemeral=True)
-
-        try:
-            cooldown_seconds = self.parse_cooldown(cooldown)
-        except ValueError:
-            return await interaction.response.send_message(
-                "❌ Formato inválido. Usa ejemplos como: 30s, 5m, 1h", ephemeral=True
-            )
-
-        ruleta_config["max_apuesta"] = monto
-        ruleta_config["cooldown"] = cooldown_seconds
-        await save_ruleta_config()
-        await clear_game_cooldowns("ruleta")
-        cache.clear_game_cooldowns_cache("ruleta")
-
-        await interaction.response.send_message(
-            f"✅ Ruleta configurada:\n"
-            f"• Apuesta máxima: **{monto}** {COIN}\n"
-            f"• Cooldown: **{cooldown}**",
-            ephemeral=False
-        )
 
     @app_commands.command(name="add_item", description="Agrega un nuevo item a la tienda")
     @is_staff()
@@ -670,17 +639,6 @@ class Staff(commands.Cog):
             return await interaction.response.send_message(f"❌ {rol.mention} no tiene collect configurado.", ephemeral=True)
         await delete_collect_config_db(rol.id)
         await interaction.response.send_message(f"✅ Collect de {rol.mention} eliminado.", ephemeral=False)
-        
-
-    def parse_cooldown(self, value: str):
-        value = value.lower().strip()
-        if value.endswith("h"):
-            return int(value[:-1]) * 3600
-        if value.endswith("m"):
-            return int(value[:-1]) * 60
-        if value.endswith("s"):
-            return int(value[:-1])
-        raise ValueError("Formato inválido")
 
     @app_commands.command(name="work_edit", description="Edita configuración de !work")
     @app_commands.describe(minimo="Mínimo de coins", maximo="Máximo de coins", cooldown="Cooldown: ej 4h o 30m")
@@ -695,7 +653,7 @@ class Staff(commands.Cog):
         game_config["work"]["min"] = minimo
         game_config["work"]["max"] = maximo
         game_config["work"]["cooldown"] = seconds
-        await save_game_config()  # persiste en DB
+        await save_game_config()
         await interaction.response.send_message(
             f"✅ Work actualizado:\n• Min: {minimo}\n• Max: {maximo}\n• Cooldown: {cooldown}",
             ephemeral=False
@@ -714,7 +672,7 @@ class Staff(commands.Cog):
         game_config["crime"]["min"] = minimo
         game_config["crime"]["max"] = maximo
         game_config["crime"]["cooldown"] = seconds
-        await save_game_config()  # persiste en DB
+        await save_game_config()
         await interaction.response.send_message(
             f"✅ Crime actualizado:\n• Min: {minimo}\n• Max: {maximo}\n• Cooldown: {cooldown}",
             ephemeral=False
@@ -749,117 +707,54 @@ class Staff(commands.Cog):
         await interaction.response.send_message(
             f"✅ Cooldown de robos actualizado a **{cooldown}**.", ephemeral=False
         )
+
     @app_commands.command(name="anunciar", description="Envía un anuncio a un canal escogido")
     @app_commands.describe(canal="Canal donde se enviará el anuncio")
+    @is_staff()
     async def anunciar(self, interaction: discord.Interaction, canal: discord.TextChannel):
-        role = discord.utils.get(interaction.user.roles, name=COORDINADOR_ROLE)
-        if not role:
-            return await interaction.response.send_message(
-                "❌ No tienes permisos para usar Anuncios.", ephemeral=False
-            )
-
-        import time
-        user_id = interaction.user.id
-        _pending_announcements[user_id] = {
-            "channel": canal,
-            "expires": time.time() + 300,
-            "content": None
-        }
-
-        await interaction.response.send_message(
-            embed=discord.Embed(
-                title="📣 Anunciador listo",
-                description=(
-                    f"Escribe tu mensaje **en este canal** y lo reenviaré a {canal.mention}.\n\n"
-                    f"⏳ Tienes **5 minutos**. Escribe normalmente, nadie más lo verá."
-                ),
-                color=discord.Color.purple()
-            ),
-            ephemeral=True
-        )
-
-        # Auto-limpiar si expira sin mensaje
-        async def auto_clear():
-            import asyncio
-            await asyncio.sleep(300)
-            entry = _pending_announcements.get(user_id)
-            if entry and entry["content"] is None:
-                _pending_announcements.pop(user_id, None)
-
-        import asyncio
-        asyncio.create_task(auto_clear())
-
-    @commands.Cog.listener()
-    async def on_message(self, message: discord.Message):
-        if message.author.bot:
-            return
-
-        import time
-        user_id = message.author.id
-
-        # ── Nave edit listener ─────────────────────────
-        nave_entry = _pending_nave.get(user_id)
-        if nave_entry and nave_entry["content"] is None:
-            if time.time() > nave_entry["expires"]:
-                _pending_nave.pop(user_id, None)
-            elif message.channel.id == nave_entry["channel"].id:
-                nave_entry["content"] = message.content
-                confirm_embed = discord.Embed(
-                    title="📋 Confirma el contenido de la Guía",
+        try:
+            role = discord.utils.get(interaction.user.roles, name=COORDINADOR_ROLE)
+            if not role:
+                return await interaction.response.send_message(
+                    "❌ No tienes permisos para usar Anuncios.", ephemeral=True
+                )
+            import time
+            user_id = interaction.user.id
+            _pending_announcements[user_id] = {
+                "channel": canal,
+                "expires": time.time() + 300,
+                "content": None
+            }
+            await interaction.response.send_message(
+                embed=discord.Embed(
+                    title="📣 Anunciador listo",
                     description=(
-                        f"**Contenido a guardar:**\n\n{message.content}"
+                        f"Escribe tu mensaje **en este canal** y lo reenviaré a {canal.mention}.\n\n"
+                        f"⏳ Tienes **5 minutos**. Escribe normalmente, nadie más lo verá."
                     ),
-                    color=discord.Color.cyan()
-                )
-                confirm_embed.set_footer(text="Tienes 60 segundos para confirmar.")
-                await message.channel.send(
-                    embed=confirm_embed,
-                    view=NaveConfirmView(user_id, message.content, message),
-                    delete_after=65
-                )
-                return
-
-        # ── Anuncio listener ───────────────────────────
-        entry = _pending_announcements.get(user_id)
-
-        if not entry or entry["content"] is not None:
-            return
-
-        if time.time() > entry["expires"]:
-            _pending_announcements.pop(user_id, None)
-            return
-
-        content = message.content
-        entry["content"] = content
-
-        try:
-            await message.delete()
-        except Exception:
-            pass
-
-        confirm_embed = discord.Embed(
-            title="📋 Confirma tu anuncio",
-            description=(
-                f"**Canal destino:** {entry['channel'].mention}\n\n"
-                f"**Mensaje:**\n{content}"
-            ),
-            color=discord.Color.orange()
-        )
-        confirm_embed.set_footer(text="Tienes 60 segundos para confirmar.")
-
-        try:
-            await message.author.send(
-                embed=confirm_embed,
-                view=AnuncioConfirmView(user_id, entry["channel"], content)
+                    color=discord.Color.purple()
+                ),
+                ephemeral=True
             )
-        except discord.Forbidden:
-            # Si tiene DMs cerrados, responde efímero en el canal
-            await message.channel.send(
-                embed=confirm_embed,
-                view=AnuncioConfirmView(user_id, entry["channel"], content),
-                delete_after=60
-            )
-            
+
+            async def auto_clear():
+                await asyncio.sleep(300)
+                entry = _pending_announcements.get(user_id)
+                if entry and entry["content"] is None:
+                    _pending_announcements.pop(user_id, None)
+
+            asyncio.create_task(auto_clear())
+
+        except Exception as e:
+            import traceback
+            traceback.print_exc()
+            try:
+                await interaction.response.send_message(f"❌ Error interno: {e}", ephemeral=True)
+            except Exception:
+                pass
+
+    @app_commands.command(name="nave_edit", description="Actualiza la Guía de la Nave-Sus")
+    @is_staff()
     async def nave_edit(self, interaction: discord.Interaction):
         try:
             role = discord.utils.get(interaction.user.roles, name=COORDINADOR_ROLE)
@@ -867,7 +762,6 @@ class Staff(commands.Cog):
                 return await interaction.response.send_message(
                     "❌ No tienes permisos para usar este comando.", ephemeral=True
                 )
-
             import time
             user_id = interaction.user.id
             ahora = time.time()
@@ -905,14 +799,73 @@ class Staff(commands.Cog):
                 await interaction.response.send_message(f"❌ Error interno: {e}", ephemeral=True)
             except Exception:
                 pass
-            await asyncio.sleep(300)
-            entry = _pending_nave.get(user_id)
-            if entry and entry["content"] is None:
-                _pending_nave.pop(user_id, None)
 
-        asyncio.create_task(auto_clear())            
+    @commands.Cog.listener()
+    async def on_message(self, message: discord.Message):
+        if message.author.bot:
+            return
+
+        import time
+        user_id = message.author.id
+
+        # ── Nave edit listener ─────────────────────────
+        nave_entry = _pending_nave.get(user_id)
+        if nave_entry and nave_entry["content"] is None:
+            if time.time() > nave_entry["expires"]:
+                _pending_nave.pop(user_id, None)
+            elif message.channel.id == nave_entry["channel"].id:
+                nave_entry["content"] = message.content
+                confirm_embed = discord.Embed(
+                    title="📋 Confirma el contenido de la Guía",
+                    description=f"**Contenido a guardar:**\n\n{message.content}",
+                    color=discord.Color.cyan()
+                )
+                confirm_embed.set_footer(text="Tienes 60 segundos para confirmar.")
+                await message.channel.send(
+                    embed=confirm_embed,
+                    view=NaveConfirmView(user_id, message.content, message),
+                    delete_after=65
+                )
+                return
+
+        # ── Anuncio listener ───────────────────────────
+        entry = _pending_announcements.get(user_id)
+        if not entry or entry["content"] is not None:
+            return
+        if time.time() > entry["expires"]:
+            _pending_announcements.pop(user_id, None)
+            return
+
+        content = message.content
+        entry["content"] = content
+
+        try:
+            await message.delete()
+        except Exception:
+            pass
+
+        confirm_embed = discord.Embed(
+            title="📋 Confirma tu anuncio",
+            description=(
+                f"**Canal destino:** {entry['channel'].mention}\n\n"
+                f"**Mensaje:**\n{content}"
+            ),
+            color=discord.Color.orange()
+        )
+        confirm_embed.set_footer(text="Tienes 60 segundos para confirmar.")
+
+        try:
+            await message.author.send(
+                embed=confirm_embed,
+                view=AnuncioConfirmView(user_id, entry["channel"], content)
+            )
+        except discord.Forbidden:
+            await message.channel.send(
+                embed=confirm_embed,
+                view=AnuncioConfirmView(user_id, entry["channel"], content),
+                delete_after=60
+            )
+
 
 async def setup(bot):
     await bot.add_cog(Staff(bot))
-
-
