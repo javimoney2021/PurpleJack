@@ -113,6 +113,7 @@ class Economy(commands.Cog):
             f"**!work**     — Cada {work_cd}\n"
             f"**!crime**    — Cada {crime_cd}\n"
             f"**!ruleta**   — Cada {ruleta_cd}\n"
+            f"**!rr**       — Cada {rr_cd}\n"
             f"**!rob**      — Cada {rob_cd}\n"
             f"**!collect**  — Configurado por Rol **(ver !collect)**"
         )
