@@ -102,7 +102,7 @@ class Rob(commands.Cog):
             await update_bank(target_id, compensation)
 
             await ctx.send(
-                f"🚔 {ctx.author.mention} ¡Robo fallido! Perdiste **{penalty}** {COIN} de tu balance."
+                f"🚔 {ctx.author.mention} ¡Robo fallido! Perdiste **{penalty}** {COIN} de tu balance + **Indemnización** para la víctima por daños y perjuicios."
             )
             await ctx.send(
                 f"🛡️ {target.mention} Alguien intentó robarte, pero falló. Recibiste **{compensation}** {COIN} en tu banco como indemnización."

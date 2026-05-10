@@ -620,14 +620,22 @@ class Staff(commands.Cog):
         await interaction.response.send_message(f"El sistema de robos ha sido **{estado}**. {mensaje}", ephemeral=False)
 
     @app_commands.command(name="rob_edit", description="Configura el cooldown de robos")
-    @app_commands.describe(cooldown="Cooldown en horas")
+    @app_commands.describe(cooldown="Cooldown: ej 30s, 5m, 1h")
     @is_staff()
-    async def rob_edit(self, interaction, cooldown: int):
+    async def rob_edit(self, interaction, cooldown: str):
         from core.config import rob_config
-        if cooldown <= 0:
+        try:
+            seconds = self.parse_cooldown(cooldown)
+        except ValueError:
+            return await interaction.response.send_message(
+                "❌ Formato inválido. Usa ejemplos como: 30s, 5m, 1h", ephemeral=True
+            )
+        if seconds <= 0:
             return await interaction.response.send_message("❌ El cooldown debe ser mayor a 0.", ephemeral=True)
-        rob_config["cooldown"] = cooldown * 3600
-        await interaction.response.send_message(f"✅ Cooldown de robos actualizado a **{cooldown} horas**.", ephemeral=False)
+        rob_config["cooldown"] = seconds
+        await interaction.response.send_message(
+            f"✅ Cooldown de robos actualizado a **{cooldown}**.", ephemeral=False
+        )
 
 async def setup(bot):
     await bot.add_cog(Staff(bot))
