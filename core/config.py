@@ -5,6 +5,14 @@ ruleta_config = {
     "activa": True
 }
 
+rr_config = {
+    "max_apuesta": 100,
+    "cooldown": 180,
+    "ganar_prob": 0.7,
+    "perder_prob": 0.3,
+    "activa": True
+}
+
 game_config = {
     "work": {
         "min": 250,

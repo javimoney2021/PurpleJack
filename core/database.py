@@ -323,7 +323,7 @@ async def save_collect_cooldowns(user_id, cobros: dict):
 # ── GAME CONFIG ────────────────────────────────────────
 
 async def create_game_config_table():
-    from core.config import game_config
+    from core.config import game_config, rr_config
     async with pool.acquire() as conn:
         await conn.execute("""
         CREATE TABLE IF NOT EXISTS game_config (
@@ -352,8 +352,32 @@ async def create_game_config_table():
             game_config["crime"]["cooldown"]
         )
 
+        await conn.execute("""
+        CREATE TABLE IF NOT EXISTS rr_config (
+            id SERIAL PRIMARY KEY,
+            max_apuesta INTEGER,
+            cooldown INTEGER,
+            ganar_prob DOUBLE PRECISION,
+            perder_prob DOUBLE PRECISION,
+            activa BOOLEAN DEFAULT TRUE
+        )
+        """)
+        rr_exists = await conn.fetchrow("SELECT * FROM rr_config LIMIT 1")
+        if not rr_exists:
+            await conn.execute("""
+            INSERT INTO rr_config (
+                max_apuesta, cooldown, ganar_prob, perder_prob, activa
+            ) VALUES ($1, $2, $3, $4, $5)
+            """,
+            rr_config["max_apuesta"],
+            rr_config["cooldown"],
+            rr_config["ganar_prob"],
+            rr_config["perder_prob"],
+            rr_config["activa"]
+        )
+
 async def load_game_config():
-    from core.config import game_config
+    from core.config import game_config, rr_config
     async with pool.acquire() as conn:
         row = await conn.fetchrow("SELECT * FROM game_config LIMIT 1")
         if not row:
@@ -364,6 +388,14 @@ async def load_game_config():
         game_config["crime"]["min"]     = row["crime_min"]
         game_config["crime"]["max"]     = row["crime_max"]
         game_config["crime"]["cooldown"]= row["crime_cooldown"]
+
+        rr_row = await conn.fetchrow("SELECT * FROM rr_config LIMIT 1")
+        if rr_row:
+            rr_config["max_apuesta"] = rr_row["max_apuesta"]
+            rr_config["cooldown"] = rr_row["cooldown"]
+            rr_config["ganar_prob"] = rr_row["ganar_prob"]
+            rr_config["perder_prob"] = rr_row["perder_prob"]
+            rr_config["activa"] = rr_row["activa"]
 
 async def save_game_config():
     from core.config import game_config
@@ -379,4 +411,19 @@ async def save_game_config():
         game_config["crime"]["min"],
         game_config["crime"]["max"],
         game_config["crime"]["cooldown"]
+        )
+
+async def save_rr_config():
+    from core.config import rr_config
+    async with pool.acquire() as conn:
+        await conn.execute("""
+        UPDATE rr_config SET
+            max_apuesta=$1, cooldown=$2, ganar_prob=$3,
+            perder_prob=$4, activa=$5
+        """,
+        rr_config["max_apuesta"],
+        rr_config["cooldown"],
+        rr_config["ganar_prob"],
+        rr_config["perder_prob"],
+        rr_config["activa"]
         )
