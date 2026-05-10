@@ -155,6 +155,23 @@ class RRView(discord.ui.View):
                     return
 
                 reward_percent = format_percent(sum(ROUND_REWARDS[: self.game.round]))
+
+                # Mensaje especial según la ronda siguiente
+                if self.game.round == 3:
+                    aviso = (
+                        f"\n\n⚠️ **¡Atención!** Las rondas 4 y 5 comprometen más que tu apuesta inicial.\n"
+                        f"Derrota en ronda 4 → pierdes **{int(self.game.apuesta * 1.3)} {COIN}**\n"
+                        f"Derrota en ronda 5 → pierdes **{int(self.game.apuesta * 1.5)} {COIN}**\n"
+                        f"¿Grandes ganancias implican grandes riesgos, continuas?"
+                    )
+                elif self.game.round == 4:
+                    aviso = (
+                        f"\n\n🌟 **Maravillosas ganancias, la suerte te persigue...**\n"
+                        f"¿Te atreves a dar el último paso a por el **Gran Botín**?"
+                    )
+                else:
+                    aviso = ""
+
                 result_embed = build_rr_embed(
                     interaction.user,
                     self.game,
@@ -164,6 +181,7 @@ class RRView(discord.ui.View):
                         f"Ganancia acumulada: **{self.game.ganancia} {COIN}**\n"
                         f"Puedes reclamar ya o arriesgarte al siguiente disparo.\n\n"
                         f"🔸 Total posible si completas la ronda actual: **{reward_percent}%**"
+                        f"{aviso}"
                     ),
                     thumbnail=SUCCESS_IMAGE
                 )
@@ -173,20 +191,33 @@ class RRView(discord.ui.View):
 
             self.game.active = False
             self.game.finished = True
+
+            # Pérdida según ronda: ronda 4 = +30%, ronda 5 = +50%
+            ronda_actual = self.game.round + 1
+            if ronda_actual == 4:
+                perdida = int(self.game.apuesta * 1.3)
+                extra_txt = f"⚠️ Ronda 4 — Perdiste **{perdida} {COIN}** (apuesta +30%)"
+            elif ronda_actual == 5:
+                perdida = int(self.game.apuesta * 1.5)
+                extra_txt = f"⚠️ Ronda 5 — Perdiste **{perdida} {COIN}** (apuesta +50%)"
+            else:
+                perdida = self.game.apuesta
+                extra_txt = f"Perdiste tu apuesta inicial de **{perdida} {COIN}**"
+
             loss_embed = build_rr_embed(
                 interaction.user,
                 self.game,
                 state="lost",
                 description=(
-                    f"💥 ¡Bala inoportuna! Perdiste la apuesta inicial de **{self.game.apuesta} {COIN}**.\n\n"
-                    f"No hay ganancia acumulada. Mejor suerte la próxima vez."
+                    f"💥 ¡Bala inoportuna! {extra_txt}.\n\n"
+                    f"Mejor suerte la próxima vez."
                 ),
                 thumbnail=FAILURE_IMAGE
             )
             loss_view = RRView(self.game, self.author_id)
             for item in loss_view.children:
                 item.disabled = True
-            await update_balance(self.game.user_id, -self.game.apuesta)
+            await update_balance(self.game.user_id, -perdida)
             await interaction.edit_original_response(embed=loss_embed, view=loss_view)
             rr_games.pop(self.game.user_id, None)
         except Exception as e:
