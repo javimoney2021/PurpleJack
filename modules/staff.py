@@ -111,7 +111,7 @@ class NaveConfirmView(discord.ui.View):
         await interaction.response.edit_message(
             embed=discord.Embed(
                 description="⏳ Guardando...",
-                color=discord.Color.cyan()
+                color=discord.Color.teal()
             ),
             view=self
         )
@@ -125,7 +125,7 @@ class NaveConfirmView(discord.ui.View):
             embed=discord.Embed(
                 title="📋 Guía de la Nave-Sus Actualizada",
                 description="✅ **Comando de la Nave Actualizado!**",
-                color=discord.Color.cyan()
+                color=discord.Color.teal()
             )
         )
 
@@ -779,7 +779,7 @@ class Staff(commands.Cog):
                         "Escribe el contenido de la guía **en este canal**.\n\n"
                         "⏳ Tienes **5 minutos**. Tu mensaje será borrado automáticamente."
                     ),
-                    color=discord.Color.cyan()
+                    color=discord.Color.teal()
                 ),
                 ephemeral=True
             )
@@ -818,7 +818,7 @@ class Staff(commands.Cog):
                 confirm_embed = discord.Embed(
                     title="📋 Confirma el contenido de la Guía",
                     description=f"**Contenido a guardar:**\n\n{message.content}",
-                    color=discord.Color.cyan()
+                    color=discord.Color.teal()
                 )
                 confirm_embed.set_footer(text="Tienes 60 segundos para confirmar.")
                 await message.channel.send(
