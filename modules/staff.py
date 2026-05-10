@@ -13,6 +13,11 @@ from core import cache
 from core.config import ruleta_config, rr_config, game_config, COIN
 
 STAFF_ROLE = "Equipo de Eventos"
+COORDINADOR_ROLE = "Coordinador-ES"
+
+# ── ANUNCIOS (RAM only) ────────────────────────────────
+_pending_announcements = {}
+# {user_id: {"channel": channel_obj, "expires": float, "content": str|None}}
 
 
 def is_staff():
@@ -41,6 +46,45 @@ class ResetAllModal(discord.ui.Modal, title="Confirmar Reset Global"):
         cache._dirty.clear()
         await interaction.response.send_message("✅ Reset global completado.", ephemeral=False)
 
+# ── ANUNCIO CONFIRM VIEW ───────────────────────────────
+
+class AnuncioConfirmView(discord.ui.View):
+    def __init__(self, user_id, channel, content):
+        super().__init__(timeout=60)
+        self.user_id = user_id
+        self.channel = channel
+        self.content = content
+
+    @discord.ui.button(label="✅ Aceptar", style=discord.ButtonStyle.success)
+    async def aceptar(self, interaction: discord.Interaction, button: discord.ui.Button):
+        if interaction.user.id != self.user_id:
+            return await interaction.response.send_message("❌ No es tu confirmación.", ephemeral=True)
+        for item in self.children:
+            item.disabled = True
+        await interaction.response.edit_message(
+            embed=discord.Embed(
+                description=f"✅ Anuncio enviado a {self.channel.mention}.",
+                color=discord.Color.green()
+            ),
+            view=self
+        )
+        await self.channel.send(self.content)
+        _pending_announcements.pop(self.user_id, None)
+
+    @discord.ui.button(label="❌ Cancelar", style=discord.ButtonStyle.danger)
+    async def cancelar(self, interaction: discord.Interaction, button: discord.ui.Button):
+        if interaction.user.id != self.user_id:
+            return await interaction.response.send_message("❌ No es tu confirmación.", ephemeral=True)
+        for item in self.children:
+            item.disabled = True
+        await interaction.response.edit_message(
+            embed=discord.Embed(
+                description="🚫 Anuncio cancelado. No se envió nada.",
+                color=discord.Color.red()
+            ),
+            view=self
+        )
+        _pending_announcements.pop(self.user_id, None)
 
 # ── ITEM NEW STATE ─────────────────────────────────────
 
@@ -644,6 +688,92 @@ class Staff(commands.Cog):
         await interaction.response.send_message(
             f"✅ Cooldown de robos actualizado a **{cooldown}**.", ephemeral=False
         )
+@app_commands.command(name="anunciar", description="Envía un anuncio a un canal escogido")
+    @app_commands.describe(canal="Canal donde se enviará el anuncio")
+    async def anunciar(self, interaction: discord.Interaction, canal: discord.TextChannel):
+        role = discord.utils.get(interaction.user.roles, name=COORDINADOR_ROLE)
+        if not role:
+            return await interaction.response.send_message(
+                "❌ No tienes permisos para usar este comando.", ephemeral=True
+            )
+
+        import time
+        user_id = interaction.user.id
+        _pending_announcements[user_id] = {
+            "channel": canal,
+            "expires": time.time() + 300,
+            "content": None
+        }
+
+        await interaction.response.send_message(
+            embed=discord.Embed(
+                title="📣 Anunciador listo",
+                description=(
+                    f"Escribe tu mensaje **en este canal** y lo reenviaré a {canal.mention}.\n\n"
+                    f"⏳ Tienes **5 minutos**. Escribe normalmente, nadie más lo verá."
+                ),
+                color=discord.Color.purple()
+            ),
+            ephemeral=True
+        )
+
+        # Auto-limpiar si expira sin mensaje
+        async def auto_clear():
+            import asyncio
+            await asyncio.sleep(300)
+            entry = _pending_announcements.get(user_id)
+            if entry and entry["content"] is None:
+                _pending_announcements.pop(user_id, None)
+
+        import asyncio
+        asyncio.create_task(auto_clear())
+
+    @commands.Cog.listener()
+    async def on_message(self, message: discord.Message):
+        if message.author.bot:
+            return
+
+        import time
+        user_id = message.author.id
+        entry = _pending_announcements.get(user_id)
+
+        if not entry or entry["content"] is not None:
+            return
+
+        if time.time() > entry["expires"]:
+            _pending_announcements.pop(user_id, None)
+            return
+
+        content = message.content
+        entry["content"] = content
+
+        try:
+            await message.delete()
+        except Exception:
+            pass
+
+        confirm_embed = discord.Embed(
+            title="📋 Confirma tu anuncio",
+            description=(
+                f"**Canal destino:** {entry['channel'].mention}\n\n"
+                f"**Mensaje:**\n{content}"
+            ),
+            color=discord.Color.orange()
+        )
+        confirm_embed.set_footer(text="Tienes 60 segundos para confirmar.")
+
+        try:
+            await message.author.send(
+                embed=confirm_embed,
+                view=AnuncioConfirmView(user_id, entry["channel"], content)
+            )
+        except discord.Forbidden:
+            # Si tiene DMs cerrados, responde efímero en el canal
+            await message.channel.send(
+                embed=confirm_embed,
+                view=AnuncioConfirmView(user_id, entry["channel"], content),
+                delete_after=60
+            )
 
 async def setup(bot):
     await bot.add_cog(Staff(bot))
