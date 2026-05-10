@@ -189,9 +189,9 @@ class Economy(commands.Cog):
         )
         embed.set_footer(text="Solo se muestra el Top 10 de los más ricos.")
         await ctx.send(embed=embed)
-        
-        @commands.command(name="nave")
-        async def nave(self, ctx):
+
+    @commands.command(name="nave")
+    async def nave(self, ctx):
         from core.database import get_nave_contenido
         contenido = await get_nave_contenido()
         if not contenido:
