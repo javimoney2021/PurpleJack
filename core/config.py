@@ -14,6 +14,11 @@ rr_config = {
     "activa": True
 }
 
+rob_config = {
+    "activa": True,
+    "cooldown": 3600  # segundos, default 1 hora
+}
+
 game_config = {
     "work": {
         "min": 250,

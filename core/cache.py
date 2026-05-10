@@ -54,6 +54,23 @@ def clear_dirty(user_id):
 def get_all_cache():
     return _cache
 
+# ── ROB ────────────────────────────────────────────────
+_rob_cooldowns = {}      # {user_id: timestamp}
+_rob_protection = {}     # {user_id: timestamp}
+
+def get_rob_cooldown(user_id):
+    return _rob_cooldowns.get(user_id, 0)
+
+def set_rob_cooldown(user_id):
+    from core.config import rob_config
+    _rob_cooldowns[user_id] = time.time() + rob_config["cooldown"]
+
+def get_rob_protection(user_id):
+    return _rob_protection.get(user_id, 0)
+
+def set_rob_protection(user_id):
+    _rob_protection[user_id] = time.time() + 3600  # 1 hora fija
+
 # ── ITEMS ──────────────────────────────────────────────
 _items_cache = []
 

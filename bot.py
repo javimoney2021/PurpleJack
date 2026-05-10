@@ -22,6 +22,7 @@ async def load_modules():
     await bot.load_extension("modules.staff")
     await bot.load_extension("modules.roulette")
     await bot.load_extension("modules.russian_roulette")
+    await bot.load_extension("modules.rob")
     await bot.load_extension("modules.shop")
     await bot.load_extension("modules.collect")
 

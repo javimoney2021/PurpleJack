@@ -610,6 +610,25 @@ class Staff(commands.Cog):
             ephemeral=False
         )
 
+    @app_commands.command(name="rob_alternar", description="Activa o desactiva el sistema de robos")
+    @is_staff()
+    async def rob_alternar(self, interaction):
+        from core.config import rob_config
+        rob_config["activa"] = not rob_config["activa"]
+        estado = "✅ activado" if rob_config["activa"] else "🔧 desactivado"
+        mensaje = "Las calles están llenas de Sheriffs y Veteranos, está siendo imposible atracar a alguien." if not rob_config["activa"] else "El sistema de robos ha sido reactivado."
+        await interaction.response.send_message(f"El sistema de robos ha sido **{estado}**. {mensaje}", ephemeral=False)
+
+    @app_commands.command(name="rob_edit", description="Configura el cooldown de robos")
+    @app_commands.describe(cooldown="Cooldown en horas")
+    @is_staff()
+    async def rob_edit(self, interaction, cooldown: int):
+        from core.config import rob_config
+        if cooldown <= 0:
+            return await interaction.response.send_message("❌ El cooldown debe ser mayor a 0.", ephemeral=True)
+        rob_config["cooldown"] = cooldown * 3600
+        await interaction.response.send_message(f"✅ Cooldown de robos actualizado a **{cooldown} horas**.", ephemeral=False)
+
 async def setup(bot):
     await bot.add_cog(Staff(bot))
 
