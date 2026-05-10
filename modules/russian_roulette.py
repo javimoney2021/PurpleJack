@@ -55,7 +55,7 @@ class RRGameState:
 
 class RRView(discord.ui.View):
     def __init__(self, game: RRGameState, author_id: int):
-        super().__init__(timeout=30)
+        super().__init__(timeout=150)
         self.game = game
         self.author_id = author_id
 
