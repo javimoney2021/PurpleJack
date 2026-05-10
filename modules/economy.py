@@ -5,7 +5,7 @@ import time
 
 from core.database import get_user, update_balance, update_bank
 from core import cache
-from core.config import COIN, game_config, ruleta_config, rob_config
+from core.config import COIN, game_config, ruleta_config, rob_config, rr_config
 
 TOP_COOLDOWN = 300
 
@@ -108,6 +108,7 @@ class Economy(commands.Cog):
         crime_cd = self.format_cooldown(game_config["crime"]["cooldown"])
         ruleta_cd = self.format_cooldown(ruleta_config["cooldown"])
         rob_cd = self.format_cooldown(rob_config["cooldown"])
+        rr_cd = self.format_cooldown(rr_config["cooldown"])
 
         descripcion = (
             f"**!work**     — Cada {work_cd}\n"
