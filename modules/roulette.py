@@ -6,10 +6,11 @@ import asyncio
 
 from core.database import get_user, update_balance
 from core.config import game_config, ruleta_config
+from core import cache
 
 COIN = "<:PurpleCoin:1501855737842892941>"
 
-roulette_cooldowns = {}
+# cooldowns manejados via cache + DB
 # ROULETTE_COOLDOWN = 180  # Ahora usa ruleta_config["cooldown"]
 
 SLOTS = {
@@ -69,20 +70,23 @@ class Roulette(commands.Cog):
         user_id = ctx.author.id
         now = time.time()
 
-        if user_id in roulette_cooldowns:
-            elapsed = now - roulette_cooldowns[user_id]
+        expira_en = cache.get_game_cooldown_cache(user_id, "ruleta")
+        if expira_en == 0:
+            from core.database import get_game_cooldown
+            expira_en = await get_game_cooldown(user_id, "ruleta")
+            if expira_en:
+                cache.set_game_cooldown_cache(user_id, "ruleta", expira_en)
 
-            if elapsed < ruleta_config["cooldown"]:
-                remaining = int(ruleta_config["cooldown"] - elapsed)
-                minutos = remaining // 60
-                segundos = remaining % 60
-
-                return await ctx.send(
-                    f"⏳ {ctx.author.mention} "
-                    f"Espera **{minutos}m {segundos}s** "
-                    f"para jugar de nuevo.",
-                    delete_after=10
-                )
+        if expira_en > now:
+            remaining = int(expira_en - now)
+            minutos = remaining // 60
+            segundos = remaining % 60
+            return await ctx.send(
+                f"⏳ {ctx.author.mention} "
+                f"Espera **{minutos}m {segundos}s** "
+                f"para jugar de nuevo.",
+                delete_after=10
+            )
 
         user = await get_user(user_id)
 
@@ -92,7 +96,10 @@ class Roulette(commands.Cog):
                 f"No tienes suficiente balance para esta apuesta."
             )
 
-        roulette_cooldowns[user_id] = now
+        expira_en = now + ruleta_config["cooldown"]
+        cache.set_game_cooldown_cache(user_id, "ruleta", expira_en)
+        from core.database import set_game_cooldown
+        await set_game_cooldown(user_id, "ruleta", expira_en)
 
         embed = discord.Embed(
             description=(

@@ -7,6 +7,7 @@ from discord.ext import commands
 
 from core.config import COIN, rr_config
 from core.database import get_user, update_balance
+from core import cache
 
 WAIT_IMAGE = "https://github.com/javimoney2021/PurpleJack/blob/main/Esperando%20Shot.png?raw=true"
 SUCCESS_IMAGE = "https://github.com/javimoney2021/PurpleJack/blob/main/Salvado.png?raw=true"
@@ -16,7 +17,7 @@ ROUND_REWARDS = [0.6, 0.6, 1.0, 1.5, 2.0]
 ROUND_LABELS = ["1º ronda", "2º ronda", "3º ronda", "4º ronda", "5º ronda"]
 
 rr_games = {}
-rr_cooldowns = {}
+# cooldowns manejados via cache + DB
 
 
 def format_percent(value):
@@ -260,15 +261,22 @@ class RussianRoulette(commands.Cog):
             )
 
         now = time.time()
-        if ctx.author.id in rr_cooldowns:
-            elapsed = now - rr_cooldowns[ctx.author.id]
-            if elapsed < rr_config["cooldown"]:
-                remaining = int(rr_config["cooldown"] - elapsed)
-                return await ctx.send(
-                    f"⏳ {ctx.author.mention} Espera <t:{int(now + remaining)}:R> para volver a jugar Ruleta Rusa."
-                )
+        expira_en = cache.get_game_cooldown_cache(ctx.author.id, "rr")
+        if expira_en == 0:
+            from core.database import get_game_cooldown
+            expira_en = await get_game_cooldown(ctx.author.id, "rr")
+            if expira_en:
+                cache.set_game_cooldown_cache(ctx.author.id, "rr", expira_en)
 
-        rr_cooldowns[ctx.author.id] = now
+        if expira_en > now:
+            return await ctx.send(
+                f"⏳ {ctx.author.mention} Espera <t:{int(expira_en)}:R> para volver a jugar Ruleta Rusa."
+            )
+
+        expira_en = now + rr_config["cooldown"]
+        cache.set_game_cooldown_cache(ctx.author.id, "rr", expira_en)
+        from core.database import set_game_cooldown
+        await set_game_cooldown(ctx.author.id, "rr", expira_en)
         game = RRGameState(ctx.author.id, monto, ctx.author.display_name)
         rr_games[ctx.author.id] = game
 

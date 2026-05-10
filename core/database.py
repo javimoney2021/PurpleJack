@@ -82,6 +82,15 @@ async def init_db():
             PRIMARY KEY (user_id, rol_id)
         )
         """)
+        
+        await conn.execute("""
+        CREATE TABLE IF NOT EXISTS game_cooldowns (
+            user_id BIGINT,
+            game TEXT,
+            expira_en DOUBLE PRECISION,
+            PRIMARY KEY (user_id, game)
+        )
+        """)
 
     print("✅ Base de datos conectada y tablas verificadas.")
 
@@ -465,3 +474,19 @@ async def save_ruleta_config():
         ruleta_config["cooldown"],
         ruleta_config["activa"]
         )
+
+async def get_game_cooldown(user_id, game):
+    async with pool.acquire() as conn:
+        row = await conn.fetchrow(
+            "SELECT expira_en FROM game_cooldowns WHERE user_id=$1 AND game=$2",
+            user_id, game
+        )
+    return row["expira_en"] if row else 0
+
+async def set_game_cooldown(user_id, game, expira_en):
+    async with pool.acquire() as conn:
+        await conn.execute("""
+            INSERT INTO game_cooldowns (user_id, game, expira_en)
+            VALUES ($1, $2, $3)
+            ON CONFLICT (user_id, game) DO UPDATE SET expira_en=$3
+        """, user_id, game, expira_en)
