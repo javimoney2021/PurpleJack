@@ -789,14 +789,6 @@ class Staff(commands.Cog):
         import asyncio
         asyncio.create_task(auto_clear())
 
-        except Exception as e:
-            import traceback
-            traceback.print_exc()
-            try:
-                await interaction.response.send_message(f"❌ Error interno: {e}", ephemeral=True)
-            except Exception:
-                pass
-
     @commands.Cog.listener()
     async def on_message(self, message: discord.Message):
         if message.author.bot:
