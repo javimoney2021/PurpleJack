@@ -74,7 +74,8 @@ class RRView(discord.ui.View):
 
     async def on_timeout(self) -> None:
         self.game.active = False
-        self.disable_all_items()
+        for item in self.children:
+            item.disabled = True
         if self.game.message:
             timeout_embed = discord.Embed(
                 title=f"**RULETA RUSA - {self.game.author_name}**",
@@ -107,7 +108,8 @@ class RRView(discord.ui.View):
             
             # Crear vista deshabilitada para la espera
             disabled_view = RRView(self.game, self.author_id)
-            disabled_view.disable_all_items()
+            for item in disabled_view.children:
+                item.disabled = True
             
             await interaction.response.edit_message(embed=preparing_embed, view=disabled_view)
 
@@ -135,7 +137,8 @@ class RRView(discord.ui.View):
                         thumbnail=SUCCESS_IMAGE
                     )
                     final_view = RRView(self.game, self.author_id)
-                    final_view.disable_all_items()
+                    for item in final_view.children:
+                        item.disabled = True
                     await update_balance(self.game.user_id, self.game.ganancia)
                     await interaction.edit_original_response(embed=total_embed, view=final_view)
                     rr_games.pop(self.game.user_id, None)
@@ -170,7 +173,8 @@ class RRView(discord.ui.View):
                 thumbnail=FAILURE_IMAGE
             )
             loss_view = RRView(self.game, self.author_id)
-            loss_view.disable_all_items()
+            for item in loss_view.children:
+                item.disabled = True
             await update_balance(self.game.user_id, -self.game.apuesta)
             await interaction.edit_original_response(embed=loss_embed, view=loss_view)
             rr_games.pop(self.game.user_id, None)
@@ -203,7 +207,8 @@ class RRView(discord.ui.View):
                 thumbnail=SUCCESS_IMAGE
             )
             claim_view = RRView(self.game, self.author_id)
-            claim_view.disable_all_items()
+            for item in claim_view.children:
+                item.disabled = True
             await update_balance(self.game.user_id, self.game.ganancia)
             await interaction.response.edit_message(embed=claim_embed, view=claim_view)
             rr_games.pop(self.game.user_id, None)
