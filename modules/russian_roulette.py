@@ -159,9 +159,9 @@ class RRView(discord.ui.View):
                 # Mensaje especial según la ronda siguiente
                 if self.game.round == 3:
                     aviso = (
-                        f"\n\n⚠️ **¡Atención!** Las rondas 4 y 5 comprometen más que tu apuesta inicial.\n"
+                        f"\n\n⚠️ **¡Atención!** Las rondas 4 y 5 comprometen más que tu Apuesta Inicial.\n\n"
                         f"Derrota en ronda 4 → pierdes **{int(self.game.apuesta * 1.8)} {COIN}**\n"
-                        f"Derrota en ronda 5 → pierdes **{int(self.game.apuesta * 2.0)} {COIN}**\n"
+                        f"Derrota en ronda 5 → pierdes **{int(self.game.apuesta * 2.0)} {COIN}**\n\n"
                         f"¿Grandes ganancias implican grandes riesgos, continuas?"
                     )
                 elif self.game.round == 4:
