@@ -5,7 +5,7 @@ import time
 import asyncio
 
 from core.database import get_user, update_balance
-from core.config import game_config
+from core.config import game_config, ruleta_config
 
 COIN = "<:PurpleCoin:1501855737842892941>"
 
@@ -32,7 +32,7 @@ class Roulette(commands.Cog):
 
     @commands.command()
     async def ruleta(self, ctx, apuesta: int = None, espacio: str = None):
-        if not game_config["ruleta"]["activa"]:
+        if not ruleta_config["activa"]:
             return await ctx.send(
                 "🔧 La Ruleta se encuentra en mantenimiento, inténtalo más tarde...!"
             )
@@ -59,11 +59,11 @@ class Roulette(commands.Cog):
                 f"❌ {ctx.author.mention} La apuesta debe ser mayor a 0."
             )
 
-        if apuesta > game_config["ruleta"]["max_apuesta"]:
+        if apuesta > ruleta_config["max_apuesta"]:
             return await ctx.send(
                 f"❌ {ctx.author.mention} "
                 f"No puedes apostar más de "
-                f"**{game_config['ruleta']['max_apuesta']}** {COIN}."
+                f"**{ruleta_config['max_apuesta']}** {COIN}."
             )
 
         user_id = ctx.author.id
@@ -139,7 +139,7 @@ class Roulette(commands.Cog):
             gano = espacio == resultado
 
         if gano:
-            ganancia = apuesta * multiplicador
+            ganancia = apuesta * (multiplicador - 1)
 
             await update_balance(user_id, ganancia)
 
