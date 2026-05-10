@@ -199,7 +199,7 @@ class Economy(commands.Cog):
         embed = discord.Embed(
             title="🚀 Guía de la Nave-Sus",
             description=contenido,
-            color=discord.Color.cyan()
+            color=discord.Color.teal()
         )
         embed.set_footer(text="Usa los comandos de economía para crecer en la nave.")
         await ctx.send(embed=embed)
