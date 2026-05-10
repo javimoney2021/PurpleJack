@@ -141,8 +141,8 @@ class RRView(discord.ui.View):
                         self.game,
                         state="victory",
                         description=(
-                            f"💥 **Victoria Total**! Completaste las 5 fases de la Ruleta Rusa, suerte es tu segundo nombre!.\n\n"
-                            f"Has acumulado **{self.game.ganancia} {COIN}**. Dinero enviado a tu balance."
+                            f"💥 **Victoria Total**! Completaste las 5 fases de la Ruleta Rusa, **Suerte** es tu segundo nombre!.\n\n"
+                            f"Has acumulado **{self.game.ganancia} {COIN}** Dinero enviado a tu balance."
                         ),
                         thumbnail=END_IMAGE
                     )
@@ -160,8 +160,8 @@ class RRView(discord.ui.View):
                 if self.game.round == 3:
                     aviso = (
                         f"\n\n⚠️ **¡Atención!** Las rondas 4 y 5 comprometen más que tu apuesta inicial.\n"
-                        f"Derrota en ronda 4 → pierdes **{int(self.game.apuesta * 1.3)} {COIN}**\n"
-                        f"Derrota en ronda 5 → pierdes **{int(self.game.apuesta * 1.5)} {COIN}**\n"
+                        f"Derrota en ronda 4 → pierdes **{int(self.game.apuesta * 1.8)} {COIN}**\n"
+                        f"Derrota en ronda 5 → pierdes **{int(self.game.apuesta * 2.0)} {COIN}**\n"
                         f"¿Grandes ganancias implican grandes riesgos, continuas?"
                     )
                 elif self.game.round == 4:
