@@ -62,7 +62,7 @@ class RRGameState:
 
 class RRView(discord.ui.View):
     def __init__(self, game: RRGameState, author_id: int):
-        super().__init__(timeout=150)
+        super().__init__(timeout=60)
         self.game = game
         self.author_id = author_id
 
@@ -161,7 +161,7 @@ class RRView(discord.ui.View):
                     aviso = (
                         f"\n\n⚠️ **¡Atención!** Las rondas 4 y 5 comprometen más que tu Apuesta Inicial.\n\n"
                         f"Derrota en ronda 4 → pierdes **{int(self.game.apuesta * 1.8)} {COIN}**\n"
-                        f"Derrota en ronda 5 → pierdes **{int(self.game.apuesta * 2.0)} {COIN}**\n\n"
+                        f"Derrota en ronda 5 → pierdes **{int(self.game.apuesta * 2.8)} {COIN}**\n\n"
                         f"¿Grandes ganancias implican grandes riesgos, continuas?"
                     )
                 elif self.game.round == 4:
@@ -180,7 +180,7 @@ class RRView(discord.ui.View):
                         f"✅ Te salvaste en la **{ROUND_LABELS[self.game.round - 1]}**!\n\n"
                         f"Ganancia acumulada: **{self.game.ganancia} {COIN}**\n"
                         f"Puedes reclamar ya o arriesgarte al siguiente disparo.\n\n"
-                        f"🔸 Total posible si completas la ronda actual: **{reward_percent}%**"
+                        f"🔸 **Boost!** por completar la ronda actual: **{reward_percent}%**"
                         f"{aviso}"
                     ),
                     thumbnail=SUCCESS_IMAGE
