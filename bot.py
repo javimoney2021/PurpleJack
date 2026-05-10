@@ -70,6 +70,7 @@ async def on_ready():
     asyncio.create_task(cache.flush_loop())
     asyncio.create_task(check_cargos_loop())
     print("✅ Task de cargos temporales iniciada | Revisión cada 12 horas")
+    print("\n⫷ 𝙋𝙐𝙍𝙋𝙇𝙀𝙅𝘼𝘾𝙆 𝙀𝙉 𝙇𝙄𝙉𝙀𝘼 ⫸\n")
 
 
 def run_bot():
