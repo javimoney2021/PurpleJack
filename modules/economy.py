@@ -110,14 +110,31 @@ class Economy(commands.Cog):
         rob_cd = self.format_cooldown(rob_config["cooldown"])
 
         descripcion = (
-            f"**!work**     — cada {work_cd}\n"
-            f"**!crime**    — cada {crime_cd}\n"
-            f"**!ruleta**   — cada {ruleta_cd}\n"
-            f"**!rob**      — cada {rob_cd}\n"
-            f"**!collect**  — configurado por rol (ver !collect)"
+            f"**!work**     — Cada {work_cd}\n"
+            f"**!crime**    — Cada {crime_cd}\n"
+            f"**!ruleta**   — Cada {ruleta_cd}\n"
+            f"**!rob**      — Cada {rob_cd}\n"
+            f"**!collect**  — Configurado por Rol **(ver !collect)**"
         )
 
         embed.description = descripcion
+
+        collect_config = cache.get_collect_config()
+        if collect_config:
+            lineas_collect = []
+            for rol_id, cfg in collect_config.items():
+                cantidad = cfg["cantidad"]
+                horas = cfg["cooldown_horas"]
+                tiempo = f"{horas} hora" if horas == 1 else f"{horas} horas"
+                lineas_collect.append(
+                    f"<@&{rol_id}>: **{cantidad}** {COIN} Cada {tiempo}"
+                )
+            embed.add_field(
+                name="**Cargos con Collect Activo**",
+                value="\n".join(lineas_collect),
+                inline=False
+            )
+
         await ctx.send(embed=embed)
 
     @commands.command()
