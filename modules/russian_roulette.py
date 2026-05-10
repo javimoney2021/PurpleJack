@@ -31,7 +31,10 @@ def build_rr_embed(user: discord.Member, game, state: str, description: str, thu
     )
 
     embed.add_field(name="Apuesta", value=f"{game.apuesta} {COIN}", inline=True)
-    if game.active:
+    if state == "lost":
+        embed.add_field(name="Rondas completadas", value=f"{game.round}/5", inline=True)
+        embed.add_field(name="Ganancia final", value=f"0 {COIN}", inline=False)
+    elif game.active:
         embed.add_field(name="Ronda", value=f"{game.round + 1}/5", inline=True)
         embed.add_field(name="Ganancia provisional", value=f"{game.ganancia} {COIN}", inline=False)
     else:
@@ -49,6 +52,7 @@ class RRGameState:
         self.round = 0
         self.ganancia = 0
         self.active = True
+        self.finished = False
         self.message = None
         self.author_name = author_name
 
@@ -73,6 +77,8 @@ class RRView(discord.ui.View):
         return True
 
     async def on_timeout(self) -> None:
+        if self.game.finished:
+            return
         self.game.active = False
         for item in self.children:
             item.disabled = True
@@ -126,6 +132,7 @@ class RRView(discord.ui.View):
 
                 if self.game.round >= 5:
                     self.game.active = False
+                    self.game.finished = True
                     total_embed = build_rr_embed(
                         interaction.user,
                         self.game,
@@ -162,6 +169,7 @@ class RRView(discord.ui.View):
                 return
 
             self.game.active = False
+            self.game.finished = True
             loss_embed = build_rr_embed(
                 interaction.user,
                 self.game,
@@ -195,6 +203,7 @@ class RRView(discord.ui.View):
                 )
 
             self.game.active = False
+            self.game.finished = True
 
             claim_embed = build_rr_embed(
                 interaction.user,
