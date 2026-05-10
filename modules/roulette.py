@@ -10,7 +10,7 @@ from core.config import game_config, ruleta_config
 COIN = "<:PurpleCoin:1501855737842892941>"
 
 roulette_cooldowns = {}
-ROULETTE_COOLDOWN = 180
+# ROULETTE_COOLDOWN = 180  # Ahora usa ruleta_config["cooldown"]
 
 SLOTS = {
     '0': 'green', '1': 'red', '2': 'black', '3': 'red', '4': 'black',
@@ -72,8 +72,8 @@ class Roulette(commands.Cog):
         if user_id in roulette_cooldowns:
             elapsed = now - roulette_cooldowns[user_id]
 
-            if elapsed < ROULETTE_COOLDOWN:
-                remaining = int(ROULETTE_COOLDOWN - elapsed)
+            if elapsed < ruleta_config["cooldown"]:
+                remaining = int(ruleta_config["cooldown"] - elapsed)
                 minutos = remaining // 60
                 segundos = remaining % 60
 

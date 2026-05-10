@@ -6,7 +6,7 @@ from core.database import (
     add_item, edit_item, delete_item,
     get_item_by_name, load_items_to_cache,
     upsert_collect_config_db, delete_collect_config_db,
-    save_game_config, save_rr_config
+    save_game_config, save_rr_config, save_ruleta_config
 )
 from core import cache
 from core.config import ruleta_config, rr_config, game_config, COIN
@@ -401,6 +401,7 @@ class Staff(commands.Cog):
     @is_staff()
     async def ruleta_alternar(self, interaction):
         ruleta_config["activa"] = not ruleta_config["activa"]
+        await save_ruleta_config()
         estado = "✅ activada" if ruleta_config["activa"] else "🔧 desactivada"
         await interaction.response.send_message(f"La ruleta ha sido **{estado}**.", ephemeral=False)
 
@@ -494,6 +495,34 @@ class Staff(commands.Cog):
         await save_rr_config()
         estado = "✅ activada" if rr_config["activa"] else "🔧 desactivada"
         await interaction.response.send_message(f"La Ruleta Rusa ha sido **{estado}**.", ephemeral=False)
+
+    @app_commands.command(name="ruleta_apuesta_max", description="Configura la ruleta")
+    @app_commands.describe(
+        monto="Apuesta máxima",
+        cooldown="Cooldown: ej 30s, 5m, 1h"
+    )
+    @is_staff()
+    async def ruleta_apuesta_max(self, interaction, monto: int, cooldown: str):
+        if monto <= 0:
+            return await interaction.response.send_message("❌ El monto debe ser mayor a 0.", ephemeral=True)
+
+        try:
+            cooldown_seconds = self.parse_cooldown(cooldown)
+        except ValueError:
+            return await interaction.response.send_message(
+                "❌ Formato inválido. Usa ejemplos como: 30s, 5m, 1h", ephemeral=True
+            )
+
+        ruleta_config["max_apuesta"] = monto
+        ruleta_config["cooldown"] = cooldown_seconds
+        await save_ruleta_config()
+
+        await interaction.response.send_message(
+            f"✅ Ruleta configurada:\n"
+            f"• Apuesta máxima: **{monto}** {COIN}\n"
+            f"• Cooldown: **{cooldown}**",
+            ephemeral=False
+        )
 
     @app_commands.command(name="add_item", description="Agrega un nuevo item a la tienda")
     @is_staff()

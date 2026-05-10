@@ -2,6 +2,7 @@ COIN = "<:PurpleCoin:1501855737842892941>"
 
 ruleta_config = {
     "max_apuesta": 100,
+    "cooldown": 180,
     "activa": True
 }
 

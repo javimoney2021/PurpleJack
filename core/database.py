@@ -376,8 +376,28 @@ async def create_game_config_table():
             rr_config["activa"]
         )
 
+        await conn.execute("""
+        CREATE TABLE IF NOT EXISTS ruleta_config (
+            id SERIAL PRIMARY KEY,
+            max_apuesta INTEGER,
+            cooldown INTEGER,
+            activa BOOLEAN DEFAULT TRUE
+        )
+        """)
+        ruleta_exists = await conn.fetchrow("SELECT * FROM ruleta_config LIMIT 1")
+        if not ruleta_exists:
+            await conn.execute("""
+            INSERT INTO ruleta_config (
+                max_apuesta, cooldown, activa
+            ) VALUES ($1, $2, $3)
+            """,
+            ruleta_config["max_apuesta"],
+            ruleta_config["cooldown"],
+            ruleta_config["activa"]
+        )
+
 async def load_game_config():
-    from core.config import game_config, rr_config
+    from core.config import game_config, rr_config, ruleta_config
     async with pool.acquire() as conn:
         row = await conn.fetchrow("SELECT * FROM game_config LIMIT 1")
         if not row:
@@ -396,6 +416,12 @@ async def load_game_config():
             rr_config["ganar_prob"] = rr_row["ganar_prob"]
             rr_config["perder_prob"] = rr_row["perder_prob"]
             rr_config["activa"] = rr_row["activa"]
+
+        ruleta_row = await conn.fetchrow("SELECT * FROM ruleta_config LIMIT 1")
+        if ruleta_row:
+            ruleta_config["max_apuesta"] = ruleta_row["max_apuesta"]
+            ruleta_config["cooldown"] = ruleta_row["cooldown"]
+            ruleta_config["activa"] = ruleta_row["activa"]
 
 async def save_game_config():
     from core.config import game_config
@@ -426,4 +452,16 @@ async def save_rr_config():
         rr_config["ganar_prob"],
         rr_config["perder_prob"],
         rr_config["activa"]
+        )
+
+async def save_ruleta_config():
+    from core.config import ruleta_config
+    async with pool.acquire() as conn:
+        await conn.execute("""
+        UPDATE ruleta_config SET
+            max_apuesta=$1, cooldown=$2, activa=$3
+        """,
+        ruleta_config["max_apuesta"],
+        ruleta_config["cooldown"],
+        ruleta_config["activa"]
         )
