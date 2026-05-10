@@ -5,7 +5,7 @@ import time
 
 from core.database import get_user, update_balance, update_bank
 from core import cache
-from core.config import COIN
+from core.config import COIN, game_config, ruleta_config, rob_config
 
 TOP_COOLDOWN = 300
 
@@ -91,6 +91,34 @@ class Economy(commands.Cog):
         embed.add_field(name="🏦 Banco", value=f"{user['bank']} {COIN}", inline=True)
         embed.set_thumbnail(url=ctx.author.display_avatar.url)
         await ctx.send(embed=embed, view=FinanceView(ctx.author.id))
+
+    def format_cooldown(self, seconds: int) -> str:
+        if seconds >= 3600:
+            return f"{seconds // 3600}h"
+        return f"{seconds // 60}m"
+
+    @commands.command(name="cd")
+    async def cooldowns(self, ctx):
+        embed = discord.Embed(
+            title="⏱️ Cooldowns Actuales",
+            color=discord.Color.purple()
+        )
+
+        work_cd = self.format_cooldown(game_config["work"]["cooldown"])
+        crime_cd = self.format_cooldown(game_config["crime"]["cooldown"])
+        ruleta_cd = self.format_cooldown(ruleta_config["cooldown"])
+        rob_cd = self.format_cooldown(rob_config["cooldown"])
+
+        descripcion = (
+            f"**!work**     — cada {work_cd}\n"
+            f"**!crime**    — cada {crime_cd}\n"
+            f"**!ruleta**   — cada {ruleta_cd}\n"
+            f"**!rob**      — cada {rob_cd}\n"
+            f"**!collect**  — configurado por rol (ver !collect)"
+        )
+
+        embed.description = descripcion
+        await ctx.send(embed=embed)
 
     @commands.command()
     async def top(self, ctx):

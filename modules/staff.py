@@ -616,7 +616,7 @@ class Staff(commands.Cog):
         from core.config import rob_config
         rob_config["activa"] = not rob_config["activa"]
         estado = "✅ activado" if rob_config["activa"] else "🔧 desactivado"
-        mensaje = "Las calles están llenas de Sheriffs y Veteranos, está siendo imposible atracar a alguien." if not rob_config["activa"] else "El sistema de robos ha sido reactivado."
+        mensaje = "Ejecuta **/rob_alternar** para activar de nuevo." if not rob_config["activa"] else "El sistema de robos ha sido reactivado."
         await interaction.response.send_message(f"El sistema de robos ha sido **{estado}**. {mensaje}", ephemeral=False)
 
     @app_commands.command(name="rob_edit", description="Configura el cooldown de robos")
