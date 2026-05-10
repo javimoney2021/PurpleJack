@@ -23,8 +23,6 @@ _pending_announcements = {}
 # ── NAVE EDIT (RAM only) ───────────────────────────────
 _pending_nave = {}
 # {user_id: {"channel": channel_obj, "expires": float, "content": str|None}}
-_nave_edit_cooldown = {}
-# {user_id: timestamp_ultimo_edit}
 
 
 def is_staff():
@@ -872,20 +870,7 @@ class Staff(commands.Cog):
 
         import time
         user_id = interaction.user.id
-        ahora = time.time()
-
-        # Cooldown de 10 minutos entre ediciones
-        ultimo = _nave_edit_cooldown.get(user_id, 0)
-        if ahora - ultimo < 600:
-            restante = int(600 - (ahora - ultimo))
-            minutos = restante // 60
-            segundos = restante % 60
-            return await interaction.response.send_message(
-                f"⏳ Debes esperar **{minutos}m {segundos}s** antes de editar de nuevo.",
-                ephemeral=True
-            )
-
-        _nave_edit_cooldown[user_id] = ahora
+        
         _pending_nave[user_id] = {
             "channel": interaction.channel,
             "expires": ahora + 300,
