@@ -688,13 +688,13 @@ class Staff(commands.Cog):
         await interaction.response.send_message(
             f"✅ Cooldown de robos actualizado a **{cooldown}**.", ephemeral=False
         )
-@app_commands.command(name="anunciar", description="Envía un anuncio a un canal escogido")
+    @app_commands.command(name="anunciar", description="Envía un anuncio a un canal escogido")
     @app_commands.describe(canal="Canal donde se enviará el anuncio")
     async def anunciar(self, interaction: discord.Interaction, canal: discord.TextChannel):
         role = discord.utils.get(interaction.user.roles, name=COORDINADOR_ROLE)
         if not role:
             return await interaction.response.send_message(
-                "❌ No tienes permisos para usar este comando.", ephemeral=True
+                "❌ No tienes permisos para usar Anuncios.", ephemeral=False
             )
 
         import time
