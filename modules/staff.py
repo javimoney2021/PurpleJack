@@ -860,7 +860,6 @@ class Staff(commands.Cog):
                 delete_after=60
             )
             
-    @app_commands.command(name="nave_edit", description="Actualiza la Guía de la Nave-Sus")
     async def nave_edit(self, interaction: discord.Interaction):
         try:
             role = discord.utils.get(interaction.user.roles, name=COORDINADOR_ROLE)
@@ -872,26 +871,40 @@ class Staff(commands.Cog):
             import time
             user_id = interaction.user.id
             ahora = time.time()
-        
-        _pending_nave[user_id] = {
-            "channel": interaction.channel,
-            "expires": ahora + 300,
-            "content": None
-        }
 
-        await interaction.response.send_message(
-            embed=discord.Embed(
-                title="📋 Guía de la Nave-Sus — Edición",
-                description=(
-                    "Escribe el contenido de la guía **en este canal**.\n\n"
-                    "⏳ Tienes **5 minutos**. Tu mensaje será borrado automáticamente."
+            _pending_nave[user_id] = {
+                "channel": interaction.channel,
+                "expires": ahora + 300,
+                "content": None
+            }
+
+            await interaction.response.send_message(
+                embed=discord.Embed(
+                    title="📋 Guía de la Nave-Sus — Edición",
+                    description=(
+                        "Escribe el contenido de la guía **en este canal**.\n\n"
+                        "⏳ Tienes **5 minutos**. Tu mensaje será borrado automáticamente."
+                    ),
+                    color=discord.Color.cyan()
                 ),
-                color=discord.Color.cyan()
-            ),
-            ephemeral=True
-        )
+                ephemeral=True
+            )
 
-        async def auto_clear():
+            async def auto_clear():
+                await asyncio.sleep(300)
+                entry = _pending_nave.get(user_id)
+                if entry and entry["content"] is None:
+                    _pending_nave.pop(user_id, None)
+
+            asyncio.create_task(auto_clear())
+
+        except Exception as e:
+            import traceback
+            traceback.print_exc()
+            try:
+                await interaction.response.send_message(f"❌ Error interno: {e}", ephemeral=True)
+            except Exception:
+                pass
             await asyncio.sleep(300)
             entry = _pending_nave.get(user_id)
             if entry and entry["content"] is None:
