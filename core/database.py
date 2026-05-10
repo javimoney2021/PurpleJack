@@ -332,7 +332,7 @@ async def save_collect_cooldowns(user_id, cobros: dict):
 # ── GAME CONFIG ────────────────────────────────────────
 
 async def create_game_config_table():
-    from core.config import game_config, rr_config, ruleta_config
+    from core.config import game_config, rr_config, ruleta_config, rob_config
     async with pool.acquire() as conn:
         await conn.execute("""
         CREATE TABLE IF NOT EXISTS game_config (
@@ -405,8 +405,25 @@ async def create_game_config_table():
             ruleta_config["activa"]
         )
 
+        await conn.execute("""
+        CREATE TABLE IF NOT EXISTS rob_config_db (
+            id SERIAL PRIMARY KEY,
+            activa BOOLEAN DEFAULT TRUE,
+            cooldown INTEGER
+        )
+        """)
+        rob_exists = await conn.fetchrow("SELECT * FROM rob_config_db LIMIT 1")
+        if not rob_exists:
+            await conn.execute("""
+            INSERT INTO rob_config_db (activa, cooldown)
+            VALUES ($1, $2)
+            """,
+            rob_config["activa"],
+            rob_config["cooldown"]
+        )
+
 async def load_game_config():
-    from core.config import game_config, rr_config, ruleta_config
+    from core.config import game_config, rr_config, ruleta_config, rob_config
     async with pool.acquire() as conn:
         row = await conn.fetchrow("SELECT * FROM game_config LIMIT 1")
         if not row:
@@ -431,6 +448,11 @@ async def load_game_config():
             ruleta_config["max_apuesta"] = ruleta_row["max_apuesta"]
             ruleta_config["cooldown"] = ruleta_row["cooldown"]
             ruleta_config["activa"] = ruleta_row["activa"]
+
+        rob_row = await conn.fetchrow("SELECT * FROM rob_config_db LIMIT 1")
+        if rob_row:
+            rob_config["activa"] = rob_row["activa"]
+            rob_config["cooldown"] = rob_row["cooldown"]
 
 async def save_game_config():
     from core.config import game_config
@@ -475,6 +497,16 @@ async def save_ruleta_config():
         ruleta_config["activa"]
         )
 
+async def save_rob_config():
+    from core.config import rob_config
+    async with pool.acquire() as conn:
+        await conn.execute("""
+        UPDATE rob_config_db SET activa=$1, cooldown=$2
+        """,
+        rob_config["activa"],
+        rob_config["cooldown"]
+        )
+
 async def get_game_cooldown(user_id, game):
     async with pool.acquire() as conn:
         row = await conn.fetchrow(
@@ -490,3 +522,10 @@ async def set_game_cooldown(user_id, game, expira_en):
             VALUES ($1, $2, $3)
             ON CONFLICT (user_id, game) DO UPDATE SET expira_en=$3
         """, user_id, game, expira_en)
+        
+async def clear_game_cooldowns(game):
+    async with pool.acquire() as conn:
+        await conn.execute(
+            "DELETE FROM game_cooldowns WHERE game=$1", game
+        )
+        

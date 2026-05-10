@@ -6,7 +6,8 @@ from core.database import (
     add_item, edit_item, delete_item,
     get_item_by_name, load_items_to_cache,
     upsert_collect_config_db, delete_collect_config_db,
-    save_game_config, save_rr_config, save_ruleta_config
+    save_game_config, save_rr_config, save_ruleta_config,
+    save_rob_config, clear_game_cooldowns
 )
 from core import cache
 from core.config import ruleta_config, rr_config, game_config, COIN
@@ -478,6 +479,8 @@ class Staff(commands.Cog):
         rr_config["ganar_prob"] = ganar
         rr_config["perder_prob"] = perder
         await save_rr_config()
+        await clear_game_cooldowns("rr")
+        cache.clear_game_cooldowns_cache("rr")
 
         await interaction.response.send_message(
             f"✅ Ruleta Rusa configurada:\n"
@@ -516,6 +519,8 @@ class Staff(commands.Cog):
         ruleta_config["max_apuesta"] = monto
         ruleta_config["cooldown"] = cooldown_seconds
         await save_ruleta_config()
+        await clear_game_cooldowns("ruleta")
+        cache.clear_game_cooldowns_cache("ruleta")
 
         await interaction.response.send_message(
             f"✅ Ruleta configurada:\n"
@@ -615,6 +620,7 @@ class Staff(commands.Cog):
     async def rob_alternar(self, interaction):
         from core.config import rob_config
         rob_config["activa"] = not rob_config["activa"]
+        await save_rob_config()
         estado = "✅ activado" if rob_config["activa"] else "🔧 desactivado"
         mensaje = "Ejecuta **/rob_alternar** para activar de nuevo." if not rob_config["activa"] else "El sistema de robos ha sido reactivado."
         await interaction.response.send_message(f"El sistema de robos ha sido **{estado}**. {mensaje}", ephemeral=False)
@@ -633,6 +639,8 @@ class Staff(commands.Cog):
         if seconds <= 0:
             return await interaction.response.send_message("❌ El cooldown debe ser mayor a 0.", ephemeral=True)
         rob_config["cooldown"] = seconds
+        await save_rob_config()
+        cache.clear_rob_cooldowns_cache()
         await interaction.response.send_message(
             f"✅ Cooldown de robos actualizado a **{cooldown}**.", ephemeral=False
         )

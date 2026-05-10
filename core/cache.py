@@ -70,6 +70,9 @@ def get_rob_protection(user_id):
 
 def set_rob_protection(user_id):
     _rob_protection[user_id] = time.time() + 3600  # 1 hora fija
+
+def clear_rob_cooldowns_cache():
+    _rob_cooldowns.clear()
     
     # ── GAME COOLDOWNS (ruleta / rr) ───────────────────────
 _game_cooldowns = {}  # {(user_id, game): expira_en}
@@ -79,6 +82,11 @@ def get_game_cooldown_cache(user_id, game):
 
 def set_game_cooldown_cache(user_id, game, expira_en):
     _game_cooldowns[(user_id, game)] = expira_en
+
+def clear_game_cooldowns_cache(game):
+    keys = [k for k in _game_cooldowns if k[1] == game]
+    for k in keys:
+        del _game_cooldowns[k]
 
 # ── ITEMS ──────────────────────────────────────────────
 _items_cache = []

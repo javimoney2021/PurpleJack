@@ -9,11 +9,13 @@ from core.config import COIN, rr_config
 from core.database import get_user, update_balance
 from core import cache
 
-WAIT_IMAGE = "https://github.com/javimoney2021/PurpleJack/blob/main/Esperando%20Shot.png?raw=true"
-SUCCESS_IMAGE = "https://github.com/javimoney2021/PurpleJack/blob/main/Salvado.png?raw=true"
-FAILURE_IMAGE = "https://github.com/javimoney2021/PurpleJack/blob/main/Derrota.png?raw=true"
+WAIT_IMAGE = "https://raw.githubusercontent.com/javimoney2021/PurpleJack/main/Thumbs/Shot.png"
+SUCCESS_IMAGE = "https://raw.githubusercontent.com/javimoney2021/PurpleJack/main/Thumbs/Salvado.png"
+FAILURE_IMAGE = "https://raw.githubusercontent.com/javimoney2021/PurpleJack/main/Thumbs/Derrota.png"
+END_IMAGE = "https://raw.githubusercontent.com/javimoney2021/PurpleJack/main/Thumbs/Victoria.png"
 
-ROUND_REWARDS = [0.6, 0.6, 1.0, 1.5, 2.0]
+
+ROUND_REWARDS = [0.6, 0.8, 1.0, 1.5, 2.0]
 ROUND_LABELS = ["1º ronda", "2º ronda", "3º ronda", "4º ronda", "5º ronda"]
 
 rr_games = {}
@@ -139,10 +141,10 @@ class RRView(discord.ui.View):
                         self.game,
                         state="victory",
                         description=(
-                            f"💥 **Victoria total**! Completaste las 5 fases de la Ruleta Rusa.\n\n"
-                            f"Has acumulado **{self.game.ganancia} {COIN}**. El dinero se envía a tu balance."
+                            f"💥 **Victoria Total**! Completaste las 5 fases de la Ruleta Rusa, suerte es tu segundo nombre!.\n\n"
+                            f"Has acumulado **{self.game.ganancia} {COIN}**. Dinero enviado a tu balance."
                         ),
-                        thumbnail=SUCCESS_IMAGE
+                        thumbnail=END_IMAGE
                     )
                     final_view = RRView(self.game, self.author_id)
                     for item in final_view.children:
@@ -214,7 +216,7 @@ class RRView(discord.ui.View):
                     f"🟢 Has reclamado **{self.game.ganancia} {COIN}** al balance.\n\n"
                     f"Gracias por jugar Ruleta Rusa."
                 ),
-                thumbnail=SUCCESS_IMAGE
+                thumbnail=END_IMAGE
             )
             claim_view = RRView(self.game, self.author_id)
             for item in claim_view.children:
