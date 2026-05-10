@@ -323,7 +323,7 @@ async def save_collect_cooldowns(user_id, cobros: dict):
 # ── GAME CONFIG ────────────────────────────────────────
 
 async def create_game_config_table():
-    from core.config import game_config, rr_config
+    from core.config import game_config, rr_config, ruleta_config
     async with pool.acquire() as conn:
         await conn.execute("""
         CREATE TABLE IF NOT EXISTS game_config (
