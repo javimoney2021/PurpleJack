@@ -92,106 +92,127 @@ class RRView(discord.ui.View):
 
     @discord.ui.button(label="Disparar", style=discord.ButtonStyle.danger, row=0)
     async def disparar(self, interaction: discord.Interaction, button: discord.ui.Button):
-        self.disable_all_items()
-        preparing_embed = build_rr_embed(
-            interaction.user,
-            self.game,
-            state="waiting",
-            description=(
-                f"Preparando disparo... \n\n"
-                f"Ronda actual: **{self.game.round + 1}/5**\n"
-                f"Pulsa **Disparar** para ver si sobrevives."
-            ),
-            thumbnail=WAIT_IMAGE
-        )
-        await interaction.response.edit_message(embed=preparing_embed, view=self)
+        try:
+            preparing_embed = build_rr_embed(
+                interaction.user,
+                self.game,
+                state="waiting",
+                description=(
+                    f"Preparando disparo... \n\n"
+                    f"Ronda actual: **{self.game.round + 1}/5**\n"
+                    f"Esperando resultado..."
+                ),
+                thumbnail=WAIT_IMAGE
+            )
+            
+            # Crear vista deshabilitada para la espera
+            disabled_view = RRView(self.game, self.author_id)
+            disabled_view.disable_all_items()
+            
+            await interaction.response.edit_message(embed=preparing_embed, view=disabled_view)
 
-        await asyncio.sleep(5)
+            await asyncio.sleep(5)
 
-        if not self.game.active:
-            return
+            if not self.game.active:
+                return
 
-        success = random.random() <= rr_config["ganar_prob"]
-        if success:
-            self.game.round += 1
-            reward = int(round(self.game.apuesta * ROUND_REWARDS[self.game.round - 1]))
-            self.game.ganancia += reward
+            success = random.random() <= rr_config["ganar_prob"]
+            if success:
+                self.game.round += 1
+                reward = int(round(self.game.apuesta * ROUND_REWARDS[self.game.round - 1]))
+                self.game.ganancia += reward
 
-            if self.game.round >= 5:
-                self.game.active = False
-                self.disable_all_items()
-                total_embed = build_rr_embed(
+                if self.game.round >= 5:
+                    self.game.active = False
+                    total_embed = build_rr_embed(
+                        interaction.user,
+                        self.game,
+                        state="victory",
+                        description=(
+                            f"💥 **Victoria total**! Completaste las 5 fases de la Ruleta Rusa.\n\n"
+                            f"Has acumulado **{self.game.ganancia} {COIN}**. El dinero se envía a tu balance."
+                        ),
+                        thumbnail=SUCCESS_IMAGE
+                    )
+                    final_view = RRView(self.game, self.author_id)
+                    final_view.disable_all_items()
+                    await update_balance(self.game.user_id, self.game.ganancia)
+                    await interaction.edit_original_response(embed=total_embed, view=final_view)
+                    rr_games.pop(self.game.user_id, None)
+                    return
+
+                reward_percent = format_percent(sum(ROUND_REWARDS[: self.game.round]))
+                result_embed = build_rr_embed(
                     interaction.user,
                     self.game,
-                    state="victory",
+                    state="success",
                     description=(
-                        f"💥 **Victoria total**! Completaste las 5 fases de la Ruleta Rusa.\n\n"
-                        f"Has acumulado **{self.game.ganancia} {COIN}**. El dinero se envía a tu balance."
+                        f"✅ Te salvaste en la **{ROUND_LABELS[self.game.round - 1]}**!\n\n"
+                        f"Ganancia acumulada: **{self.game.ganancia} {COIN}**\n"
+                        f"Puedes reclamar ya o arriesgarte al siguiente disparo.\n\n"
+                        f"🔸 Total posible si completas la ronda actual: **{reward_percent}%**"
                     ),
                     thumbnail=SUCCESS_IMAGE
                 )
-                await update_balance(self.game.user_id, self.game.ganancia)
-                await interaction.edit_original_response(embed=total_embed, view=self)
-                rr_games.pop(self.game.user_id, None)
+                active_view = RRView(self.game, self.author_id)
+                await interaction.edit_original_response(embed=result_embed, view=active_view)
                 return
 
-            reward_percent = format_percent(sum(ROUND_REWARDS[: self.game.round]))
-            result_embed = build_rr_embed(
+            self.game.active = False
+            loss_embed = build_rr_embed(
                 interaction.user,
                 self.game,
-                state="success",
+                state="lost",
                 description=(
-                    f"✅ Te salvaste en la **{ROUND_LABELS[self.game.round - 1]}**!\n\n"
-                    f"Ganancia acumulada: **{self.game.ganancia} {COIN}**\n"
-                    f"Puedes reclamar ya o arriesgarte al siguiente disparo.\n\n"
-                    f"🔸 Total posible si completas la ronda actual: **{reward_percent}%**"
+                    f"💥 ¡Bala inoportuna! Perdiste la apuesta inicial de **{self.game.apuesta} {COIN}**.\n\n"
+                    f"No hay ganancia acumulada. Mejor suerte la próxima vez."
                 ),
-                thumbnail=SUCCESS_IMAGE
+                thumbnail=FAILURE_IMAGE
             )
-            for child in self.children:
-                child.disabled = False
-            await interaction.edit_original_response(embed=result_embed, view=self)
-            return
+            loss_view = RRView(self.game, self.author_id)
+            loss_view.disable_all_items()
+            await update_balance(self.game.user_id, -self.game.apuesta)
+            await interaction.edit_original_response(embed=loss_embed, view=loss_view)
+            rr_games.pop(self.game.user_id, None)
+        except Exception as e:
+            print(f"Error en disparar: {e}")
+            try:
+                await interaction.response.send_message(f"❌ Error al procesar: {e}", ephemeral=True)
+            except Exception:
+                pass
 
-        self.game.active = False
-        self.disable_all_items()
-        loss_embed = build_rr_embed(
-            interaction.user,
-            self.game,
-            state="lost",
-            description=(
-                f"💥 ¡Bala inoportuna! Perdiste la apuesta inicial de **{self.game.apuesta} {COIN}**.\n\n"
-                f"No hay ganancia acumulada. Mejor suerte la próxima vez."
-            ),
-            thumbnail=FAILURE_IMAGE
-        )
-        await update_balance(self.game.user_id, -self.game.apuesta)
-        await interaction.edit_original_response(embed=loss_embed, view=self)
-        rr_games.pop(self.game.user_id, None)
 
     @discord.ui.button(label="Reclamar", style=discord.ButtonStyle.success, row=0)
     async def reclamar(self, interaction: discord.Interaction, button: discord.ui.Button):
-        if self.game.round == 0:
-            return await interaction.response.send_message(
-                "❌ Debes sobrevivir al menos a un disparo para reclamar.", ephemeral=True
+        try:
+            if self.game.round == 0:
+                return await interaction.response.send_message(
+                    "❌ Debes sobrevivir al menos a un disparo para reclamar.", ephemeral=True
+                )
+
+            self.game.active = False
+
+            claim_embed = build_rr_embed(
+                interaction.user,
+                self.game,
+                state="claimed",
+                description=(
+                    f"🟢 Has reclamado **{self.game.ganancia} {COIN}** al balance.\n\n"
+                    f"Gracias por jugar Ruleta Rusa."
+                ),
+                thumbnail=SUCCESS_IMAGE
             )
-
-        self.game.active = False
-        self.disable_all_items()
-
-        claim_embed = build_rr_embed(
-            interaction.user,
-            self.game,
-            state="claimed",
-            description=(
-                f"🟢 Has reclamado **{self.game.ganancia} {COIN}** al balance.\n\n"
-                f"Gracias por jugar Ruleta Rusa."
-            ),
-            thumbnail=SUCCESS_IMAGE
-        )
-        await update_balance(self.game.user_id, self.game.ganancia)
-        await interaction.response.edit_message(embed=claim_embed, view=self)
-        rr_games.pop(self.game.user_id, None)
+            claim_view = RRView(self.game, self.author_id)
+            claim_view.disable_all_items()
+            await update_balance(self.game.user_id, self.game.ganancia)
+            await interaction.response.edit_message(embed=claim_embed, view=claim_view)
+            rr_games.pop(self.game.user_id, None)
+        except Exception as e:
+            print(f"Error en reclamar: {e}")
+            try:
+                await interaction.response.send_message(f"❌ Error al procesar: {e}", ephemeral=True)
+            except Exception:
+                pass
 
 
 class RussianRoulette(commands.Cog):
