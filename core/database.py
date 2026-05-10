@@ -422,6 +422,13 @@ async def create_game_config_table():
             rob_config["cooldown"]
         )
 
+        await conn.execute("""
+        CREATE TABLE IF NOT EXISTS nave_config (
+            id INTEGER PRIMARY KEY DEFAULT 1,
+            contenido TEXT
+        )
+        """)
+
 async def load_game_config():
     from core.config import game_config, rr_config, ruleta_config, rob_config
     async with pool.acquire() as conn:
@@ -506,6 +513,19 @@ async def save_rob_config():
         rob_config["activa"],
         rob_config["cooldown"]
         )
+
+async def get_nave_contenido():
+    async with pool.acquire() as conn:
+        row = await conn.fetchrow("SELECT contenido FROM nave_config WHERE id=1")
+    return row["contenido"] if row else None
+
+async def save_nave_contenido(contenido: str):
+    async with pool.acquire() as conn:
+        await conn.execute("""
+            INSERT INTO nave_config (id, contenido)
+            VALUES (1, $1)
+            ON CONFLICT (id) DO UPDATE SET contenido=$1
+        """, contenido)
 
 async def get_game_cooldown(user_id, game):
     async with pool.acquire() as conn:

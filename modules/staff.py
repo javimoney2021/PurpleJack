@@ -1,4 +1,5 @@
 import discord
+import asyncio
 from discord.ext import commands
 from discord import app_commands
 from core.database import (
@@ -18,6 +19,12 @@ COORDINADOR_ROLE = "Coordinador-ES"
 # ── ANUNCIOS (RAM only) ────────────────────────────────
 _pending_announcements = {}
 # {user_id: {"channel": channel_obj, "expires": float, "content": str|None}}
+
+# ── NAVE EDIT (RAM only) ───────────────────────────────
+_pending_nave = {}
+# {user_id: {"channel": channel_obj, "expires": float, "content": str|None}}
+_nave_edit_cooldown = {}
+# {user_id: timestamp_ultimo_edit}
 
 
 def is_staff():
@@ -85,6 +92,62 @@ class AnuncioConfirmView(discord.ui.View):
             view=self
         )
         _pending_announcements.pop(self.user_id, None)
+
+# ── NAVE CONFIRM VIEW ──────────────────────────────────
+
+class NaveConfirmView(discord.ui.View):
+    def __init__(self, user_id, contenido, author_message):
+        super().__init__(timeout=60)
+        self.user_id = user_id
+        self.contenido = contenido
+        self.author_message = author_message  # mensaje de texto del autor a borrar
+
+    @discord.ui.button(label="✅ Enviar", style=discord.ButtonStyle.success)
+    async def enviar(self, interaction: discord.Interaction, button: discord.ui.Button):
+        if interaction.user.id != self.user_id:
+            return await interaction.response.send_message("❌ No es tu confirmación.", ephemeral=True)
+        from core.database import save_nave_contenido
+        await save_nave_contenido(self.contenido)
+        for item in self.children:
+            item.disabled = True
+        # Edita el embed efímero de confirmación a estado procesando
+        await interaction.response.edit_message(
+            embed=discord.Embed(
+                description="⏳ Guardando...",
+                color=discord.Color.cyan()
+            ),
+            view=self
+        )
+        # Espera 5s y borra el mensaje del autor con el contenido
+        await asyncio.sleep(5)
+        try:
+            await self.author_message.delete()
+        except Exception:
+            pass
+        _pending_nave.pop(self.user_id, None)
+        # Mensaje público de confirmación
+        await interaction.channel.send(
+            embed=discord.Embed(
+                title="📋 Guía de la Nave-Sus Actualizada",
+                description="✅ **Comando de la Nave Actualizado!**",
+                color=discord.Color.cyan()
+            )
+        )
+
+    @discord.ui.button(label="❌ Cancelar", style=discord.ButtonStyle.danger)
+    async def cancelar(self, interaction: discord.Interaction, button: discord.ui.Button):
+        if interaction.user.id != self.user_id:
+            return await interaction.response.send_message("❌ No es tu confirmación.", ephemeral=True)
+        for item in self.children:
+            item.disabled = True
+        _pending_nave.pop(self.user_id, None)
+        await interaction.response.edit_message(
+            embed=discord.Embed(
+                description="🚫 Edición cancelada. No se guardó nada.",
+                color=discord.Color.red()
+            ),
+            view=self
+        )
 
 # ── ITEM NEW STATE ─────────────────────────────────────
 
@@ -735,6 +798,30 @@ class Staff(commands.Cog):
 
         import time
         user_id = message.author.id
+
+        # ── Nave edit listener ─────────────────────────
+        nave_entry = _pending_nave.get(user_id)
+        if nave_entry and nave_entry["content"] is None:
+            if time.time() > nave_entry["expires"]:
+                _pending_nave.pop(user_id, None)
+            elif message.channel.id == nave_entry["channel"].id:
+                nave_entry["content"] = message.content
+                confirm_embed = discord.Embed(
+                    title="📋 Confirma el contenido de la Guía",
+                    description=(
+                        f"**Contenido a guardar:**\n\n{message.content}"
+                    ),
+                    color=discord.Color.cyan()
+                )
+                confirm_embed.set_footer(text="Tienes 60 segundos para confirmar.")
+                await message.channel.send(
+                    embed=confirm_embed,
+                    view=NaveConfirmView(user_id, message.content, message),
+                    delete_after=65
+                )
+                return
+
+        # ── Anuncio listener ───────────────────────────
         entry = _pending_announcements.get(user_id)
 
         if not entry or entry["content"] is not None:
@@ -774,6 +861,56 @@ class Staff(commands.Cog):
                 view=AnuncioConfirmView(user_id, entry["channel"], content),
                 delete_after=60
             )
+            
+    @app_commands.command(name="nave_edit", description="Actualiza la Guía de la Nave-Sus")
+    async def nave_edit(self, interaction: discord.Interaction):
+        role = discord.utils.get(interaction.user.roles, name=COORDINADOR_ROLE)
+        if not role:
+            return await interaction.response.send_message(
+                "❌ No tienes permisos para usar este comando.", ephemeral=True
+            )
+
+        import time
+        user_id = interaction.user.id
+        ahora = time.time()
+
+        # Cooldown de 10 minutos entre ediciones
+        ultimo = _nave_edit_cooldown.get(user_id, 0)
+        if ahora - ultimo < 600:
+            restante = int(600 - (ahora - ultimo))
+            minutos = restante // 60
+            segundos = restante % 60
+            return await interaction.response.send_message(
+                f"⏳ Debes esperar **{minutos}m {segundos}s** antes de editar de nuevo.",
+                ephemeral=True
+            )
+
+        _nave_edit_cooldown[user_id] = ahora
+        _pending_nave[user_id] = {
+            "channel": interaction.channel,
+            "expires": ahora + 300,
+            "content": None
+        }
+
+        await interaction.response.send_message(
+            embed=discord.Embed(
+                title="📋 Guía de la Nave-Sus — Edición",
+                description=(
+                    "Escribe el contenido de la guía **en este canal**.\n\n"
+                    "⏳ Tienes **5 minutos**. Tu mensaje será borrado automáticamente."
+                ),
+                color=discord.Color.cyan()
+            ),
+            ephemeral=True
+        )
+
+        async def auto_clear():
+            await asyncio.sleep(300)
+            entry = _pending_nave.get(user_id)
+            if entry and entry["content"] is None:
+                _pending_nave.pop(user_id, None)
+
+        asyncio.create_task(auto_clear())            
 
 async def setup(bot):
     await bot.add_cog(Staff(bot))

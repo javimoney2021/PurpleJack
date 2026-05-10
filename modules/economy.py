@@ -189,7 +189,20 @@ class Economy(commands.Cog):
         )
         embed.set_footer(text="Solo se muestra el Top 10 de los más ricos.")
         await ctx.send(embed=embed)
-
+        
+        @commands.command(name="nave")
+        async def nave(self, ctx):
+        from core.database import get_nave_contenido
+        contenido = await get_nave_contenido()
+        if not contenido:
+            return await ctx.send("❌ La guía aún no ha sido configurada.")
+        embed = discord.Embed(
+            title="🚀 Guía de la Nave-Sus",
+            description=contenido,
+            color=discord.Color.cyan()
+        )
+        embed.set_footer(text="Usa los comandos de economía para crecer en la nave.")
+        await ctx.send(embed=embed)
 
 async def setup(bot):
     await bot.add_cog(Economy(bot))
