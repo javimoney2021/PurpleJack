@@ -93,7 +93,7 @@ class Roulette(commands.Cog):
         if apuesta > user["balance"]:
             return await ctx.send(
                 f"❌ {ctx.author.mention} "
-                f"No tienes suficiente balance para esta apuesta."
+                f"No dispones suficiente balance para esta apuesta."
             )
 
         expira_en = now + ruleta_config["cooldown"]
