@@ -103,7 +103,7 @@ class Roulette(commands.Cog):
 
         embed = discord.Embed(
             description=(
-                f"🎰 {ctx.author.mention} apostó "
+                f"🎰 {ctx.author.mention} Apostó "
                 f"**{apuesta}** {COIN} en `{espacio}`."
             ),
             color=discord.Color.purple()
@@ -153,7 +153,7 @@ class Roulette(commands.Cog):
             embed_resultado = discord.Embed(
                 title="🎰 Resultado de la Ruleta",
                 description=(
-                    f"🟢 La bola cayó en: "
+                    f"⚫🔴 La bola cayó en: "
                     f"**{color_resultado} {resultado}**!\n\n"
                     f"🎉 **¡Ganaste!** {ctx.author.mention}\n"
                     f"Recibes **{ganancia}** "
@@ -168,7 +168,7 @@ class Roulette(commands.Cog):
             embed_resultado = discord.Embed(
                 title="🎰 Resultado de la Ruleta",
                 description=(
-                    f"🟢 La bola cayó en: "
+                    f"⚫🔴 La bola cayó en: "
                     f"**{color_resultado} {resultado}**!\n\n"
                     f"💸 **Perdiste** {ctx.author.mention}\n"
                     f"Pierdes **{apuesta}** {COIN}."
