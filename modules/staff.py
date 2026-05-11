@@ -620,18 +620,29 @@ class Staff(commands.Cog):
         await interaction.response.send_modal(DeleteItemModal())
 
     @app_commands.command(name="collect_config", description="Configura collect para un rol")
-    @app_commands.describe(rol="Rol", cantidad="PurpleCoins a otorgar", cooldown="Cooldown: ej 1h, 30m, 3600s")
+    @app_commands.describe(rol="Rol", cantidad="PurpleCoins a otorgar", cooldown="Cooldown: ej 2h o 30m")
     @is_staff()
     async def collect_config(self, interaction, rol: discord.Role, cantidad: int, cooldown: str):
         if cantidad <= 0:
             return await interaction.response.send_message("❌ Cantidad debe ser mayor a 0.", ephemeral=True)
-        try:
-            cooldown_seconds = self.parse_cooldown(cooldown)
-        except ValueError:
-            return await interaction.response.send_message(
-                "❌ Formato inválido. Usa ejemplos como: 1h, 30m, 3600s", ephemeral=True
-            )
-        cooldown_horas = max(1, cooldown_seconds // 3600) if cooldown_seconds >= 3600 else round(cooldown_seconds / 3600, 2)
+        cooldown = cooldown.strip().lower()
+        if cooldown.endswith("h"):
+            try:
+                cooldown_horas = int(cooldown[:-1])
+            except ValueError:
+                return await interaction.response.send_message("❌ Formato inválido. Usa: 2h o 30m", ephemeral=True)
+        elif cooldown.endswith("m"):
+            try:
+                minutos = int(cooldown[:-1])
+                cooldown_horas = minutos / 60
+            except ValueError:
+                return await interaction.response.send_message("❌ Formato inválido. Usa: 2h o 30m", ephemeral=True)
+        else:
+            return await interaction.response.send_message("❌ Formato inválido. Usa: 2h o 30m", ephemeral=True)
+
+        if cooldown_horas <= 0:
+            return await interaction.response.send_message("❌ El cooldown debe ser mayor a 0.", ephemeral=True)
+
         await upsert_collect_config_db(rol.id, cantidad, cooldown_horas)
         await interaction.response.send_message(
             f"✅ Collect configurado: {rol.mention} → {COIN} **{cantidad}** cada **{cooldown}**.", ephemeral=False

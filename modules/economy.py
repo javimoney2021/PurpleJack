@@ -133,7 +133,11 @@ class Economy(commands.Cog):
             for rol_id, cfg in collect_config.items():
                 cantidad = cfg["cantidad"]
                 horas = cfg["cooldown_horas"]
-                tiempo = f"{horas} hora" if horas == 1 else f"{horas} horas"
+                if horas >= 1 and horas == int(horas):
+                    tiempo = f"{int(horas)} hora" if horas == 1 else f"{int(horas)} horas"
+                else:
+                    minutos = int(round(horas * 60))
+                    tiempo = f"{minutos} minuto" if minutos == 1 else f"{minutos} minutos"
                 lineas_collect.append(
                     f"<@&{rol_id}>: **{cantidad}** {COIN} Cada {tiempo}"
                 )
