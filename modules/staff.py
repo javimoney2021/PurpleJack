@@ -620,14 +620,21 @@ class Staff(commands.Cog):
         await interaction.response.send_modal(DeleteItemModal())
 
     @app_commands.command(name="collect_config", description="Configura collect para un rol")
-    @app_commands.describe(rol="Rol", cantidad="PurpleCoins a otorgar", cooldown="Cooldown en horas")
+    @app_commands.describe(rol="Rol", cantidad="PurpleCoins a otorgar", cooldown="Cooldown: ej 1h, 30m, 3600s")
     @is_staff()
-    async def collect_config(self, interaction, rol: discord.Role, cantidad: int, cooldown: int):
-        if cantidad <= 0 or cooldown <= 0:
-            return await interaction.response.send_message("❌ Cantidad y cooldown deben ser mayores a 0.", ephemeral=True)
-        await upsert_collect_config_db(rol.id, cantidad, cooldown)
+    async def collect_config(self, interaction, rol: discord.Role, cantidad: int, cooldown: str):
+        if cantidad <= 0:
+            return await interaction.response.send_message("❌ Cantidad debe ser mayor a 0.", ephemeral=True)
+        try:
+            cooldown_seconds = self.parse_cooldown(cooldown)
+        except ValueError:
+            return await interaction.response.send_message(
+                "❌ Formato inválido. Usa ejemplos como: 1h, 30m, 3600s", ephemeral=True
+            )
+        cooldown_horas = max(1, cooldown_seconds // 3600) if cooldown_seconds >= 3600 else round(cooldown_seconds / 3600, 2)
+        await upsert_collect_config_db(rol.id, cantidad, cooldown_horas)
         await interaction.response.send_message(
-            f"✅ Collect configurado: {rol.mention} → {COIN} **{cantidad}** cada **{cooldown}h**.", ephemeral=False
+            f"✅ Collect configurado: {rol.mention} → {COIN} **{cantidad}** cada **{cooldown}**.", ephemeral=False
         )
 
     @app_commands.command(name="collect_eliminar", description="Elimina el collect de un rol")

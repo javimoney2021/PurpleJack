@@ -99,6 +99,7 @@ class RRView(discord.ui.View):
                 await self.game.message.edit(embed=timeout_embed, view=self)
             except Exception:
                 pass
+            rr_games.pop(self.game.user_id, None)
 
     @discord.ui.button(label="Disparar", style=discord.ButtonStyle.danger, row=0)
     async def disparar(self, interaction: discord.Interaction, button: discord.ui.Button):
@@ -289,9 +290,13 @@ class RussianRoulette(commands.Cog):
             )
 
         if ctx.author.id in rr_games:
-            return await ctx.send(
-                f"❌ {ctx.author.mention} Ya tienes una partida activa de Ruleta Rusa."
-            )
+            partida = rr_games[ctx.author.id]
+            if not partida.active:
+                rr_games.pop(ctx.author.id, None)
+            else:
+                return await ctx.send(
+                    f"❌ {ctx.author.mention} Ya tienes una partida activa de Ruleta Rusa."
+                )
 
         now = time.time()
         expira_en = cache.get_game_cooldown_cache(ctx.author.id, "rr")

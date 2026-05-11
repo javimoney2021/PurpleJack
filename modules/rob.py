@@ -57,16 +57,13 @@ class Rob(commands.Cog):
 
         # Verificar balance mínimo del objetivo
         if target_user["balance"] < 1000:
-            # Penalizar al author: -500 banco, +500 banco al objetivo
-            if author_user["bank"] < 500:
-                return await ctx.send(
-                    f"❌ {ctx.author.mention} No tienes suficiente en el banco para penalizarte por intentar robar a los pobres."
-                )
             await update_bank(author_id, -500)
             await update_bank(target_id, 500)
-            set_rob_cooldown(author_id)  # Aplicar cooldown
+            set_rob_cooldown(author_id)
+            user_bank = author_user["bank"] - 500
+            deuda_txt = f" Tu banco quedó en **{user_bank}**{COIN}, paga tus deudas." if user_bank < 0 else ""
             return await ctx.send(
-                f"😔 {ctx.author.mention} ¿No te da vergüenza robar a los pobres? Por tu osadía se te descontaron **500** {COIN} de tu banco y se acreditaron a {target.mention}."
+                f"😔 {ctx.author.mention} ¿No te da vergüenza robar a los pobres? Se te descontaron **-500** {COIN} del banco y se acreditaron a {target.mention}.{deuda_txt}"
             )
 
         # Calcular éxito/fallo

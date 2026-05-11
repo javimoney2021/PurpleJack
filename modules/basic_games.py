@@ -2,7 +2,7 @@ from discord.ext import commands
 import random
 import time
 
-from core.database import get_user, update_bank, update_cooldown
+from core.database import get_user, update_bank, update_balance, update_cooldown
 from core.config import game_config, COIN
 
 WORK_MESSAGES = [
@@ -29,7 +29,7 @@ CRIME_SUCCESS = [
 
 CRIME_FAIL = [
     "🚔 El Sheriff se lleva el MVP 🤠 Pierdes **-{monto}** " + COIN,
-    "🚔 Fallas al intentar secuestar al Alcalde 😭 Pieres **-{monto}** " + COIN,
+    "🚔 Fallas al intentar secuestar al Alcalde 😭 Pierdes **-{monto}** " + COIN,
     "🚔 Te encuentran Irrumpiendo el sistema electrico 💡 Pierdes **-{monto}** " + COIN,
     "🚔 Te pillaron eliminando evidencias en Sala de Seguridad 🎥 Pierdes **-{monto}** " + COIN,
 ]
@@ -49,16 +49,19 @@ class BasicGames(commands.Cog):
 
         if now - last < cooldown:
             remaining = cooldown - (now - last)
-            return await ctx.send(f"⏳ Puedes volver a trabajar <t:{int(now + remaining)}:R>.")
+            nick = ctx.author.nick or ctx.author.display_name
+            return await ctx.message.reply(f"**{nick}** ⏳ Podrás volver a trabajar <t:{int(now + remaining)}:R>.")
 
         amount = random.randint(
             game_config["work"]["min"],
             game_config["work"]["max"]
         )
 
-        await update_bank(ctx.author.id, amount)
+        nick = ctx.author.nick or ctx.author.display_name
+
+        await update_balance(ctx.author.id, amount)
         await update_cooldown(ctx.author.id, "work", now)
-        await ctx.send(random.choice(WORK_MESSAGES).format(monto=amount))
+        await ctx.message.reply(f"**{nick}** " + random.choice(WORK_MESSAGES).format(monto=amount))
 
     @commands.command()
     async def crime(self, ctx):
@@ -70,7 +73,8 @@ class BasicGames(commands.Cog):
 
         if now - last < cooldown:
             remaining = cooldown - (now - last)
-            return await ctx.send(f"⏳ Puedes volver a cometer un crimen <t:{int(now + remaining)}:R>.")
+            nick = ctx.author.nick or ctx.author.display_name
+            return await ctx.message.reply(f"**{nick}** ⏳ Podrás volver a cometer un crimen <t:{int(now + remaining)}:R>.")
 
         amount = random.randint(
             game_config["crime"]["min"],
@@ -78,16 +82,17 @@ class BasicGames(commands.Cog):
         )
 
         success = random.random() <= 0.7
+        nick = ctx.author.nick or ctx.author.display_name
 
         if success:
-            await update_bank(ctx.author.id, amount)
+            await update_balance(ctx.author.id, amount)
             msg = random.choice(CRIME_SUCCESS)
         else:
             await update_bank(ctx.author.id, -amount)
             msg = random.choice(CRIME_FAIL)
 
         await update_cooldown(ctx.author.id, "crime", now)
-        await ctx.send(msg.format(monto=amount))
+        await ctx.message.reply(f"**{nick}** " + msg.format(monto=amount))
 
 
 async def setup(bot):

@@ -1,5 +1,5 @@
 from discord.ext import commands
-from discord import ui, ButtonStyle, Interaction
+from discord import app_commands, ui, ButtonStyle, Interaction
 import discord
 import time
 
@@ -37,7 +37,9 @@ class DepositModal(ui.Modal, title="Depositar al Banco"):
 
     async def on_submit(self, interaction: Interaction):
         try:
-            amount = int(self.amount.value)
+            user = await get_user(self.user_id)
+            raw = self.amount.value.strip().lower()
+            amount = user["balance"] if raw == "all" else int(raw)
             if amount <= 0:
                 return await interaction.response.send_message("❌ Cantidad inválida.", ephemeral=True)
             user = await get_user(self.user_id)
@@ -61,10 +63,11 @@ class WithdrawModal(ui.Modal, title="Retirar del Banco"):
 
     async def on_submit(self, interaction: Interaction):
         try:
-            amount = int(self.amount.value)
+            user = await get_user(self.user_id)
+            raw = self.amount.value.strip().lower()
+            amount = user["bank"] if raw == "all" else int(raw)
             if amount <= 0:
                 return await interaction.response.send_message("❌ Cantidad inválida.", ephemeral=True)
-            user = await get_user(self.user_id)
             if amount > user["bank"]:
                 return await interaction.response.send_message("❌ No tienes suficiente en el banco.", ephemeral=True)
             await update_bank(self.user_id, -amount)
@@ -90,7 +93,7 @@ class Economy(commands.Cog):
         embed.add_field(name=f"{COIN} Balance", value=f"{user['balance']} {COIN}", inline=True)
         embed.add_field(name="🏦 Banco", value=f"{user['bank']} {COIN}", inline=True)
         embed.set_thumbnail(url=ctx.author.display_avatar.url)
-        await ctx.send(embed=embed, view=FinanceView(ctx.author.id))
+        await ctx.message.reply(embed=embed, view=FinanceView(ctx.author.id), delete_after=25)
 
     def format_cooldown(self, seconds: int) -> str:
         if seconds >= 3600:
@@ -138,7 +141,7 @@ class Economy(commands.Cog):
                 inline=False
             )
 
-        await ctx.send(embed=embed)
+        await ctx.send(embed=embed, ephemeral=True)
 
     @commands.command()
     async def top(self, ctx):
@@ -188,21 +191,23 @@ class Economy(commands.Cog):
             color=discord.Color.blue()
         )
         embed.set_footer(text="Solo se muestra el Top 10 de los más ricos.")
-        await ctx.send(embed=embed)
+        await ctx.send(embed=embed, delete_after=20)
 
-    @commands.command(name="nave")
-    async def nave(self, ctx):
+    @app_commands.command(name="ayuda_nave", description="Muestra la guía de la Nave-Sus")
+    async def ayuda_nave(self, interaction: discord.Interaction):
         from core.database import get_nave_contenido
         contenido = await get_nave_contenido()
         if not contenido:
-            return await ctx.send("❌ La guía aún no ha sido configurada.")
+            return await interaction.response.send_message(
+                "❌ La guía aún no ha sido configurada.", ephemeral=True
+            )
         embed = discord.Embed(
             title="🚀 Guía de la Nave-Sus",
             description=contenido,
             color=discord.Color.teal()
         )
         embed.set_footer(text="Usa los comandos de economía para crecer en la nave.")
-        await ctx.send(embed=embed)
+        await interaction.response.send_message(embed=embed, ephemeral=True, delete_after=25)
 
 async def setup(bot):
     await bot.add_cog(Economy(bot))

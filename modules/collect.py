@@ -63,9 +63,10 @@ class Collect(commands.Cog):
                 await save_collect_cooldowns(user_id, cobros)
 
             descripcion = "\n".join(lineas)
+            nick = ctx.author.nick or ctx.author.display_name
 
             embed = discord.Embed(
-                title="💷 Mis Collects 💷",
+                title=f"💷 Mis Collects - {nick} 💷",
                 description=descripcion,
                 color=discord.Color.purple()
             )
@@ -73,12 +74,12 @@ class Collect(commands.Cog):
             if total_ganado > 0:
                 embed.add_field(
                     name="Total cobrado",
-                    value=f"{COIN} **{total_ganado}** enviados a tu banco.",
+                    value=f"{COIN} **{total_ganado}** Enviados a tu banco.",
                     inline=False
                 )
 
-            embed.set_footer(text="💷 Todos los collects se enviarán a tu banco.")
-            await ctx.send(embed=embed)
+            embed.set_footer(text="💷 Tus collects se enviarán al banco.")
+            await ctx.message.reply(embed=embed)
 
         except Exception as e:
             print(f"ERROR !collect: {e}")
