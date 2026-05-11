@@ -46,6 +46,7 @@ class DepositModal(ui.Modal, title="Depositar al Banco"):
             if amount > user["balance"]:
                 return await interaction.response.send_message("❌ No tienes suficiente balance.", ephemeral=True)
             await update_balance(self.user_id, -amount)
+            nick = interaction.user.nick or interaction.user.display_name
             await update_bank(self.user_id, amount)
             await interaction.response.send_message(
                 f"💸 {nick} Depositaste **{amount}** {COIN} al banco.", ephemeral=False
@@ -71,6 +72,7 @@ class WithdrawModal(ui.Modal, title="Retirar del Banco"):
             if amount > user["bank"]:
                 return await interaction.response.send_message("❌ No tienes suficiente en el banco.", ephemeral=True)
             await update_bank(self.user_id, -amount)
+            nick = interaction.user.nick or interaction.user.display_name
             await update_balance(self.user_id, amount)
             await interaction.response.send_message(
                 f"💸 {nick} Retiraste **{amount}** {COIN} del banco.", ephemeral=True
