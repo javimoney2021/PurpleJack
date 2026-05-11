@@ -48,7 +48,7 @@ class DepositModal(ui.Modal, title="Depositar al Banco"):
             await update_balance(self.user_id, -amount)
             await update_bank(self.user_id, amount)
             await interaction.response.send_message(
-                f"✅ Depositaste **{amount}** {COIN} al banco.", ephemeral=False
+                f"💸 {nick} Depositaste **{amount}** {COIN} al banco.", ephemeral=False
             )
         except ValueError:
             await interaction.response.send_message("❌ Ingresa un número válido.", ephemeral=True)
@@ -73,7 +73,7 @@ class WithdrawModal(ui.Modal, title="Retirar del Banco"):
             await update_bank(self.user_id, -amount)
             await update_balance(self.user_id, amount)
             await interaction.response.send_message(
-                f"✅ Retiraste **{amount}** {COIN} del banco.", ephemeral=True
+                f"💸 {nick} Retiraste **{amount}** {COIN} del banco.", ephemeral=True
             )
         except ValueError:
             await interaction.response.send_message("❌ Ingresa un número válido.", ephemeral=True)
