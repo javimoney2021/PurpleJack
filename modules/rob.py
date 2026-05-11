@@ -60,8 +60,9 @@ class Rob(commands.Cog):
             await update_bank(author_id, -500)
             await update_bank(target_id, 500)
             set_rob_cooldown(author_id)
-            user_bank = author_user["bank"] - 500
-            deuda_txt = f" Tu banco quedó en **{user_bank}**{COIN}, paga tus deudas." if user_bank < 0 else ""
+            user_bank_actualizado = cache.get_cached(author_id)
+            bank_final = user_bank_actualizado["bank"] if user_bank_actualizado else author_user["bank"] - 500
+            deuda_txt = f" Tu banco quedó en **{bank_final}** {COIN}, paga tus deudas." if bank_final < 0 else ""
             return await ctx.send(
                 f"😔 {ctx.author.mention} ¿No te da vergüenza robar a los pobres? Se te descontaron **-500** {COIN} del banco y se acreditaron a {target.mention}.{deuda_txt}"
             )

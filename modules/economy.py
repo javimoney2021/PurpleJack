@@ -29,7 +29,7 @@ class FinanceView(ui.View):
 
 
 class DepositModal(ui.Modal, title="Depositar al Banco"):
-    amount = ui.TextInput(label="¿Cuánto deseas depositar?", placeholder="Ej: 500")
+    amount = ui.TextInput(label="¿Cuánto deseas depositar?", placeholder="Ej: 500 o All")
 
     def __init__(self, user_id):
         super().__init__()
@@ -55,7 +55,7 @@ class DepositModal(ui.Modal, title="Depositar al Banco"):
 
 
 class WithdrawModal(ui.Modal, title="Retirar del Banco"):
-    amount = ui.TextInput(label="¿Cuánto deseas retirar?", placeholder="Ej: 500")
+    amount = ui.TextInput(label="¿Cuánto deseas retirar?", placeholder="Ej: 500 o All")
 
     def __init__(self, user_id):
         super().__init__()
