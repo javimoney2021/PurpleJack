@@ -115,8 +115,8 @@ class BuyButton(discord.ui.Button):
     def __init__(self, item, author_id, bot, emoji=None):
         super().__init__(
             style=discord.ButtonStyle.success if item["stock"] != 0 else discord.ButtonStyle.secondary,
-            label=f"{item['precio']} {COIN}",
-            emoji=emoji,
+            label=f"{item['precio']}",
+            emoji=coin_emoji,
             disabled=item["stock"] == 0,
             custom_id=f"buy_{item['id']}"
         )
