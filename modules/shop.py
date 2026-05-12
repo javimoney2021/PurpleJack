@@ -90,7 +90,8 @@ class ConfirmBuyView(discord.ui.View):
             log_channel = self.bot.get_channel(LOG_CHANNEL_ID)
             if log_channel:
                 await log_channel.send(
-                    f"{interaction.user.mention} Compró en la Tienda {icono} **{item_fresh['nombre']}**"
+                    nombre_log = interaction.user.nick or interaction.user.display_name
+                    f"🛒 **{nombre_log}** Compró {icono} **{item_fresh['nombre']}**"
                 )
 
         except Exception as e:
@@ -269,6 +270,144 @@ class TiendaLayout(discord.ui.LayoutView):
         pass
 
 
+# ── BOTON DE USAR ITEM (inventario) ───────────────────
+
+class UseButton(discord.ui.Button):
+    def __init__(self, item, author_id, guild, bot):
+        super().__init__(
+            style=discord.ButtonStyle.primary,
+            label="Usar",
+            emoji="✨",
+            custom_id=f"use_{item['id']}"
+        )
+        self.item = item
+        self.author_id = author_id
+        self.guild = guild
+        self.bot = bot
+
+    async def callback(self, interaction: discord.Interaction):
+        if interaction.user.id != self.author_id:
+            return await interaction.response.send_message(
+                "❌ Este panel no fue generado por ti.", ephemeral=True
+            )
+
+        await interaction.response.defer(ephemeral=True)
+
+        try:
+            items = await get_inventory(interaction.user.id)
+            item = next((i for i in items if i["id"] == self.item["id"]), None)
+
+            if not item:
+                return await interaction.followup.send(
+                    f"❌ Ya no tienes **{self.item['nombre']}** en tu inventario.", ephemeral=True
+                )
+
+            await remove_from_inventory(interaction.user.id, item["nombre"])
+
+            if item.get("rol_id"):
+                role = self.guild.get_role(int(item["rol_id"]))
+                if role:
+                    await interaction.user.add_roles(role)
+                    duracion = item.get("duracion", 0)
+                    if duracion and duracion > 0:
+                        expira_en = time.time() + (duracion * 86400)
+                        await add_cargo_temporal(
+                            interaction.user.id,
+                            self.guild.id,
+                            int(item["rol_id"]),
+                            expira_en
+                        )
+
+            icono = item["icono"] if item["icono"] else "🔹"
+            mensaje = item["mensaje_uso"] if item["mensaje_uso"] else f"Usaste {icono} **{item['nombre']}**."
+
+            await interaction.followup.send(
+                content=f"{interaction.user.mention} {mensaje}",
+                ephemeral=True
+            )
+
+            # Recargar inventario real y reconstruir el layout
+            items_actualizados = await get_inventory(interaction.user.id)
+            inv_view: InventarioLayout = self.view
+            if items_actualizados:
+                inv_view.items = items_actualizados
+                inv_view._build()
+                await interaction.message.edit(view=inv_view)
+            else:
+                # Inventario vacío: cerrar el panel
+                await interaction.message.delete()
+
+            # ── Log de uso ──────────────────────────
+            log_channel = self.bot.get_channel(LOG_CHANNEL_ID)
+            if log_channel:
+                await log_channel.send(
+                    nombre_log = interaction.user.nick or interaction.user.display_name
+                    f"✨ **{nombre_log}** usó {icono} **{item['nombre']}**"
+                )
+
+        except Exception as e:
+            print(f"ERROR UseButton callback: {e}")
+            try:
+                await interaction.followup.send("❌ Error al usar el item.", ephemeral=True)
+            except Exception:
+                pass
+
+
+# ── INVENTARIO LAYOUT ──────────────────────────────────
+
+class InventarioLayout(discord.ui.LayoutView):
+    def __init__(self, items, author_id, guild, bot):
+        super().__init__(timeout=60)
+        self.items = items
+        self.author_id = author_id
+        self.guild = guild
+        self.bot = bot
+        self._build()
+
+    def _build(self):
+        self.clear_items()
+
+        container = discord.ui.Container(accent_color=PURPLE)
+
+        container.add_item(discord.ui.TextDisplay(
+            f"## 🎒 INVENTARIO\n"
+            f"<@{self.author_id}> Estos son los items que tienes actualmente.\n"
+        ))
+        container.add_item(discord.ui.Separator())
+
+        for item in self.items:
+            icono = item["icono"] if item["icono"] else "🔹"
+            cantidad = item.get("cantidad", 1)
+
+            texto = discord.ui.TextDisplay(
+                f"{icono} **{item['nombre']}** x{cantidad}"
+            )
+
+            if item["utilizable"]:
+                import re
+                match = re.search(r'<a?:(\w+):(\d+)>', icono)
+                emoji_obj = discord.PartialEmoji(name=match.group(1), id=int(match.group(2))) if match else None
+
+                section = discord.ui.Section(
+                    texto,
+                    accessory=UseButton(item, self.author_id, self.guild, self.bot)
+                )
+            else:
+                section = discord.ui.Section(texto)
+
+            container.add_item(section)
+
+        container.add_item(discord.ui.Separator())
+        container.add_item(discord.ui.TextDisplay(
+            f"-# Total: **{len(self.items)}** tipo(s) de item  •  Usa ✨ para consumir un item usable."
+        ))
+
+        self.add_item(container)
+
+    async def on_timeout(self):
+        pass
+
+
 # ── SHOP COG ───────────────────────────────────────────
 
 class Shop(commands.Cog):
@@ -336,66 +475,20 @@ class Shop(commands.Cog):
         if not items:
             return await ctx.send(f"🎒 {ctx.author.mention} Tu inventario está vacío.")
 
-        embed = discord.Embed(
-            title=f"🎒 Inventario de {ctx.author.display_name}",
-            color=discord.Color.purple()
-        )
-        descripcion = ""
-        for item in items:
-            icono = item["icono"] if item["icono"] else "🔹"
-            usable = "✅ Usable" if item["utilizable"] else "—"
-            descripcion += f"— {icono} **{item['nombre']}** x{item['cantidad']} | {usable}\n"
+        import asyncio
+        view = InventarioLayout(items, ctx.author.id, ctx.guild, self.bot)
+        msg = await ctx.send(view=view)
 
-        embed.description = descripcion
-        embed.set_footer(text="Usa !usar {nombre} para usar un item.")
-        await ctx.send(embed=embed)
+        async def auto_delete():
+            await asyncio.sleep(60)
+            try:
+                await msg.delete()
+            except Exception:
+                pass
 
-    @commands.command()
-    async def usar(self, ctx, *, nombre: str = None):
-        if nombre is None:
-            return await ctx.send(f"❌ {ctx.author.mention} Formato: `!usar {{nombre del item}}`")
+        asyncio.create_task(auto_delete())
 
-        items = await get_inventory(ctx.author.id)
-        item = next((i for i in items if i["nombre"].lower() == nombre.lower().strip()), None)
-
-        if not item:
-            return await ctx.send(f"❌ {ctx.author.mention} No tienes `{nombre}` en tu inventario.")
-
-        if not item["utilizable"]:
-            return await ctx.send(f"❌ {ctx.author.mention} Este item no es usable.")
-
-        await remove_from_inventory(ctx.author.id, nombre)
-
-        if item.get("rol_id"):
-            role = ctx.guild.get_role(int(item["rol_id"]))
-            if role:
-                await ctx.author.add_roles(role)
-                duracion = item.get("duracion", 0)
-                if duracion and duracion > 0:
-                    expira_en = time.time() + (duracion * 86400)
-                    await add_cargo_temporal(
-                        ctx.author.id,
-                        ctx.guild.id,
-                        int(item["rol_id"]),
-                        expira_en
-                    )
-
-        icono = item["icono"] if item["icono"] else "🔹"
-        mensaje = item["mensaje_uso"] if item["mensaje_uso"] else f"Usaste {icono} **{item['nombre']}**."
-
-        embed = discord.Embed(
-            description=f"{ctx.author.mention} {mensaje}",
-            color=discord.Color.gold()
-        )
-        await ctx.send(embed=embed)
-
-        # ── Log de uso ─────────────────────────────────
-        log_channel = self.bot.get_channel(LOG_CHANNEL_ID)
-        if log_channel:
-            await log_channel.send(
-                f"{ctx.author.mention} Ha usado {icono} **{item['nombre']}**"
-            )
-
+    )
 
 async def setup(bot):
     await bot.add_cog(Shop(bot))
