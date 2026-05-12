@@ -112,10 +112,11 @@ class ConfirmBuyView(discord.ui.View):
 # ── BOTON DE COMPRA (accesorio en Section) ─────────────
 
 class BuyButton(discord.ui.Button):
-    def __init__(self, item, author_id, bot):
+    def __init__(self, item, author_id, bot, emoji=None):
         super().__init__(
             style=discord.ButtonStyle.success if item["stock"] != 0 else discord.ButtonStyle.secondary,
             label=f"{item['precio']} {COIN}",
+            emoji=emoji,
             disabled=item["stock"] == 0,
             custom_id=f"buy_{item['id']}"
         )
@@ -204,8 +205,8 @@ class TiendaLayout(discord.ui.LayoutView):
 
         # Título
         container.add_item(discord.ui.TextDisplay(
-            f"## 🛒 Tienda PurpleJack\n"
-            f"Compra el item de tu preferencia o Usa `!info [nombre]` para ver la info completa del item.\n"
+            f"## 🛒 TIENDA - NAVE SUS\n"
+            f"<@{self.author_id}> Compra el item de tu preferencia o Usa `!info [nombre]` para ver la info completa del item.\n"
         ))
         container.add_item(discord.ui.Separator())
 
@@ -219,12 +220,19 @@ class TiendaLayout(discord.ui.LayoutView):
             else:
                 stock_txt = str(item["stock"])
 
+            import re
+            match = re.search(r'<a?:(\w+):(\d+)>', icono)
+            if match:
+                emoji_obj = discord.PartialEmoji(name=match.group(1), id=int(match.group(2)))
+            else:
+                emoji_obj = icono if icono else None
+
             section = discord.ui.Section(
                 discord.ui.TextDisplay(
                     f"{icono} **{item['nombre']}**\n"
                     f"{item.get('descripcion', '')}  •  Stock: **{stock_txt}**"
                 ),
-                accessory=BuyButton(item, self.author_id, self.bot)
+                accessory=BuyButton(item, self.author_id, self.bot, emoji=emoji_obj)
             )
             container.add_item(section)
 
