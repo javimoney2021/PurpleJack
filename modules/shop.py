@@ -8,6 +8,7 @@ from core.database import (
 from core import cache
 from core.config import COIN
 import time
+import re
 
 # ── CONFIG ─────────────────────────────────────────────
 LOG_CHANNEL_ID = 1503681101422526494
@@ -29,7 +30,6 @@ class ConfirmBuyView(discord.ui.View):
         if interaction.user.id != self.author_id:
             return await interaction.response.send_message("❌ No es tu confirmación.", ephemeral=True)
 
-        # Defer inmediatamente para evitar timeout de interacción antes de las operaciones async
         await interaction.response.defer(ephemeral=True)
 
         for item in self.children:
@@ -89,9 +89,9 @@ class ConfirmBuyView(discord.ui.View):
             # ── Log de compra ──────────────────────────
             log_channel = self.bot.get_channel(LOG_CHANNEL_ID)
             if log_channel:
+                nombre_log = interaction.user.nick or interaction.user.display_name
                 await log_channel.send(
-                    nombre_log = interaction.user.nick or interaction.user.display_name
-                    f"🛒 **{nombre_log}** Compró {icono} **{item_fresh['nombre']}**"
+                    f"🛒 **{nombre_log}** compró {icono} **{item_fresh['nombre']}**"
                 )
 
         except Exception as e:
@@ -117,7 +117,6 @@ class ConfirmBuyView(discord.ui.View):
 
 class BuyButton(discord.ui.Button):
     def __init__(self, item, author_id, bot, emoji=None):
-        import re
         match = re.search(r'<a?:(\w+):(\d+)>', COIN)
         coin_emoji = discord.PartialEmoji(name=match.group(1), id=int(match.group(2))) if match else None
 
@@ -201,24 +200,20 @@ class TiendaLayout(discord.ui.LayoutView):
         self._build()
 
     def _build(self):
-        # Limpiar componentes anteriores
         self.clear_items()
 
         total_pages = (len(self.items) + ITEMS_PER_PAGE - 1) // ITEMS_PER_PAGE
         start = self.page * ITEMS_PER_PAGE
         page_items = self.items[start:start + ITEMS_PER_PAGE]
 
-        # Container con color morado
         container = discord.ui.Container(accent_color=PURPLE)
 
-        # Título
         container.add_item(discord.ui.TextDisplay(
             f"## 🛒 TIENDA - NAVE SUS\n"
             f"<@{self.author_id}> Compra el item de tu preferencia o Usa `!info [nombre]` para ver la info completa del item.\n"
         ))
         container.add_item(discord.ui.Separator())
 
-        # Secciones por item
         for item in page_items:
             icono = item["icono"] if item["icono"] else "🔹"
             if item["stock"] == -1:
@@ -228,7 +223,6 @@ class TiendaLayout(discord.ui.LayoutView):
             else:
                 stock_txt = str(item["stock"])
 
-            import re
             match = re.search(r'<a?:(\w+):(\d+)>', icono)
             if match:
                 emoji_obj = discord.PartialEmoji(name=match.group(1), id=int(match.group(2)))
@@ -244,7 +238,6 @@ class TiendaLayout(discord.ui.LayoutView):
             )
             container.add_item(section)
 
-        # Separador y paginación
         container.add_item(discord.ui.Separator())
         container.add_item(discord.ui.TextDisplay(
             f"-# Página {self.page + 1}/{total_pages}  •  Las compras se descuentan del balance principal."
@@ -252,7 +245,6 @@ class TiendaLayout(discord.ui.LayoutView):
 
         self.add_item(container)
 
-        # Botones de paginación como ActionRow
         nav_row = discord.ui.ActionRow()
         prev = PrevButton()
         prev.disabled = self.page == 0
@@ -334,14 +326,13 @@ class UseButton(discord.ui.Button):
                 inv_view._build()
                 await interaction.message.edit(view=inv_view)
             else:
-                # Inventario vacío: cerrar el panel
                 await interaction.message.delete()
 
             # ── Log de uso ──────────────────────────
             log_channel = self.bot.get_channel(LOG_CHANNEL_ID)
             if log_channel:
+                nombre_log = interaction.user.nick or interaction.user.display_name
                 await log_channel.send(
-                    nombre_log = interaction.user.nick or interaction.user.display_name
                     f"✨ **{nombre_log}** usó {icono} **{item['nombre']}**"
                 )
 
@@ -384,10 +375,6 @@ class InventarioLayout(discord.ui.LayoutView):
             )
 
             if item["utilizable"]:
-                import re
-                match = re.search(r'<a?:(\w+):(\d+)>', icono)
-                emoji_obj = discord.PartialEmoji(name=match.group(1), id=int(match.group(2))) if match else None
-
                 section = discord.ui.Section(
                     texto,
                     accessory=UseButton(item, self.author_id, self.guild, self.bot)
@@ -488,7 +475,6 @@ class Shop(commands.Cog):
 
         asyncio.create_task(auto_delete())
 
-    )
 
 async def setup(bot):
     await bot.add_cog(Shop(bot))
