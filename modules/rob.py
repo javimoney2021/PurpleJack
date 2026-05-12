@@ -91,17 +91,14 @@ class Rob(commands.Cog):
             if penalty == 0:
                 penalty = 1
 
-            # Indemnización: 5%-8% del banco del author al banco del objetivo
-            percentage_comp = random.uniform(0.05, 0.08)
-            compensation = int(author_user["bank"] * percentage_comp)
-            if compensation == 0:
-                compensation = 1
+            compensation = 1500
 
             await update_balance(author_id, -penalty)
+            await update_bank(author_id, -compensation)
             await update_bank(target_id, compensation)
 
             await ctx.send(
-                f"🚔 {ctx.author.mention} ¡Robo fallido! Perdiste **{penalty}** {COIN} de tu balance + **Indemnización** para la víctima por daños y perjuicios."
+                f"🚔 {ctx.author.mention} ¡Robo fallido! Perdiste **{penalty}** {COIN} de tu balance + **1500** {COIN} de indemnización descontados de tu banco."
             )
             await ctx.send(
                 f"🛡️ {target.mention} Alguien intentó robarte, pero falló. Recibiste **{compensation}** {COIN} en tu banco como indemnización."

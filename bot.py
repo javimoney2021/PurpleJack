@@ -2,6 +2,8 @@ import discord
 from discord.ext import commands
 import asyncio
 import time
+import discord
+print(f"discord.py version: {discord.__version__}")
 from settings import TOKEN
 from core.database import (
     init_db, load_items_to_cache, load_cargos_to_cache,
