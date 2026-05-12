@@ -29,6 +29,9 @@ class ConfirmBuyView(discord.ui.View):
         if interaction.user.id != self.author_id:
             return await interaction.response.send_message("❌ No es tu confirmación.", ephemeral=True)
 
+        # Defer inmediatamente para evitar timeout de interacción antes de las operaciones async
+        await interaction.response.defer(ephemeral=True)
+
         for item in self.children:
             item.disabled = True
 
@@ -37,11 +40,11 @@ class ConfirmBuyView(discord.ui.View):
             item_fresh = next((i for i in items_fresh if i["id"] == self.item["id"]), None)
 
             if not item_fresh:
-                return await interaction.response.edit_message(
+                return await interaction.edit_original_response(
                     content="❌ El item ya no existe en la tienda.", view=self
                 )
             if item_fresh["stock"] == 0:
-                return await interaction.response.edit_message(
+                return await interaction.edit_original_response(
                     content=f"❌ **{item_fresh['nombre']}** sin stock.", view=self
                 )
 
@@ -50,7 +53,7 @@ class ConfirmBuyView(discord.ui.View):
             user = await get_user(interaction.user.id)
 
             if user["balance"] < total:
-                return await interaction.response.edit_message(
+                return await interaction.edit_original_response(
                     content=f"❌ No tienes suficiente balance. Necesitas **{total}** {COIN}.",
                     view=self
                 )
@@ -75,7 +78,7 @@ class ConfirmBuyView(discord.ui.View):
             icono = item_fresh["icono"] if item_fresh["icono"] else "🔹"
             nombre_display = interaction.user.nick or interaction.user.display_name
 
-            await interaction.response.edit_message(
+            await interaction.edit_original_response(
                 content=(
                     f"✅ **{nombre_display}** Has comprado **{cantidad_compra}x {icono} {item_fresh['nombre']}** "
                     f"exitosamente. Consulta tu `!inv` para verificarlo."
@@ -93,7 +96,7 @@ class ConfirmBuyView(discord.ui.View):
         except Exception as e:
             print(f"ERROR ConfirmBuyView confirmar: {e}")
             try:
-                await interaction.response.edit_message(content="❌ Error al procesar la compra.", view=self)
+                await interaction.edit_original_response(content="❌ Error al procesar la compra.", view=self)
             except Exception:
                 pass
 
