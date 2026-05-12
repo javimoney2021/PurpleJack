@@ -9,51 +9,40 @@ from core import cache
 from core.config import COIN
 import time
 
+# ── CONFIG ─────────────────────────────────────────────
+LOG_CHANNEL_ID = 1503681101422526494
+ITEMS_PER_PAGE = 5
+PURPLE = 0x9B59B6
 
-class TiendaView(discord.ui.View):
-    def __init__(self, items, author_id):
-        super().__init__(timeout=120)
+
+# ── CONFIRMACION DE COMPRA ─────────────────────────────
+
+class ConfirmBuyView(discord.ui.View):
+    def __init__(self, author_id, item, bot):
+        super().__init__(timeout=30)
         self.author_id = author_id
-        for item in items:
-            sin_stock = item["stock"] == 0
-            self.add_item(ItemBoton(
-                item=item,
-                label=f"{item['nombre']} • {item['precio']}",
-                emoji=None,
-                disabled=sin_stock,
-                author_id=author_id
-            ))
-
-
-class ItemBoton(discord.ui.Button):
-    def __init__(self, item, label, emoji, disabled, author_id):
-        super().__init__(
-            style=discord.ButtonStyle.success if not disabled else discord.ButtonStyle.secondary,
-            label=label,
-            emoji=emoji,
-            disabled=disabled,
-            custom_id=f"buy_{item['id']}"
-        )
         self.item = item
-        self.author_id = author_id
+        self.bot = bot
 
-    async def callback(self, interaction: discord.Interaction):
+    @discord.ui.button(label="Comprar", style=discord.ButtonStyle.success)
+    async def confirmar(self, interaction: discord.Interaction, button: discord.ui.Button):
+        if interaction.user.id != self.author_id:
+            return await interaction.response.send_message("❌ No es tu confirmación.", ephemeral=True)
+
+        for item in self.children:
+            item.disabled = True
+
         try:
-            if interaction.user.id != self.author_id:
-                return await interaction.response.send_message(
-                    "❌ Este panel no fue generado por ti.", ephemeral=True
-                )
-
             items_fresh = await get_all_items()
             item_fresh = next((i for i in items_fresh if i["id"] == self.item["id"]), None)
+
             if not item_fresh:
-                return await interaction.response.send_message(
-                    "❌ El item ya no existe en la tienda.", ephemeral=True
+                return await interaction.response.edit_message(
+                    content="❌ El item ya no existe en la tienda.", view=self
                 )
             if item_fresh["stock"] == 0:
-                return await interaction.response.send_message(
-                    f"**{item_fresh['nombre']}** Sin Stock por el momento, vuelve después...",
-                    ephemeral=False
+                return await interaction.response.edit_message(
+                    content=f"❌ **{item_fresh['nombre']}** sin stock.", view=self
                 )
 
             cantidad_compra = item_fresh.get("cantidad", 1)
@@ -61,9 +50,9 @@ class ItemBoton(discord.ui.Button):
             user = await get_user(interaction.user.id)
 
             if user["balance"] < total:
-                return await interaction.response.send_message(
-                    f"❌ No tienes suficiente balance. Necesitas **{total}** {COIN}.",
-                    ephemeral=False
+                return await interaction.response.edit_message(
+                    content=f"❌ No tienes suficiente balance. Necesitas **{total}** {COIN}.",
+                    view=self
                 )
 
             await update_balance(interaction.user.id, -total)
@@ -85,18 +74,187 @@ class ItemBoton(discord.ui.Button):
 
             icono = item_fresh["icono"] if item_fresh["icono"] else "🔹"
             nombre_display = interaction.user.nick or interaction.user.display_name
-            await interaction.response.send_message(
-                f"**{nombre_display}** Has comprado **{cantidad_compra}x {icono} {item_fresh['nombre']}** "
-                f"exitosamente... Consulta tu `!inventario` para verificarlo.",
-                ephemeral=False
+
+            await interaction.response.edit_message(
+                content=(
+                    f"✅ **{nombre_display}** Has comprado **{cantidad_compra}x {icono} {item_fresh['nombre']}** "
+                    f"exitosamente. Consulta tu `!inv` para verificarlo."
+                ),
+                view=self
             )
+
+            # ── Log de compra ──────────────────────────
+            log_channel = self.bot.get_channel(LOG_CHANNEL_ID)
+            if log_channel:
+                await log_channel.send(
+                    f"{interaction.user.mention} Compró en la Tienda {icono} **{item_fresh['nombre']}**"
+                )
+
         except Exception as e:
-            print(f"ERROR ItemBoton callback: {e}")
+            print(f"ERROR ConfirmBuyView confirmar: {e}")
             try:
-                await interaction.response.send_message("❌ Ocurrió un error al procesar la compra.", ephemeral=True)
-            except:
+                await interaction.response.edit_message(content="❌ Error al procesar la compra.", view=self)
+            except Exception:
                 pass
 
+    @discord.ui.button(label="Cancelar", style=discord.ButtonStyle.danger)
+    async def cancelar(self, interaction: discord.Interaction, button: discord.ui.Button):
+        if interaction.user.id != self.author_id:
+            return await interaction.response.send_message("❌ No es tu confirmación.", ephemeral=True)
+        for item in self.children:
+            item.disabled = True
+        await interaction.response.edit_message(
+            content="🚫 Compra cancelada.",
+            view=self
+        )
+
+
+# ── BOTON DE COMPRA (accesorio en Section) ─────────────
+
+class BuyButton(discord.ui.Button):
+    def __init__(self, item, author_id, bot):
+        super().__init__(
+            style=discord.ButtonStyle.success if item["stock"] != 0 else discord.ButtonStyle.secondary,
+            label=f"{item['precio']} {COIN}",
+            disabled=item["stock"] == 0,
+            custom_id=f"buy_{item['id']}"
+        )
+        self.item = item
+        self.author_id = author_id
+        self.bot = bot
+
+    async def callback(self, interaction: discord.Interaction):
+        if interaction.user.id != self.author_id:
+            return await interaction.response.send_message(
+                "❌ Este panel no fue generado por ti.", ephemeral=True
+            )
+        icono = self.item["icono"] if self.item["icono"] else "🔹"
+        await interaction.response.send_message(
+            content=(
+                f"🛒 ¿Estás seguro que deseas comprar "
+                f"**{icono} {self.item['nombre']}** por **{self.item['precio']} {COIN}**?"
+            ),
+            view=ConfirmBuyView(self.author_id, self.item, self.bot),
+            ephemeral=True
+        )
+
+
+# ── BOTONES DE PAGINACION ──────────────────────────────
+
+class PrevButton(discord.ui.Button):
+    def __init__(self):
+        super().__init__(
+            style=discord.ButtonStyle.secondary,
+            label="◀ Anterior",
+            custom_id="tienda_prev"
+        )
+
+    async def callback(self, interaction: discord.Interaction):
+        view: TiendaLayout = self.view
+        if interaction.user.id != view.author_id:
+            return await interaction.response.send_message(
+                "❌ Este panel no fue generado por ti.", ephemeral=True
+            )
+        if view.page > 0:
+            view.page -= 1
+        await view._update(interaction)
+
+
+class NextButton(discord.ui.Button):
+    def __init__(self):
+        super().__init__(
+            style=discord.ButtonStyle.secondary,
+            label="Siguiente ▶",
+            custom_id="tienda_next"
+        )
+
+    async def callback(self, interaction: discord.Interaction):
+        view: TiendaLayout = self.view
+        if interaction.user.id != view.author_id:
+            return await interaction.response.send_message(
+                "❌ Este panel no fue generado por ti.", ephemeral=True
+            )
+        total_pages = (len(view.items) + ITEMS_PER_PAGE - 1) // ITEMS_PER_PAGE
+        if view.page < total_pages - 1:
+            view.page += 1
+        await view._update(interaction)
+
+
+# ── TIENDA V2 LAYOUT ───────────────────────────────────
+
+class TiendaLayout(discord.ui.LayoutView):
+    def __init__(self, items, author_id, bot):
+        super().__init__(timeout=60)
+        self.items = items
+        self.author_id = author_id
+        self.bot = bot
+        self.page = 0
+        self._build()
+
+    def _build(self):
+        # Limpiar componentes anteriores
+        self.clear_items()
+
+        total_pages = (len(self.items) + ITEMS_PER_PAGE - 1) // ITEMS_PER_PAGE
+        start = self.page * ITEMS_PER_PAGE
+        page_items = self.items[start:start + ITEMS_PER_PAGE]
+
+        # Container con color morado
+        container = discord.ui.Container(accent_color=PURPLE)
+
+        # Título
+        container.add_item(discord.ui.TextDisplay(
+            f"## 🛒 Tienda PurpleJack\n"
+            f"Compra el item de tu preferencia o Usa `!info [nombre]` para ver la info completa del item.\n"
+        ))
+        container.add_item(discord.ui.Separator())
+
+        # Secciones por item
+        for item in page_items:
+            icono = item["icono"] if item["icono"] else "🔹"
+            if item["stock"] == -1:
+                stock_txt = "∞"
+            elif item["stock"] == 0:
+                stock_txt = "❌ Agotado"
+            else:
+                stock_txt = str(item["stock"])
+
+            section = discord.ui.Section(
+                discord.ui.TextDisplay(
+                    f"{icono} **{item['nombre']}**\n"
+                    f"{item.get('descripcion', '')}  •  Stock: **{stock_txt}**"
+                ),
+                accessory=BuyButton(item, self.author_id, self.bot)
+            )
+            container.add_item(section)
+
+        # Separador y paginación
+        container.add_item(discord.ui.Separator())
+        container.add_item(discord.ui.TextDisplay(
+            f"-# Página {self.page + 1}/{total_pages}  •  Las compras se descuentan del balance principal."
+        ))
+
+        self.add_item(container)
+
+        # Botones de paginación como ActionRow
+        nav_row = discord.ui.ActionRow()
+        prev = PrevButton()
+        prev.disabled = self.page == 0
+        next_ = NextButton()
+        next_.disabled = self.page >= total_pages - 1
+        nav_row.add_item(prev)
+        nav_row.add_item(next_)
+        self.add_item(nav_row)
+
+    async def _update(self, interaction: discord.Interaction):
+        self._build()
+        await interaction.response.edit_message(view=self)
+
+    async def on_timeout(self):
+        pass
+
+
+# ── SHOP COG ───────────────────────────────────────────
 
 class Shop(commands.Cog):
     def __init__(self, bot):
@@ -108,32 +266,18 @@ class Shop(commands.Cog):
         if not items:
             return await ctx.send("🛒 La tienda está vacía por ahora.")
 
-        embed = discord.Embed(
-            title="🛒 Tienda PurpleJack",
-            description=(
-                "Haz click en los botones abajo para comprar un item instantáneamente.\n"
-                f"Usa `!info [nombre]` para ver los detalles completos de un item."
-            ),
-            color=discord.Color.purple()
-        )
+        import asyncio
+        view = TiendaLayout(items, ctx.author.id, self.bot)
+        msg = await ctx.send(view=view)
 
-        for item in items:
-            icono = item["icono"] if item["icono"] else "🔹"
-            if item["stock"] == -1:
-                stock_txt = "∞"
-            elif item["stock"] == 0:
-                stock_txt = "❌ Agotado"
-            else:
-                stock_txt = str(item["stock"])
-            embed.add_field(
-                name=f"{icono} {item['nombre']}",
-                value=f"{item.get('descripcion', '')}  •  Stock: **{stock_txt}**",
-                inline=False
-            )
+        async def auto_delete():
+            await asyncio.sleep(60)
+            try:
+                await msg.delete()
+            except Exception:
+                pass
 
-        embed.set_footer(text="Las compras se descuentan del balance principal.")
-        view = TiendaView(items, ctx.author.id)
-        await ctx.send(embed=embed, view=view)
+        asyncio.create_task(auto_delete())
 
     @commands.command()
     async def info(self, ctx, *, nombre: str = None):
@@ -229,6 +373,13 @@ class Shop(commands.Cog):
             color=discord.Color.gold()
         )
         await ctx.send(embed=embed)
+
+        # ── Log de uso ─────────────────────────────────
+        log_channel = self.bot.get_channel(LOG_CHANNEL_ID)
+        if log_channel:
+            await log_channel.send(
+                f"{ctx.author.mention} Ha usado {icono} **{item['nombre']}**"
+            )
 
 
 async def setup(bot):
