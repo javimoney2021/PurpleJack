@@ -457,7 +457,8 @@ class Shop(commands.Cog):
         await ctx.send(embed=embed)
 
     @commands.command(name="inv")
-    async def inventario(self, ctx):
+async def inventario(self, ctx):
+    try:
         items = await get_inventory(ctx.author.id)
         if not items:
             return await ctx.send(f"🎒 {ctx.author.mention} Tu inventario está vacío.")
@@ -475,6 +476,9 @@ class Shop(commands.Cog):
 
         asyncio.create_task(auto_delete())
 
+    except Exception as e:
+        await ctx.send(f"❌ Error en inventario: `{e}`")
+        raise  # también lo imprime en consola completo
 
 async def setup(bot):
     await bot.add_cog(Shop(bot))
