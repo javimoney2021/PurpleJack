@@ -113,6 +113,10 @@ class ConfirmBuyView(discord.ui.View):
 
 class BuyButton(discord.ui.Button):
     def __init__(self, item, author_id, bot, emoji=None):
+        import re
+        match = re.search(r'<a?:(\w+):(\d+)>', COIN)
+        coin_emoji = discord.PartialEmoji(name=match.group(1), id=int(match.group(2))) if match else None
+
         super().__init__(
             style=discord.ButtonStyle.success if item["stock"] != 0 else discord.ButtonStyle.secondary,
             label=f"{item['precio']}",
