@@ -356,40 +356,45 @@ class InventarioLayout(discord.ui.LayoutView):
         self._build()
 
     def _build(self):
-        self.clear_items()
+        try:
+            self.clear_items()
 
-        container = discord.ui.Container(accent_color=PURPLE)
+            container = discord.ui.Container(accent_color=PURPLE)
 
-        container.add_item(discord.ui.TextDisplay(
-            f"## 🎒 INVENTARIO\n"
-            f"<@{self.author_id}> Estos son los items que tienes actualmente.\n"
-        ))
-        container.add_item(discord.ui.Separator())
+            container.add_item(discord.ui.TextDisplay(
+                f"## 🎒 INVENTARIO\n"
+                f"<@{self.author_id}> Estos son los items que tienes actualmente.\n"
+            ))
+            container.add_item(discord.ui.Separator())
 
-        for item in self.items:
-            icono = item["icono"] if item["icono"] else "🔹"
-            cantidad = item.get("cantidad", 1)
+            for item in self.items:
+                icono = item["icono"] if item["icono"] else "🔹"
+                cantidad = item.get("cantidad", 1)
 
-            texto = discord.ui.TextDisplay(
-                f"{icono} **{item['nombre']}** x{cantidad}"
-            )
-
-            if item["utilizable"]:
-                section = discord.ui.Section(
-                    texto,
-                    accessory=UseButton(item, self.author_id, self.guild, self.bot)
+                texto = discord.ui.TextDisplay(
+                    f"{icono} **{item['nombre']}** x{cantidad}"
                 )
-            else:
-                section = discord.ui.Section(texto)
 
-            container.add_item(section)
+                if item["utilizable"]:
+                    section = discord.ui.Section(
+                        texto,
+                        accessory=UseButton(item, self.author_id, self.guild, self.bot)
+                    )
+                else:
+                    section = discord.ui.Section(texto)
 
-        container.add_item(discord.ui.Separator())
-        container.add_item(discord.ui.TextDisplay(
-            f"-# Total: **{len(self.items)}** tipo(s) de item  •  Usa ✨ para consumir un item usable."
-        ))
+                container.add_item(section)
 
-        self.add_item(container)
+            container.add_item(discord.ui.Separator())
+            container.add_item(discord.ui.TextDisplay(
+                f"-# Total: **{len(self.items)}** tipo(s) de item  •  Usa ✨ para consumir un item usable."
+            ))
+
+            self.add_item(container)
+
+        except Exception as e:
+            print(f"ERROR InventarioLayout._build: {e}")
+            raise
 
     async def on_timeout(self):
         pass
@@ -458,22 +463,27 @@ class Shop(commands.Cog):
 
     @commands.command(name="inv")
     async def inventario(self, ctx):
-        items = await get_inventory(ctx.author.id)
-        if not items:
-            return await ctx.send(f"🎒 {ctx.author.mention} Tu inventario está vacío.")
+        try:
+            items = await get_inventory(ctx.author.id)
+            if not items:
+                return await ctx.send(f"🎒 {ctx.author.mention} Tu inventario está vacío.")
 
-        import asyncio
-        view = InventarioLayout(items, ctx.author.id, ctx.guild, self.bot)
-        msg = await ctx.send(view=view)
+            import asyncio
+            view = InventarioLayout(items, ctx.author.id, ctx.guild, self.bot)
+            msg = await ctx.send(view=view)
 
-        async def auto_delete():
-            await asyncio.sleep(60)
-            try:
-                await msg.delete()
-            except Exception:
-                pass
+            async def auto_delete():
+                await asyncio.sleep(60)
+                try:
+                    await msg.delete()
+                except Exception:
+                    pass
 
-        asyncio.create_task(auto_delete())
+            asyncio.create_task(auto_delete())
+
+        except Exception as e:
+            print(f"ERROR inventario command: {e}")
+            await ctx.send(f"❌ Error al abrir inventario: `{e}`")
 
 
 async def setup(bot):
