@@ -376,14 +376,12 @@ class InventarioLayout(discord.ui.LayoutView):
                 )
 
                 if item["utilizable"]:
-                    section = discord.ui.Section(
+                    container.add_item(discord.ui.Section(
                         texto,
                         accessory=UseButton(item, self.author_id, self.guild, self.bot)
-                    )
+                    ))
                 else:
-                    section = discord.ui.Section(texto)
-
-                container.add_item(section)
+                    container.add_item(texto)
 
             container.add_item(discord.ui.Separator())
             container.add_item(discord.ui.TextDisplay(
