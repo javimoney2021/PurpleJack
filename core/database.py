@@ -176,7 +176,11 @@ async def edit_item(item_id, nombre=None, precio=None, stock=None):
 async def delete_item(item_id):
     async with pool.acquire() as conn:
         await conn.execute("DELETE FROM items WHERE id=$1", item_id)
+        rows = await conn.fetch("SELECT user_id FROM inventario WHERE item_id=$1", item_id)
+        affected_users = [r["user_id"] for r in rows]
         await conn.execute("DELETE FROM inventario WHERE item_id=$1", item_id)
+    for user_id in affected_users:
+        cache.invalidate_inventory_cache(user_id)
     await load_items_to_cache()
 
 async def reduce_stock(item_id):
