@@ -156,7 +156,8 @@ async def get_item_by_name(nombre):
 async def add_item(nombre, descripcion, descripcion_larga, precio, cantidad,
                    stock, icono, utilizable, mensaje_uso, rol_id, duracion,
                    limite_por_usuario=0):
-        ...
+    async with pool.acquire() as conn:
+        await conn.execute("""
             INSERT INTO items
                 (nombre, descripcion, descripcion_larga, precio, cantidad,
                  stock, icono, utilizable, mensaje_uso, rol_id, duracion,
