@@ -144,248 +144,6 @@ class NaveConfirmView(discord.ui.View):
             view=self
         )
 
-# ── ITEM NEW STATE ─────────────────────────────────────
-
-class ItemState:
-    def __init__(self):
-        self.nombre = None
-        self.descripcion = None
-        self.descripcion_larga = None
-        self.precio = None
-        self.cantidad = 1
-        self.stock = -1
-        self.icono = ""
-        self.utilizable = False
-        self.mensaje_uso = ""
-        self.rol_id = None
-        self.duracion = 0
-
-    def resumen(self):
-        campos = [
-            ("Nombre",         self.nombre or "❌ No definido"),
-            ("Descripción",    self.descripcion or "❌ No definido"),
-            ("Precio",         f"{self.precio} {COIN}" if self.precio is not None else "❌ No definido"),
-            ("Cantidad",       str(self.cantidad)),
-            ("Desc. Larga",    "✅ Definida" if self.descripcion_larga else "❌ No definida"),
-            ("Stock",          "∞ Ilimitado" if self.stock == -1 else ("❌ Agotado" if self.stock == 0 else str(self.stock))),
-            ("Icono",          self.icono if self.icono else "❌ No definido"),
-            ("Usable",         "✅ Sí" if self.utilizable else "❌ No"),
-            ("Cargo (Rol ID)", str(self.rol_id) if self.rol_id else "❌ No definido"),
-            ("Duración",       f"{self.duracion}d" if self.duracion else "Permanente"),
-        ]
-        return "\n".join(f"**{k}:** {v}" for k, v in campos)
-
-    def listo(self):
-        return self.nombre and self.descripcion and self.precio is not None
-
-
-# ── MODALES ITEM NEW ───────────────────────────────────
-
-class ModalNombre(discord.ui.Modal, title="Nombre del Item"):
-    nombre = discord.ui.TextInput(label="Nombre", placeholder="Ej: Estrella Dorada", max_length=50)
-
-    def __init__(self, state, view):
-        super().__init__()
-        self.state = state
-        self._view = view
-
-    async def on_submit(self, interaction):
-        self.state.nombre = self.nombre.value.strip()
-        await interaction.response.edit_message(content=self.state.resumen(), view=self._view)
-
-
-class ModalDescripcion(discord.ui.Modal, title="Descripción Corta"):
-    descripcion = discord.ui.TextInput(label="Descripción corta", placeholder="Visible en !tienda", max_length=100)
-
-    def __init__(self, state, view):
-        super().__init__()
-        self.state = state
-        self._view = view
-
-    async def on_submit(self, interaction):
-        self.state.descripcion = self.descripcion.value.strip()
-        await interaction.response.edit_message(content=self.state.resumen(), view=self._view)
-
-
-class ModalPrecio(discord.ui.Modal, title="Precio del Item"):
-    precio = discord.ui.TextInput(label="Precio", placeholder="Ej: 500")
-    cantidad = discord.ui.TextInput(label="Cantidad al inventario", placeholder="Ej: 1", default="1")
-
-    def __init__(self, state, view):
-        super().__init__()
-        self.state = state
-        self._view = view
-
-    async def on_submit(self, interaction):
-        try:
-            self.state.precio = int(self.precio.value.strip())
-            self.state.cantidad = int(self.cantidad.value.strip()) if self.cantidad.value.strip().isdigit() else 1
-        except ValueError:
-            return await interaction.response.send_message("❌ Precio inválido.", ephemeral=True)
-        await interaction.response.edit_message(content=self.state.resumen(), view=self._view)
-
-
-class ModalDescLarga(discord.ui.Modal, title="Descripción Larga"):
-    descripcion_larga = discord.ui.TextInput(
-        label="Descripción larga", placeholder="Detalle completo visible en !info",
-        style=discord.TextStyle.paragraph, max_length=1000, required=False
-    )
-
-    def __init__(self, state, view):
-        super().__init__()
-        self.state = state
-        self._view = view
-
-    async def on_submit(self, interaction):
-        self.state.descripcion_larga = self.descripcion_larga.value.strip()
-        await interaction.response.edit_message(content=self.state.resumen(), view=self._view)
-
-
-class ModalStock(discord.ui.Modal, title="Stock del Item"):
-    stock = discord.ui.TextInput(label="Stock (-1=ilimitado, 0=agotado, n=cantidad)", placeholder="Ej: 10 o -1")
-
-    def __init__(self, state, view):
-        super().__init__()
-        self.state = state
-        self._view = view
-
-    async def on_submit(self, interaction):
-        try:
-            self.state.stock = int(self.stock.value.strip())
-        except ValueError:
-            return await interaction.response.send_message("❌ Stock inválido.", ephemeral=True)
-        await interaction.response.edit_message(content=self.state.resumen(), view=self._view)
-
-
-class ModalIcono(discord.ui.Modal, title="Ícono del Item"):
-    icono = discord.ui.TextInput(label="ID del emoji", placeholder="Ej: <:nombre:123456789>", required=False)
-
-    def __init__(self, state, view):
-        super().__init__()
-        self.state = state
-        self._view = view
-
-    async def on_submit(self, interaction):
-        self.state.icono = self.icono.value.strip()
-        await interaction.response.edit_message(content=self.state.resumen(), view=self._view)
-
-
-class ModalUsable(discord.ui.Modal, title="¿Item Usable?"):
-    usable = discord.ui.TextInput(label="¿Usable? (si/no)", placeholder="si o no")
-    mensaje_uso = discord.ui.TextInput(label="Mensaje al usar", placeholder="Ej: ¡Usaste una estrella!", required=False)
-
-    def __init__(self, state, view):
-        super().__init__()
-        self.state = state
-        self._view = view
-
-    async def on_submit(self, interaction):
-        self.state.utilizable = self.usable.value.lower().strip() == "si"
-        self.state.mensaje_uso = self.mensaje_uso.value.strip()
-        await interaction.response.edit_message(content=self.state.resumen(), view=self._view)
-
-
-class ModalCargo(discord.ui.Modal, title="Cargo (Rol)"):
-    rol_id = discord.ui.TextInput(label="ID del Rol", placeholder="Ej: 123456789012345678", required=False)
-    duracion = discord.ui.TextInput(label="Duración en días (0=permanente)", placeholder="Ej: 30 o 0", default="0")
-
-    def __init__(self, state, view):
-        super().__init__()
-        self.state = state
-        self._view = view
-
-    async def on_submit(self, interaction):
-        import re
-        rid = self.rol_id.value.strip()
-        match = re.search(r'\d+', rid)
-        self.state.rol_id = int(match.group()) if match else None
-        try:
-            self.state.duracion = int(self.duracion.value.strip())
-        except ValueError:
-            self.state.duracion = 0
-        await interaction.response.edit_message(content=self.state.resumen(), view=self._view)
-
-
-# ── VISTA ITEM NEW ─────────────────────────────────────
-
-class ItemNewView(discord.ui.View):
-    def __init__(self, author_id):
-        super().__init__(timeout=300)
-        self.author_id = author_id
-        self.state = ItemState()
-
-    async def interaction_check(self, interaction):
-        if interaction.user.id != self.author_id:
-            await interaction.response.send_message("❌ Este panel no fue generado por ti.", ephemeral=True)
-            return False
-        return True
-
-    @discord.ui.button(label="✏️ Nombre", style=discord.ButtonStyle.secondary, row=0)
-    async def btn_nombre(self, interaction, button):
-        await interaction.response.send_modal(ModalNombre(self.state, self))
-
-    @discord.ui.button(label="📋 Descripción", style=discord.ButtonStyle.secondary, row=0)
-    async def btn_descripcion(self, interaction, button):
-        await interaction.response.send_modal(ModalDescripcion(self.state, self))
-
-    @discord.ui.button(label="💰 Precio", style=discord.ButtonStyle.secondary, row=0)
-    async def btn_precio(self, interaction, button):
-        await interaction.response.send_modal(ModalPrecio(self.state, self))
-
-    @discord.ui.button(label="📖 Desc. Larga", style=discord.ButtonStyle.secondary, row=1)
-    async def btn_desc_larga(self, interaction, button):
-        await interaction.response.send_modal(ModalDescLarga(self.state, self))
-
-    @discord.ui.button(label="📦 Stock", style=discord.ButtonStyle.secondary, row=1)
-    async def btn_stock(self, interaction, button):
-        await interaction.response.send_modal(ModalStock(self.state, self))
-
-    @discord.ui.button(label="🖼️ Ícono", style=discord.ButtonStyle.secondary, row=1)
-    async def btn_icono(self, interaction, button):
-        await interaction.response.send_modal(ModalIcono(self.state, self))
-
-    @discord.ui.button(label="🎯 Usable", style=discord.ButtonStyle.secondary, row=2)
-    async def btn_usable(self, interaction, button):
-        await interaction.response.send_modal(ModalUsable(self.state, self))
-
-    @discord.ui.button(label="👤 Cargo", style=discord.ButtonStyle.secondary, row=2)
-    async def btn_cargo(self, interaction, button):
-        await interaction.response.send_modal(ModalCargo(self.state, self))
-
-    @discord.ui.button(label="✅ Agregar Item", style=discord.ButtonStyle.success, row=3)
-    async def btn_agregar(self, interaction, button):
-        if not self.state.listo():
-            return await interaction.response.send_message(
-                "❌ Faltan campos obligatorios: **Nombre**, **Descripción** y **Precio**.", ephemeral=True
-            )
-        existing = await get_item_by_name(self.state.nombre)
-        if existing:
-            return await interaction.response.send_message(
-                f"❌ Ya existe un item llamado **{self.state.nombre}**.", ephemeral=True
-            )
-        await add_item(
-            nombre=self.state.nombre,
-            descripcion=self.state.descripcion,
-            descripcion_larga=self.state.descripcion_larga or "",
-            precio=self.state.precio,
-            cantidad=self.state.cantidad,
-            stock=self.state.stock,
-            icono=self.state.icono,
-            utilizable=self.state.utilizable,
-            mensaje_uso=self.state.mensaje_uso,
-            rol_id=self.state.rol_id,
-            duracion=self.state.duracion
-        )
-        self.stop()
-        await interaction.response.edit_message(
-            content=f"✅ Item **{self.state.nombre}** agregado a la tienda exitosamente.", view=None
-        )
-
-    @discord.ui.button(label="🚫 Cancelar", style=discord.ButtonStyle.danger, row=3)
-    async def btn_cancelar(self, interaction, button):
-        self.stop()
-        await interaction.response.edit_message(content="❌ Creación de item cancelada.", view=None)
-
 
 # ── MODALES EDITAR/ELIMINAR ────────────────────────────
 
@@ -404,10 +162,6 @@ class EditItemModal(discord.ui.Modal, title="Editar Item"):
         stock = int(self.nuevo_stock.value.strip()) if self.nuevo_stock.value.strip().lstrip("-").isdigit() else None
         await edit_item(item["id"], nombre=nombre, precio=precio, stock=stock)
         await interaction.response.send_message(f"✅ Item actualizado.", ephemeral=True)
-
-
-class DeleteItemModal(discord.ui.Modal, title="Eliminar Item"):
-    nombre = discord.ui.TextInput(label="Nombre del item a eliminar")
 
     async def on_submit(self, interaction):
         item = await get_item_by_name(self.nombre.value.strip())
@@ -603,11 +357,85 @@ class Staff(commands.Cog):
         estado = "✅ activada" if rr_config["activa"] else "🔧 desactivada"
         await interaction.response.send_message(f"La Ruleta Rusa ha sido **{estado}**.", ephemeral=False)
 
+    # ── ADD ITEM (nuevo flujo: campos de texto directos) ───
     @app_commands.command(name="add_item", description="Agrega un nuevo item a la tienda")
+    @app_commands.describe(
+        nombre="Nombre del item",
+        desc="Descripción corta (visible en !tienda)",
+        precio="Precio en PurpleCoins",
+        stock="Stock (-1 = ilimitado)",
+        icono="Emoji del servidor o unicode. Ej: <:nombre:123456> o 🌟",
+        desc_larga="Descripción larga visible en !info. Opcional.",
+        rol="Rol que se otorga al usar el item. Opcional.",
+        duracion_rol="Duración del rol: ej 30m, 12h, 7d. Vacío = permanente. Opcional."
+    )
     @is_staff()
-    async def item_new(self, interaction):
-        view = ItemNewView(interaction.user.id)
-        await interaction.response.send_message(content=view.state.resumen(), view=view, ephemeral=True)
+    async def item_new(self, interaction,
+                       nombre: str,
+                       desc: str,
+                       precio: int,
+                       stock: int,
+                       icono: str,
+                       desc_larga: str = "",
+                       rol: discord.Role = None,
+                       duracion_rol: str = ""):
+
+        if precio <= 0:
+            return await interaction.response.send_message("❌ El precio debe ser mayor a 0.", ephemeral=True)
+
+        existing = await get_item_by_name(nombre.strip())
+        if existing:
+            return await interaction.response.send_message(
+                f"❌ Ya existe un item llamado **{nombre}**.", ephemeral=True
+            )
+
+        # Parsear duración
+        duracion_segundos = 0
+        if duracion_rol:
+            try:
+                val = duracion_rol.strip().lower()
+                if val.endswith("d"):
+                    duracion_segundos = int(val[:-1]) * 86400
+                elif val.endswith("h"):
+                    duracion_segundos = int(val[:-1]) * 3600
+                elif val.endswith("m"):
+                    duracion_segundos = int(val[:-1]) * 60
+                else:
+                    return await interaction.response.send_message(
+                        "❌ Formato de duración inválido. Usa: 30m, 12h, 7d", ephemeral=True
+                    )
+            except ValueError:
+                return await interaction.response.send_message(
+                    "❌ Duración inválida.", ephemeral=True
+                )
+
+        rol_id = rol.id if rol else None
+
+        await add_item(
+            nombre=nombre.strip(),
+            descripcion=desc.strip(),
+            descripcion_larga=desc_larga.strip(),
+            precio=precio,
+            cantidad=1,
+            stock=stock,
+            icono=icono.strip(),
+            utilizable=True,
+            mensaje_uso="",
+            rol_id=rol_id,
+            duracion=duracion_segundos
+        )
+
+        dur_txt = duracion_rol if duracion_rol else "Permanente"
+        rol_txt = rol.mention if rol else "Ninguno"
+        icono_display = icono
+
+        await interaction.response.send_message(
+            f"✅ Item **{icono_display} {nombre}** añadido a la tienda.\n"
+            f"• Precio: **{precio}** {COIN}\n"
+            f"• Stock: **{'∞' if stock == -1 else stock}**\n"
+            f"• Rol: {rol_txt}  •  Duración: {dur_txt}",
+            ephemeral=False
+        )
 
     @app_commands.command(name="editar_item", description="Edita un item de la tienda")
     @is_staff()
@@ -615,9 +443,29 @@ class Staff(commands.Cog):
         await interaction.response.send_modal(EditItemModal())
 
     @app_commands.command(name="eliminar_item", description="Elimina un item de la tienda")
+    @app_commands.describe(item="Selecciona el item a eliminar")
     @is_staff()
-    async def eliminar_item(self, interaction):
-        await interaction.response.send_modal(DeleteItemModal())
+    async def eliminar_item(self, interaction, item: str):
+        found = await get_item_by_name(item.strip())
+        if not found:
+            return await interaction.response.send_message(
+                f"❌ Item **{item}** no encontrado.", ephemeral=True
+            )
+        await delete_item(found["id"])
+        icono = found["icono"] if found["icono"] else "🔹"
+        await interaction.response.send_message(
+            f"✅ Item **{icono} {found['nombre']}** eliminado de la tienda.",
+            ephemeral=False
+        )
+
+    @eliminar_item.autocomplete("item")
+    async def eliminar_item_autocomplete(self, interaction: discord.Interaction, current: str):
+        items = cache.get_items_cache()
+        return [
+            app_commands.Choice(name=f"{i['icono']} {i['nombre']}" if i['icono'] else i['nombre'], value=i['nombre'])
+            for i in items
+            if current.lower() in i['nombre'].lower()
+        ][:25]
 
     @app_commands.command(name="stock_add", description="Añade stock a un item de la tienda")
     @app_commands.describe(nombre="Nombre exacto del item", cantidad="Cantidad de stock a añadir")
@@ -781,6 +629,7 @@ class Staff(commands.Cog):
             return await interaction.response.send_message(
                 "❌ Formato inválido. Usa ejemplos como: 30s, 5m, 1h", ephemeral=True
             )
+
         if seconds <= 0:
             return await interaction.response.send_message("❌ El cooldown debe ser mayor a 0.", ephemeral=True)
 
