@@ -48,6 +48,20 @@ class ConfirmBuyView(discord.ui.View):
                     content=f"❌ **{item_fresh['nombre']}** sin stock.", view=self
                 )
 
+            # ── Validar límite por usuario ─────────────
+            limite = item_fresh.get("limite_por_usuario", 0)
+            if limite and limite > 0:
+                inv = cache.get_inventory_cache(interaction.user.id)
+                if inv is None:
+                    from core.database import get_inventory
+                    inv = await get_inventory(interaction.user.id)
+                poseidos = next((i["cantidad"] for i in inv if i["id"] == item_fresh["id"]), 0)
+                if poseidos >= limite:
+                    return await interaction.edit_original_response(
+                        content=f"❌ Ya alcanzaste el límite de **{limite}** unidad(es) de **{item_fresh['nombre']}**.",
+                        view=self
+                    )
+
             cantidad_compra = item_fresh.get("cantidad", 1)
             total = item_fresh["precio"]
             user = await get_user(interaction.user.id)
