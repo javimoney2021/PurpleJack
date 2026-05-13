@@ -363,11 +363,12 @@ class Staff(commands.Cog):
         nombre="Nombre del item",
         desc="Descripción corta (visible en !tienda)",
         precio="Precio en PurpleCoins",
-        stock="Stock (-1 = ilimitado)",
+        stock="Stock total (-1 = ilimitado)",
         icono="Emoji del servidor o unicode. Ej: <:nombre:123456> o 🌟",
         desc_larga="Descripción larga visible en !info. Opcional.",
         rol="Rol que se otorga al usar el item. Opcional.",
-        duracion_rol="Duración del rol: ej 30m, 12h, 7d. Vacío = permanente. Opcional."
+        duracion_rol="Duración del rol: ej 30m, 12h, 7d. Vacío = permanente. Opcional.",
+        cantid_por_user="Límite de compras por usuario. Vacío = ilimitado. Opcional."
     )
     @is_staff()
     async def item_new(self, interaction,
@@ -375,10 +376,11 @@ class Staff(commands.Cog):
                        desc: str,
                        precio: int,
                        stock: int,
-                       icono: str,
+                       icono: str = "",
                        desc_larga: str = "",
                        rol: discord.Role = None,
-                       duracion_rol: str = ""):
+                       duracion_rol: str = "",
+                       cantid_por_user: int = 0):
 
         if precio <= 0:
             return await interaction.response.send_message("❌ El precio debe ser mayor a 0.", ephemeral=True)
@@ -422,17 +424,20 @@ class Staff(commands.Cog):
             utilizable=True,
             mensaje_uso="",
             rol_id=rol_id,
-            duracion=duracion_segundos
+            duracion=duracion_segundos,
+            limite_por_usuario=cantid_por_user if cantid_por_user > 0 else 0
         )
 
         dur_txt = duracion_rol if duracion_rol else "Permanente"
         rol_txt = rol.mention if rol else "Ninguno"
-        icono_display = icono
+        icono_display = icono if icono else "🔹"
+        limite_txt = str(cantid_por_user) if cantid_por_user > 0 else "∞"
 
         await interaction.response.send_message(
             f"✅ Item **{icono_display} {nombre}** añadido a la tienda.\n"
             f"• Precio: **{precio}** {COIN}\n"
-            f"• Stock: **{'∞' if stock == -1 else stock}**\n"
+            f"• Stock total: **{'∞' if stock == -1 else stock}**\n"
+            f"• Límite por usuario: **{limite_txt}**\n"
             f"• Rol: {rol_txt}  •  Duración: {dur_txt}",
             ephemeral=False
         )
@@ -462,7 +467,7 @@ class Staff(commands.Cog):
     async def eliminar_item_autocomplete(self, interaction: discord.Interaction, current: str):
         items = cache.get_items_cache()
         return [
-            app_commands.Choice(name=f"{i['icono']} {i['nombre']}" if i['icono'] else i['nombre'], value=i['nombre'])
+            app_commands.Choice(name=i['nombre'], value=i['nombre'])
             for i in items
             if current.lower() in i['nombre'].lower()
         ][:25]

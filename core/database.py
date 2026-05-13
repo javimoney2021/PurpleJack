@@ -33,15 +33,17 @@ async def init_db():
             utilizable BOOLEAN DEFAULT FALSE,
             mensaje_uso TEXT DEFAULT '',
             rol_id BIGINT DEFAULT NULL,
-            duracion INTEGER DEFAULT 0
+            duracion INTEGER DEFAULT 0,
+            limite_por_usuario INTEGER DEFAULT 0
         )
         """)
 
         for col, definition in [
-            ("descripcion",       "TEXT DEFAULT ''"),
-            ("descripcion_larga", "TEXT DEFAULT ''"),
-            ("cantidad",          "INTEGER DEFAULT 1"),
-            ("duracion",          "INTEGER DEFAULT 0"),
+            ("descripcion",          "TEXT DEFAULT ''"),
+            ("descripcion_larga",    "TEXT DEFAULT ''"),
+            ("cantidad",             "INTEGER DEFAULT 1"),
+            ("duracion",             "INTEGER DEFAULT 0"),
+            ("limite_por_usuario",   "INTEGER DEFAULT 0"),
         ]:
             await conn.execute(
                 f"ALTER TABLE items ADD COLUMN IF NOT EXISTS {col} {definition}"
@@ -152,15 +154,17 @@ async def get_item_by_name(nombre):
     return next((i for i in items if i["nombre"].lower() == nombre), None)
 
 async def add_item(nombre, descripcion, descripcion_larga, precio, cantidad,
-                   stock, icono, utilizable, mensaje_uso, rol_id, duracion):
-    async with pool.acquire() as conn:
-        await conn.execute("""
+                   stock, icono, utilizable, mensaje_uso, rol_id, duracion,
+                   limite_por_usuario=0):
+        ...
             INSERT INTO items
                 (nombre, descripcion, descripcion_larga, precio, cantidad,
-                 stock, icono, utilizable, mensaje_uso, rol_id, duracion)
-            VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)
+                 stock, icono, utilizable, mensaje_uso, rol_id, duracion,
+                 limite_por_usuario)
+                VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12)
         """, nombre, descripcion, descripcion_larga, precio, cantidad,
-             stock, icono, utilizable, mensaje_uso, rol_id, duracion)
+             stock, icono, utilizable, mensaje_uso, rol_id, duracion,
+             limite_por_usuario)
     await load_items_to_cache()
 
 async def edit_item(item_id, nombre=None, precio=None, stock=None):
