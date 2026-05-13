@@ -69,7 +69,7 @@ def get_rob_protection(user_id):
     return _rob_protection.get(user_id, 0)
 
 def set_rob_protection(user_id):
-    _rob_protection[user_id] = time.time() + 900  # 15 min fijo
+    _rob_protection[user_id] = time.time() + 600  # 10 min fijo
 
 def clear_rob_cooldowns_cache():
     _rob_cooldowns.clear()

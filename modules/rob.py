@@ -49,8 +49,9 @@ class Rob(commands.Cog):
         protection_ts = get_rob_protection(target_id)
         if protection_ts > now:
             remaining = int(protection_ts - now)
-            return await ctx.send(
-                f"🛡️ {ctx.author.mention} Este usuario fue recientemente atacado por la inseguridad, ¿un poquito de caridad humana no? Protección restante: **{remaining // 3600}h {(remaining % 3600) // 60}m {remaining % 60}s**."
+            author_nick = ctx.author.nick or ctx.author.display_name
+            return await ctx.message.reply(
+                f"🛡️ **{author_nick}** Esta persona fue recientemente atacada por la inseguridad, ¿un poquito de caridad humana no? Protección restante: **{remaining // 60}m {remaining % 60}s**."
             )
 
         author_user = await get_user(author_id)
