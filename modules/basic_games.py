@@ -81,7 +81,7 @@ class BasicGames(commands.Cog):
             game_config["crime"]["max"]
         )
 
-        success = random.random() <= 0.7
+        success = random.random() <= game_config["crime"]["ganar_prob"]
         nick = ctx.author.nick or ctx.author.display_name
 
         if success:

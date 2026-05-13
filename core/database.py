@@ -342,7 +342,9 @@ async def create_game_config_table():
             work_cooldown INTEGER,
             crime_min INTEGER,
             crime_max INTEGER,
-            crime_cooldown INTEGER
+            crime_cooldown INTEGER,
+            crime_ganar_prob DOUBLE PRECISION DEFAULT 1.0,
+            crime_perder_prob DOUBLE PRECISION DEFAULT 0.0
         )
         """)
         exists = await conn.fetchrow("SELECT * FROM game_config LIMIT 1")
@@ -350,15 +352,18 @@ async def create_game_config_table():
             await conn.execute("""
             INSERT INTO game_config (
                 work_min, work_max, work_cooldown,
-                crime_min, crime_max, crime_cooldown
-            ) VALUES ($1, $2, $3, $4, $5, $6)
+                crime_min, crime_max, crime_cooldown,
+                crime_ganar_prob, crime_perder_prob
+            ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
             """,
             game_config["work"]["min"],
             game_config["work"]["max"],
             game_config["work"]["cooldown"],
             game_config["crime"]["min"],
             game_config["crime"]["max"],
-            game_config["crime"]["cooldown"]
+            game_config["crime"]["cooldown"],
+            game_config["crime"]["ganar_prob"],
+            game_config["crime"]["perder_prob"]
         )
 
         await conn.execute("""
@@ -438,9 +443,11 @@ async def load_game_config():
         game_config["work"]["min"]      = row["work_min"]
         game_config["work"]["max"]      = row["work_max"]
         game_config["work"]["cooldown"] = row["work_cooldown"]
-        game_config["crime"]["min"]     = row["crime_min"]
-        game_config["crime"]["max"]     = row["crime_max"]
-        game_config["crime"]["cooldown"]= row["crime_cooldown"]
+        game_config["crime"]["min"]        = row["crime_min"]
+        game_config["crime"]["max"]        = row["crime_max"]
+        game_config["crime"]["cooldown"]   = row["crime_cooldown"]
+        game_config["crime"]["ganar_prob"] = row["crime_ganar_prob"]
+        game_config["crime"]["perder_prob"]= row["crime_perder_prob"]
 
         rr_row = await conn.fetchrow("SELECT * FROM rr_config LIMIT 1")
         if rr_row:
@@ -467,14 +474,17 @@ async def save_game_config():
         await conn.execute("""
         UPDATE game_config SET
             work_min=$1, work_max=$2, work_cooldown=$3,
-            crime_min=$4, crime_max=$5, crime_cooldown=$6
+            crime_min=$4, crime_max=$5, crime_cooldown=$6,
+            crime_ganar_prob=$7, crime_perder_prob=$8
         """,
         game_config["work"]["min"],
         game_config["work"]["max"],
         game_config["work"]["cooldown"],
         game_config["crime"]["min"],
         game_config["crime"]["max"],
-        game_config["crime"]["cooldown"]
+        game_config["crime"]["cooldown"],
+        game_config["crime"]["ganar_prob"],
+        game_config["crime"]["perder_prob"]
         )
 
 async def save_rr_config():
