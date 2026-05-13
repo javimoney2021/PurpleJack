@@ -139,7 +139,7 @@ class Economy(commands.Cog):
                     minutos = int(round(horas * 60))
                     tiempo = f"{minutos} minuto" if minutos == 1 else f"{minutos} minutos"
                 lineas_collect.append(
-                    f"<@&{rol_id}>: **{cantidad}** {COIN} Cada {tiempo}"
+                    f"<@&{rol_id}>: **{cantidad}** {COIN}"
                 )
             embed.add_field(
                 name="**Cargos con Collect Activo**",
