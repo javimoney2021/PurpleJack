@@ -58,7 +58,7 @@ class ConfirmBuyView(discord.ui.View):
                 poseidos = next((i["cantidad"] for i in inv if i["id"] == item_fresh["id"]), 0)
                 if poseidos >= limite:
                     return await interaction.edit_original_response(
-                        content=f"❌ Ya alcanzaste el límite de **{limite}** unidad(es) de **{item_fresh['nombre']}**.",
+                        content=f"🫤 Has alcanzado el limite de compra de **{limite}** unidad/es de **{item_fresh['nombre']}** Por usuario.",
                         view=self
                     )
 
