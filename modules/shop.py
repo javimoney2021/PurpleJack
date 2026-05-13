@@ -423,6 +423,7 @@ class Shop(commands.Cog):
         items = await get_all_items()
         if not items:
             return await ctx.send("🛒 La tienda está vacía por ahora.")
+        items = sorted(items, key=lambda i: i["precio"])
 
         import asyncio
         view = TiendaLayout(items, ctx.author.id, self.bot)
