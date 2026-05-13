@@ -145,6 +145,8 @@ class Roulette(commands.Cog):
         else:
             gano = espacio == resultado
 
+        color_emoji = "⚫" if color_resultado == "black" else "🔴" if color_resultado == "red" else "🟢"
+
         if gano:
             ganancia = apuesta * (multiplicador - 1)
 
@@ -153,7 +155,7 @@ class Roulette(commands.Cog):
             embed_resultado = discord.Embed(
                 title="🎰 Resultado de la Ruleta",
                 description=(
-                    f"⚫🔴 La bola cayó en: "
+                    f"{color_emoji} La bola cayó en: "
                     f"**{color_resultado} {resultado}**!\n\n"
                     f"🎉 **¡Ganaste!** {ctx.author.mention}\n"
                     f"Recibes **{ganancia}** "
@@ -168,17 +170,13 @@ class Roulette(commands.Cog):
             embed_resultado = discord.Embed(
                 title="🎰 Resultado de la Ruleta",
                 description=(
-                    f"⚫🔴 La bola cayó en: "
+                    f"{color_emoji} La bola cayó en: "
                     f"**{color_resultado} {resultado}**!\n\n"
                     f"💸 **Perdiste** {ctx.author.mention}\n"
                     f"Pierdes **{apuesta}** {COIN}."
                 ),
                 color=discord.Color.red()
             )
-
-        embed_resultado.set_thumbnail(
-            url=ctx.author.display_avatar.url
-        )
 
         await ctx.send(embed=embed_resultado)
 

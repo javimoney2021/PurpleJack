@@ -214,6 +214,30 @@ class Economy(commands.Cog):
         )
         embed.set_footer(text="Usa los comandos de economía para crecer en la nave.")
         await interaction.response.send_message(embed=embed, ephemeral=True, delete_after=25)
+        
+        @commands.command(name="prob")
+    async def probabilidades(self, ctx):
+        crime_exito = int(game_config["crime"]["ganar_prob"] * 100)
+        crime_fallo = int(game_config["crime"]["perder_prob"] * 100)
+        rob_exito = int(rob_config["exito_prob"] * 100)
+        rob_fallo = int(rob_config["fallo_prob"] * 100)
+        rr_exito = int(rr_config["ganar_prob"] * 100)
+        rr_fallo = int(rr_config["perder_prob"] * 100)
+
+        embed = discord.Embed(
+            title="🍀 Probabilidades Actuales",
+            color=discord.Color.purple()
+        )
+        embed.add_field(
+            name="",
+            value=(
+                f"**!crime** — Éxito: `{crime_exito}%` · Fallo: `{crime_fallo}%`\n"
+                f"**!rob** — Éxito: `{rob_exito}%` · Fallo: `{rob_fallo}%`\n"
+                f"**!rr** — Éxito: `{rr_exito}%` · Fallo: `{rr_fallo}%` *(por disparo)*"
+            ),
+            inline=False
+        )
+        await ctx.send(embed=embed, delete_after=25)
 
 async def setup(bot):
     await bot.add_cog(Economy(bot))
