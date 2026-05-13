@@ -74,7 +74,7 @@ class BasicGames(commands.Cog):
         if now - last < cooldown:
             remaining = cooldown - (now - last)
             nick = ctx.author.nick or ctx.author.display_name
-            return await ctx.message.reply(f"**{nick}** ⏳ Podrás volver a cometer un crimen <t:{int(now + remaining)}:R>.")
+            return await ctx.message.reply(f"**{nick}** ⏳ Podrás volver a cometer un crimen <t:{int(now + remaining)}:R>.", delete_after=30)
 
         amount = random.randint(
             game_config["crime"]["min"],
