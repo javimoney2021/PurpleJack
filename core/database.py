@@ -186,6 +186,13 @@ async def reduce_stock(item_id):
         )
     await load_items_to_cache()
 
+async def add_stock(item_id, cantidad):
+    async with pool.acquire() as conn:
+        await conn.execute(
+            "UPDATE items SET stock = stock + $1 WHERE id=$2", cantidad, item_id
+        )
+    await load_items_to_cache()
+
 
 # ── INVENTARIO ─────────────────────────────────────────
 

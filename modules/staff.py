@@ -5,7 +5,7 @@ from discord import app_commands
 from core.database import (
     get_user, update_balance, update_bank, pool,
     add_item, edit_item, delete_item,
-    get_item_by_name, load_items_to_cache,
+    get_item_by_name, load_items_to_cache, add_stock,
     upsert_collect_config_db, delete_collect_config_db,
     save_game_config, save_rr_config, save_ruleta_config,
     save_rob_config, clear_game_cooldowns
@@ -618,6 +618,24 @@ class Staff(commands.Cog):
     @is_staff()
     async def eliminar_item(self, interaction):
         await interaction.response.send_modal(DeleteItemModal())
+
+    @app_commands.command(name="stock_add", description="Añade stock a un item de la tienda")
+    @app_commands.describe(nombre="Nombre exacto del item", cantidad="Cantidad de stock a añadir")
+    @is_staff()
+    async def stock_add(self, interaction, nombre: str, cantidad: int):
+        if cantidad <= 0:
+            return await interaction.response.send_message("❌ La cantidad debe ser mayor a 0.", ephemeral=True)
+        item = await get_item_by_name(nombre.strip())
+        if not item:
+            return await interaction.response.send_message(f"❌ Item **{nombre}** no encontrado.", ephemeral=True)
+        if item["stock"] == -1:
+            return await interaction.response.send_message(f"❌ **{item['nombre']}** tiene stock infinito, no aplica.", ephemeral=True)
+        await add_stock(item["id"], cantidad)
+        nuevo_stock = item["stock"] + cantidad
+        await interaction.response.send_message(
+            f"✅ Stock de **{item['nombre']}** actualizado: `{item['stock']}` → `{nuevo_stock}`",
+            ephemeral=False
+        )
 
     @app_commands.command(name="collect_config", description="Configura collect para un rol")
     @app_commands.describe(rol="Rol", cantidad="PurpleCoins a otorgar", cooldown="Cooldown: ej 2h o 30m")
