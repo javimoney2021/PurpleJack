@@ -678,21 +678,63 @@ class Staff(commands.Cog):
         )
 
     @app_commands.command(name="crime_edit", description="Edita configuración de !crime")
-    @app_commands.describe(minimo="Mínimo de coins", maximo="Máximo de coins", cooldown="Cooldown: ej 8h o 30m")
+    @app_commands.describe(
+        minimo="Min coins",
+        maximo="Max coins",
+        cooldown="CD: ej 8h o 30m",
+        ganar_prob="Prob. éxito en % (ej: 100 o 70). Opcional.",
+        perder_prob="Prob. fallo en % (ej: 0 o 30). Opcional."
+    )
     @is_staff()
-    async def crime_edit(self, interaction, minimo: int, maximo: int, cooldown: str):
+    async def crime_edit(self, interaction, minimo: int, maximo: int, cooldown: str,
+                         ganar_prob: float = None, perder_prob: float = None):
         try:
             seconds = self.parse_cooldown(cooldown)
         except:
             return await interaction.response.send_message(
                 "❌ Formato inválido. Usa ejemplos como: 6h o 30m", ephemeral=True
             )
+
+        def parse_prob(value):
+            if value is None:
+                return None
+            if value > 1:
+                if value > 100:
+                    raise ValueError
+                value = value / 100
+            if value < 0 or value > 1:
+                raise ValueError
+            return value
+
+        try:
+            ganar = parse_prob(ganar_prob)
+            perder = parse_prob(perder_prob)
+        except ValueError:
+            return await interaction.response.send_message(
+                "❌ Probabilidades inválidas. Usa % como 70 o fracción 0.7.", ephemeral=True
+            )
+
+        if ganar is None and perder is None:
+            ganar = game_config["crime"]["ganar_prob"]
+            perder = game_config["crime"]["perder_prob"]
+        elif ganar is None:
+            ganar = 1 - perder
+        elif perder is None:
+            perder = 1 - ganar
+
+        if abs((ganar + perder) - 1) > 0.01:
+            return await interaction.response.send_message(
+                "❌ Las probabilidades deben sumar 100%.", ephemeral=True
+            )
+
         game_config["crime"]["min"] = minimo
         game_config["crime"]["max"] = maximo
         game_config["crime"]["cooldown"] = seconds
+        game_config["crime"]["ganar_prob"] = ganar
+        game_config["crime"]["perder_prob"] = perder
         await save_game_config()
         await interaction.response.send_message(
-            f"✅ Crime actualizado:\n• Min: {minimo}\n• Max: {maximo}\n• Cooldown: {cooldown}",
+            f"✅ Crime actualizado:\n• Min: {minimo}\n• Max: {maximo}\n• CD: {cooldown}\n• Éxito: {int(ganar*100)}%\n• Fallo: {int(perder*100)}%",
             ephemeral=False
         )
 
