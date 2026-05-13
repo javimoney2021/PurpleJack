@@ -57,6 +57,12 @@ class Rob(commands.Cog):
         target_user = await get_user(target_id)
 
         # Verificar balance mínimo del objetivo
+        if target_user["balance"] < 100:
+            target_nick = target.nick or target.display_name
+            return await ctx.send(
+                f"🦋 Solo hay mariposas en la cartera de **{target_nick}**. ¿Qué le vas a robar? ¡Ve a trabajar!"
+            )
+
         if target_user["balance"] < 1000:
             await update_bank(author_id, -500)
             await update_bank(target_id, 500)
@@ -72,8 +78,8 @@ class Rob(commands.Cog):
         success = random.random() <= rob_config["exito_prob"]
 
         if success:
-            # Éxito: robar 10%-30% del balance del objetivo
-            percentage = random.uniform(0.10, 0.30)
+            # Éxito: robar 10%-50% del balance del objetivo
+            percentage = random.uniform(0.10, 0.50)
             amount = int(target_user["balance"] * percentage)
             if amount == 0:
                 amount = 1  # Mínimo 1
@@ -85,9 +91,9 @@ class Rob(commands.Cog):
                 f"💰 {ctx.author.mention} ¡Robo exitoso! Le robaste **{amount}** {COIN} a {target.mention}."
             )
         else:
-            # Fallo: perder 10%-40% del balance del author
-            percentage_penalty = random.uniform(0.10, 0.40)
-            penalty = int(author_user["balance"] * percentage_penalty)
+            # Fallo: perder 10%-20% del balance del objetivo
+            percentage_penalty = random.uniform(0.10, 0.20)
+            penalty = int(target_user["balance"] * percentage_penalty)
             if penalty == 0:
                 penalty = 1
 
