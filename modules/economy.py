@@ -216,7 +216,7 @@ class Economy(commands.Cog):
         await interaction.response.send_message(embed=embed, ephemeral=True, delete_after=25)
         
         @commands.command(name="prob")
-    async def probabilidades(self, ctx):
+        async def probabilidades(self, ctx):
         crime_exito = int(game_config["crime"]["ganar_prob"] * 100)
         crime_fallo = int(game_config["crime"]["perder_prob"] * 100)
         rob_exito = int(rob_config["exito_prob"] * 100)
