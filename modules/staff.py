@@ -682,8 +682,8 @@ class Staff(commands.Cog):
         minimo="Min coins",
         maximo="Max coins",
         cooldown="CD: ej 8h o 30m",
-        ganar_prob="Prob. éxito en % (ej: 100 o 70). Opcional.",
-        perder_prob="Prob. fallo en % (ej: 0 o 30). Opcional."
+        ganar_prob="Prob. éxito en % (ej: 100 o 70).",
+        perder_prob="Prob. fallo en % (ej: 0 o 30)."
     )
     @is_staff()
     async def crime_edit(self, interaction, minimo: int, maximo: int, cooldown: str,
@@ -748,10 +748,14 @@ class Staff(commands.Cog):
         mensaje = "Ejecuta **/rob_alternar** para activar de nuevo." if not rob_config["activa"] else "El sistema de robos ha sido reactivado."
         await interaction.response.send_message(f"El sistema de robos ha sido **{estado}**. {mensaje}", ephemeral=False)
 
-    @app_commands.command(name="rob_edit", description="Configura el cooldown de robos")
-    @app_commands.describe(cooldown="Cooldown: ej 30s, 5m, 1h")
+    @app_commands.command(name="rob_edit", description="Configura el sistema de robos")
+    @app_commands.describe(
+        cooldown="CD: ej 30s, 5m, 1h",
+        exito_prob="Prob. éxito en % (ej: 50). Opcional.",
+        fallo_prob="Prob. fallo en % (ej: 50). Opcional."
+    )
     @is_staff()
-    async def rob_edit(self, interaction, cooldown: str):
+    async def rob_edit(self, interaction, cooldown: str, exito_prob: float = None, fallo_prob: float = None):
         from core.config import rob_config
         try:
             seconds = self.parse_cooldown(cooldown)
@@ -761,11 +765,47 @@ class Staff(commands.Cog):
             )
         if seconds <= 0:
             return await interaction.response.send_message("❌ El cooldown debe ser mayor a 0.", ephemeral=True)
+
+        def parse_prob(value):
+            if value is None:
+                return None
+            if value > 1:
+                if value > 100:
+                    raise ValueError
+                value = value / 100
+            if value < 0 or value > 1:
+                raise ValueError
+            return value
+
+        try:
+            exito = parse_prob(exito_prob)
+            fallo = parse_prob(fallo_prob)
+        except ValueError:
+            return await interaction.response.send_message(
+                "❌ Probabilidades inválidas. Usa % como 50 o fracción 0.5.", ephemeral=True
+            )
+
+        if exito is None and fallo is None:
+            exito = rob_config["exito_prob"]
+            fallo = rob_config["fallo_prob"]
+        elif exito is None:
+            exito = 1 - fallo
+        elif fallo is None:
+            fallo = 1 - exito
+
+        if abs((exito + fallo) - 1) > 0.01:
+            return await interaction.response.send_message(
+                "❌ Las probabilidades deben sumar 100%.", ephemeral=True
+            )
+
         rob_config["cooldown"] = seconds
+        rob_config["exito_prob"] = exito
+        rob_config["fallo_prob"] = fallo
         await save_rob_config()
         cache.clear_rob_cooldowns_cache()
         await interaction.response.send_message(
-            f"✅ Cooldown de robos actualizado a **{cooldown}**.", ephemeral=False
+            f"✅ Rob actualizado:\n• CD: {cooldown}\n• Éxito: {int(exito*100)}%\n• Fallo: {int(fallo*100)}%",
+            ephemeral=False
         )
 
     @app_commands.command(name="anunciar", description="Envía un anuncio a un canal escogido")

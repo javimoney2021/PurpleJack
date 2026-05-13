@@ -69,7 +69,7 @@ class Rob(commands.Cog):
             )
 
         # Calcular éxito/fallo
-        success = random.choice([True, False])
+        success = random.random() <= rob_config["exito_prob"]
 
         if success:
             # Éxito: robar 10%-30% del balance del objetivo

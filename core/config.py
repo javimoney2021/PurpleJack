@@ -16,7 +16,9 @@ rr_config = {
 
 rob_config = {
     "activa": True,
-    "cooldown": 3600  # segundos, default 1 hora
+    "cooldown": 3600,  # segundos, default 1 hora
+    "exito_prob": 0.5,
+    "fallo_prob": 0.5
 }
 
 game_config = {

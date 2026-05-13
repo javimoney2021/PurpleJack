@@ -467,6 +467,8 @@ async def load_game_config():
         if rob_row:
             rob_config["activa"] = rob_row["activa"]
             rob_config["cooldown"] = rob_row["cooldown"]
+            rob_config["exito_prob"] = rob_row["exito_prob"]
+            rob_config["fallo_prob"] = rob_row["fallo_prob"]
 
 async def save_game_config():
     from core.config import game_config
@@ -518,10 +520,12 @@ async def save_rob_config():
     from core.config import rob_config
     async with pool.acquire() as conn:
         await conn.execute("""
-        UPDATE rob_config_db SET activa=$1, cooldown=$2
+        UPDATE rob_config_db SET activa=$1, cooldown=$2, exito_prob=$3, fallo_prob=$4
         """,
         rob_config["activa"],
-        rob_config["cooldown"]
+        rob_config["cooldown"],
+        rob_config["exito_prob"],
+        rob_config["fallo_prob"]
         )
 
 async def get_nave_contenido():
