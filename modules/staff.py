@@ -145,32 +145,6 @@ class NaveConfirmView(discord.ui.View):
         )
 
 
-# ── MODALES EDITAR/ELIMINAR ────────────────────────────
-
-class EditItemModal(discord.ui.Modal, title="Editar Item"):
-    nombre_actual = discord.ui.TextInput(label="Nombre actual del item")
-    nuevo_nombre = discord.ui.TextInput(label="Nuevo nombre (vacío = sin cambio)", required=False)
-    nuevo_precio = discord.ui.TextInput(label="Nuevo precio (vacío = sin cambio)", required=False)
-    nuevo_stock = discord.ui.TextInput(label="Nuevo stock (vacío = sin cambio)", required=False)
-
-    async def on_submit(self, interaction):
-        item = await get_item_by_name(self.nombre_actual.value.strip())
-        if not item:
-            return await interaction.response.send_message(f"❌ Item no encontrado.", ephemeral=True)
-        nombre = self.nuevo_nombre.value.strip() or None
-        precio = int(self.nuevo_precio.value.strip()) if self.nuevo_precio.value.strip().isdigit() else None
-        stock = int(self.nuevo_stock.value.strip()) if self.nuevo_stock.value.strip().lstrip("-").isdigit() else None
-        await edit_item(item["id"], nombre=nombre, precio=precio, stock=stock)
-        await interaction.response.send_message(f"✅ Item actualizado.", ephemeral=True)
-
-    async def on_submit(self, interaction):
-        item = await get_item_by_name(self.nombre.value.strip())
-        if not item:
-            return await interaction.response.send_message(f"❌ Item no encontrado.", ephemeral=True)
-        await delete_item(item["id"])
-        await interaction.response.send_message(f"✅ Item eliminado.", ephemeral=True)
-
-
 # ── STAFF COG ──────────────────────────────────────────
 
 class Staff(commands.Cog):
@@ -443,9 +417,58 @@ class Staff(commands.Cog):
         )
 
     @app_commands.command(name="editar_item", description="Edita un item de la tienda")
+    @app_commands.describe(
+        item="Selecciona el item a editar",
+        nuevo_nombre="Nuevo nombre. Vacío = sin cambio. Opcional.",
+        nuevo_precio="Nuevo precio. Vacío = sin cambio. Opcional.",
+        nueva_desc="Nueva descripción corta. Vacío = sin cambio. Opcional."
+    )
     @is_staff()
-    async def editar_item(self, interaction):
-        await interaction.response.send_modal(EditItemModal())
+    async def editar_item(self, interaction,
+                          item: str,
+                          nuevo_nombre: str = "",
+                          nuevo_precio: int = None,
+                          nueva_desc: str = ""):
+
+        found = await get_item_by_name(item.strip())
+        if not found:
+            return await interaction.response.send_message(
+                f"❌ Item **{item}** no encontrado.", ephemeral=True
+            )
+
+        if not any([nuevo_nombre, nuevo_precio is not None, nueva_desc]):
+            return await interaction.response.send_message(
+                "❌ Debes cambiar al menos un campo.", ephemeral=True
+            )
+
+        nombre = nuevo_nombre.strip() or None
+        precio = nuevo_precio if nuevo_precio is not None else None
+        desc = nueva_desc.strip() or None
+
+        await edit_item(found["id"], nombre=nombre, precio=precio, descripcion=desc)
+
+        cambios = []
+        if nombre:
+            cambios.append(f"• Nombre: **{found['nombre']}** → **{nombre}**")
+        if precio is not None:
+            cambios.append(f"• Precio: **{found['precio']}** → **{precio}** {COIN}")
+        if desc:
+            cambios.append(f"• Descripción: **{desc}**")
+
+        icono = found["icono"] if found["icono"] else "🔹"
+        await interaction.response.send_message(
+            f"✅ Item **{icono} {found['nombre']}** actualizado:\n" + "\n".join(cambios),
+            ephemeral=False
+        )
+
+    @editar_item.autocomplete("item")
+    async def editar_item_autocomplete(self, interaction: discord.Interaction, current: str):
+        items = cache.get_items_cache()
+        return [
+            app_commands.Choice(name=i["nombre"], value=i["nombre"])
+            for i in items
+            if current.lower() in i["nombre"].lower()
+        ][:25]
 
     @app_commands.command(name="eliminar_item", description="Elimina un item de la tienda")
     @app_commands.describe(item="Selecciona el item a eliminar")
