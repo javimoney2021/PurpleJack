@@ -5,7 +5,7 @@ from discord import app_commands
 from core.database import (
     get_user, update_balance, update_bank, pool,
     add_item, edit_item, delete_item,
-    get_item_by_name, load_items_to_cache, add_stock,
+    get_item_by_name, add_to_inventory, load_items_to_cache, add_stock,
     upsert_collect_config_db, delete_collect_config_db,
     save_game_config, save_rr_config, save_ruleta_config,
     save_rob_config, clear_game_cooldowns
@@ -502,6 +502,52 @@ class Staff(commands.Cog):
             app_commands.Choice(name=i['nombre'], value=i['nombre'])
             for i in items
             if current.lower() in i['nombre'].lower()
+        ][:25]
+
+    @app_commands.command(name="dropar_item", description="Agrega un item de la tienda al inventario de un usuario")
+    @app_commands.describe(
+        usuario="Selecciona el usuario destinatario",
+        item="Selecciona el item a dropar",
+        cantidad="Cantidad a agregar"
+    )
+    @is_staff()
+    async def dropar_item(self, interaction, usuario: discord.Member, item: str, cantidad: int):
+        if cantidad <= 0:
+            return await interaction.response.send_message(
+                "❌ La cantidad debe ser mayor a 0.", ephemeral=True
+            )
+
+        found = await get_item_by_name(item.strip())
+        if not found:
+            return await interaction.response.send_message(
+                f"❌ Item **{item}** no encontrado.", ephemeral=True
+            )
+
+        await add_to_inventory(usuario.id, found["id"], cantidad)
+        cache.add_to_inventory_cache(usuario.id, {
+            "id": found["id"],
+            "nombre": found["nombre"],
+            "icono": found["icono"] or "",
+            "utilizable": found["utilizable"],
+            "mensaje_uso": found["mensaje_uso"],
+            "rol_id": found["rol_id"],
+            "duracion": found.get("duracion", 0),
+            "cantidad": cantidad
+        })
+
+        icono = found["icono"] if found["icono"] else "🔹"
+        await interaction.response.send_message(
+            f"✅ Se han agregado {cantidad}x {icono} {found['nombre']} al inventario de {usuario.mention}.",
+            ephemeral=False
+        )
+
+    @dropar_item.autocomplete("item")
+    async def dropar_item_autocomplete(self, interaction: discord.Interaction, current: str):
+        items = cache.get_items_cache()
+        return [
+            app_commands.Choice(name=i["nombre"], value=i["nombre"])
+            for i in items
+            if current.lower() in i["nombre"].lower()
         ][:25]
 
     @app_commands.command(name="stock_add", description="Añade stock a un item de la tienda")
