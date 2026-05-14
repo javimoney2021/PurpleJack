@@ -269,5 +269,4 @@ class Duels(commands.Cog):
 
 
 async def setup(bot):
-    await bot.add_cog(Duels(bot))</content>
-<parameter name="filePath">/home/zorinhozz/Escritorio/PurpleJack/Purple Previa Code/PurplePrevio/modules/duels.py
+    await bot.add_cog(Duels(bot))
