@@ -266,6 +266,26 @@ async def remove_from_inventory(user_id, item_nombre):
     return True
 
 
+async def get_all_users_net_worth(minimum=0):
+    async with pool.acquire() as conn:
+        rows = await conn.fetch(
+            "SELECT id, balance, bank FROM users WHERE (balance + bank) >= $1",
+            minimum
+        )
+    return [dict(r) for r in rows]
+
+
+async def get_all_inventarios():
+    async with pool.acquire() as conn:
+        rows = await conn.fetch("""
+            SELECT inv.user_id, i.nombre, inv.cantidad
+            FROM inventario inv
+            JOIN items i ON inv.item_id = i.id
+            ORDER BY inv.user_id, i.nombre
+        """)
+    return [dict(r) for r in rows]
+
+
 # ── CARGOS TEMPORALES ──────────────────────────────────
 
 async def load_cargos_to_cache():

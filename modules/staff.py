@@ -1,11 +1,15 @@
 import discord
 import asyncio
+from io import BytesIO
+from math import ceil
 from discord.ext import commands
 from discord import app_commands
+from openpyxl import Workbook
 from core.database import (
     get_user, update_balance, update_bank, pool,
     add_item, edit_item, delete_item,
-    get_item_by_name, add_to_inventory, load_items_to_cache, add_stock,
+    get_item_by_name, add_to_inventory, get_all_users_net_worth,
+    get_all_inventarios, load_items_to_cache, add_stock,
     upsert_collect_config_db, delete_collect_config_db,
     save_game_config, save_rr_config, save_ruleta_config,
     save_rob_config, clear_game_cooldowns
@@ -142,6 +146,114 @@ class NaveConfirmView(discord.ui.View):
                 color=discord.Color.red()
             ),
             view=self
+        )
+
+
+class SaldosPaginationView(discord.ui.View):
+    def __init__(self, author_id, users):
+        super().__init__(timeout=120)
+        self.author_id = author_id
+        self.users = sorted(
+            users,
+            key=lambda u: u["balance"] + u["bank"],
+            reverse=True
+        )
+        self.page = 0
+
+    def get_embed(self):
+        total_items = len(self.users)
+        total_pages = max(1, ceil(total_items / 10))
+        start = self.page * 10
+        end = start + 10
+        page_users = self.users[start:end]
+
+        embed = discord.Embed(
+            title="📊 Saldos Netos",
+            color=discord.Color.gold()
+        )
+
+        if not page_users:
+            embed.description = "No hay usuarios con neto ≥ 100 Purple Coins."
+        else:
+            embed.description = "\n".join(
+                f"**{idx}.** <@{user['id']}> — **{user['balance'] + user['bank']}** {COIN}"
+                for idx, user in enumerate(page_users, start=start + 1)
+            )
+
+        embed.set_footer(text=f"Página {self.page + 1}/{total_pages}")
+        return embed
+
+    @discord.ui.button(label="Anterior", style=discord.ButtonStyle.secondary)
+    async def anterior(self, interaction: discord.Interaction, button: discord.ui.Button):
+        if interaction.user.id != self.author_id:
+            return await interaction.response.send_message("❌ Solo el creador puede usar estos botones.", ephemeral=True)
+        if self.page > 0:
+            self.page -= 1
+            await interaction.response.edit_message(embed=self.get_embed(), view=self)
+        else:
+            await interaction.response.send_message("📌 Ya estás en la primera página.", ephemeral=True)
+
+    @discord.ui.button(label="Siguiente", style=discord.ButtonStyle.secondary)
+    async def siguiente(self, interaction: discord.Interaction, button: discord.ui.Button):
+        if interaction.user.id != self.author_id:
+            return await interaction.response.send_message("❌ Solo el creador puede usar estos botones.", ephemeral=True)
+        total_pages = max(1, ceil(len(self.users) / 10))
+        if self.page < total_pages - 1:
+            self.page += 1
+            await interaction.response.edit_message(embed=self.get_embed(), view=self)
+        else:
+            await interaction.response.send_message("📌 Ya estás en la última página.", ephemeral=True)
+
+
+class EconomiaView(discord.ui.View):
+    def __init__(self, author_id):
+        super().__init__(timeout=180)
+        self.author_id = author_id
+
+    @discord.ui.button(label="Saldos Netos", style=discord.ButtonStyle.primary)
+    async def saldos_netos(self, interaction: discord.Interaction, button: discord.ui.Button):
+        if interaction.user.id != self.author_id:
+            return await interaction.response.send_message("❌ Solo el creador puede usar estos botones.", ephemeral=True)
+
+        await interaction.response.defer()
+        users = await get_all_users_net_worth(100)
+        view = SaldosPaginationView(self.author_id, users)
+        await interaction.edit_original_response(content=None, embed=view.get_embed(), view=view)
+
+    @discord.ui.button(label="Inventarios", style=discord.ButtonStyle.success)
+    async def inventarios(self, interaction: discord.Interaction, button: discord.ui.Button):
+        if interaction.user.id != self.author_id:
+            return await interaction.response.send_message("❌ Solo el creador puede usar estos botones.", ephemeral=True)
+
+        await interaction.response.defer()
+        await asyncio.sleep(10)
+
+        rows = await get_all_inventarios()
+        wb = Workbook()
+        ws = wb.active
+        ws.title = "Inventarios"
+
+        ws.append(["Usuario", "Item", "Cantidad"])
+        current_user = None
+        user_index = 1
+
+        for row in rows:
+            if current_user != row["user_id"]:
+                current_user = row["user_id"]
+                ws.append([])
+                ws.append([f"{user_index}. <@{current_user}>", "", ""])
+                user_index += 1
+            ws.append(["", row["nombre"], row["cantidad"]])
+
+        buffer = BytesIO()
+        wb.save(buffer)
+        buffer.seek(0)
+
+        dispositivo = discord.File(buffer, filename="Inv_actual.xlsx")
+        await interaction.followup.send(
+            content="✅ Inventarios generados. Descarga el archivo a continuación.",
+            file=dispositivo,
+            ephemeral=False
         )
 
 
@@ -549,6 +661,20 @@ class Staff(commands.Cog):
             for i in items
             if current.lower() in i["nombre"].lower()
         ][:25]
+
+    @app_commands.command(name="economia", description="Examina la economía completa")
+    @is_staff()
+    async def economia(self, interaction: discord.Interaction):
+        embed = discord.Embed(
+            title="📊 Economía",
+            description="Selecciona una opción para examinar la economía de PurpleJack.",
+            color=discord.Color.dark_purple()
+        )
+        await interaction.response.send_message(
+            embed=embed,
+            view=EconomiaView(interaction.user.id),
+            ephemeral=False
+        )
 
     @app_commands.command(name="stock_add", description="Añade stock a un item de la tienda")
     @app_commands.describe(nombre="Selecciona el item", cantidad="Cantidad de stock a añadir")
