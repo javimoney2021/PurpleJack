@@ -430,36 +430,45 @@ class Staff(commands.Cog):
                           nuevo_precio: int = None,
                           nueva_desc: str = ""):
 
-        found = await get_item_by_name(item.strip())
-        if not found:
-            return await interaction.response.send_message(
-                f"❌ Item **{item}** no encontrado.", ephemeral=True
+        await interaction.response.defer()
+
+        try:
+            found = await get_item_by_name(item.strip())
+            if not found:
+                return await interaction.followup.send(
+                    f"❌ Item **{item}** no encontrado.", ephemeral=True
+                )
+
+            if not any([nuevo_nombre, nuevo_precio is not None, nueva_desc]):
+                return await interaction.followup.send(
+                    "❌ Debes cambiar al menos un campo.", ephemeral=True
+                )
+
+            nombre = nuevo_nombre.strip() or None
+            precio = nuevo_precio if nuevo_precio is not None else None
+            desc = nueva_desc.strip() or None
+
+            await edit_item(found["id"], nombre=nombre, precio=precio, descripcion=desc)
+
+            cambios = []
+            if nombre:
+                cambios.append(f"• Nombre: **{found['nombre']}** → **{nombre}**")
+            if precio is not None:
+                cambios.append(f"• Precio: **{found['precio']}** → **{precio}** {COIN}")
+            if desc:
+                cambios.append(f"• Descripción: **{desc}**")
+
+            icono = found["icono"] if found["icono"] else "🔹"
+            await interaction.followup.send(
+                f"✅ Item **{icono} {found['nombre']}** actualizado:\n" + "\n".join(cambios),
+                ephemeral=False
             )
-
-        if not any([nuevo_nombre, nuevo_precio is not None, nueva_desc]):
-            return await interaction.response.send_message(
-                "❌ Debes cambiar al menos un campo.", ephemeral=True
+        except Exception as e:
+            print(f"ERROR editar_item: {e}")
+            return await interaction.followup.send(
+                "❌ Ocurrió un error al editar el item. Intenta de nuevo más tarde.",
+                ephemeral=True
             )
-
-        nombre = nuevo_nombre.strip() or None
-        precio = nuevo_precio if nuevo_precio is not None else None
-        desc = nueva_desc.strip() or None
-
-        await edit_item(found["id"], nombre=nombre, precio=precio, descripcion=desc)
-
-        cambios = []
-        if nombre:
-            cambios.append(f"• Nombre: **{found['nombre']}** → **{nombre}**")
-        if precio is not None:
-            cambios.append(f"• Precio: **{found['precio']}** → **{precio}** {COIN}")
-        if desc:
-            cambios.append(f"• Descripción: **{desc}**")
-
-        icono = found["icono"] if found["icono"] else "🔹"
-        await interaction.response.send_message(
-            f"✅ Item **{icono} {found['nombre']}** actualizado:\n" + "\n".join(cambios),
-            ephemeral=False
-        )
 
     @editar_item.autocomplete("item")
     async def editar_item_autocomplete(self, interaction: discord.Interaction, current: str):
