@@ -513,6 +513,15 @@ class Staff(commands.Cog):
             ephemeral=False
         )
 
+        @stock_add.autocomplete("nombre")
+    async def stock_add_autocomplete(self, interaction: discord.Interaction, current: str):
+        items = cache.get_items_cache()
+        return [
+            app_commands.Choice(name=i["nombre"], value=i["nombre"])
+            for i in items
+            if current.lower() in i["nombre"].lower()
+        ][:25]
+
     @app_commands.command(name="collect_config", description="Configura collect para un rol")
     @app_commands.describe(rol="Rol", cantidad="PurpleCoins a otorgar", cooldown="Cooldown: ej 2h o 30m")
     @is_staff()
