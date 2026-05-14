@@ -41,6 +41,14 @@ def is_staff():
     return app_commands.check(predicate)
 
 
+def create_economia_menu_embed():
+    return discord.Embed(
+        title="📊 Economía",
+        description="Selecciona una opción para examinar la economía de PurpleJack.",
+        color=discord.Color.dark_purple()
+    )
+
+
 # ── MODAL RESET ────────────────────────────────────────
 
 class ResetAllModal(discord.ui.Modal, title="Confirmar Reset Global"):
@@ -204,6 +212,12 @@ class SaldosPaginationView(discord.ui.View):
         else:
             await interaction.response.send_message("📌 Ya estás en la última página.", ephemeral=True)
 
+    @discord.ui.button(label="Atrás", style=discord.ButtonStyle.danger)
+    async def atras(self, interaction: discord.Interaction, button: discord.ui.Button):
+        if interaction.user.id != self.author_id:
+            return await interaction.response.send_message("❌ Solo el creador puede usar estos botones.", ephemeral=True)
+        await interaction.response.edit_message(embed=create_economia_menu_embed(), view=EconomiaView(self.author_id))
+
 
 class EconomiaView(discord.ui.View):
     def __init__(self, author_id):
@@ -236,12 +250,34 @@ class EconomiaView(discord.ui.View):
         ws.append(["Usuario", "Item", "Cantidad"])
         current_user = None
         user_index = 1
+        user_names = {}
 
         for row in rows:
-            if current_user != row["user_id"]:
-                current_user = row["user_id"]
+            user_id = row["user_id"]
+            if user_id not in user_names:
+                member = None
+                if interaction.guild:
+                    member = interaction.guild.get_member(user_id)
+                    if member is None:
+                        try:
+                            member = await interaction.guild.fetch_member(user_id)
+                        except Exception:
+                            member = None
+                if member:
+                    user_names[user_id] = member.nick or member.name
+                else:
+                    user_obj = interaction.client.get_user(user_id)
+                    if not user_obj:
+                        try:
+                            user_obj = await interaction.client.fetch_user(user_id)
+                        except Exception:
+                            user_obj = None
+                    user_names[user_id] = user_obj.name if user_obj else f"Usuario {user_id}"
+
+            if current_user != user_id:
+                current_user = user_id
                 ws.append([])
-                ws.append([f"{user_index}. <@{current_user}>", "", ""])
+                ws.append([f"{user_index}. {user_names[user_id]}", "", ""])
                 user_index += 1
             ws.append(["", row["nombre"], row["cantidad"]])
 
