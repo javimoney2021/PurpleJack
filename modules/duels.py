@@ -59,6 +59,9 @@ class AcceptDuelView(discord.ui.View):
         await update_bank(self.retador_id, -self.monto)
         await update_bank(self.retado_id, -self.monto)
 
+        # Detener la vista de aceptación para evitar timeouts posteriores
+        self.stop()
+
         # Iniciar minijuego
         duel_view = DuelGameView(self.retador_id, self.retado_id, self.monto * 2, self.ctx.guild.id)
         embed = discord.Embed(
@@ -80,6 +83,7 @@ class AcceptDuelView(discord.ui.View):
             description=f"<@{self.retado_id}> ha rechazado el reto.",
             color=discord.Color.red()
         )
+        self.stop()
         await interaction.response.edit_message(embed=embed, view=None)
 
 
@@ -106,6 +110,8 @@ class DuelButton(discord.ui.Button):
             self.duel_view.retador_score += 1
         else:
             self.duel_view.retado_score += 1
+
+        await interaction.response.defer()
 
         # Ocultar espada inmediatamente
         await self.duel_view.hide_sword()
@@ -259,7 +265,7 @@ class Duels(commands.Cog):
 
         embed = discord.Embed(
             title="⚔️ Reto de Duelo",
-            description=f"<@{ctx.author.id}> te reta a un duelo por **{monto}** {COIN}.\n\n¿Aceptas?",
+            description=f"<@{usuario.id}> Has recibido un duelo por parte de <@{ctx.author.id}> por **{monto}** {COIN}.\n\n¿Aceptas?",
             color=discord.Color.orange()
         )
 
