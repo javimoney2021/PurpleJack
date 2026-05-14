@@ -99,7 +99,7 @@ class DuelButton(discord.ui.Button):
             return await interaction.response.send_message("❌ No participas en este duelo.", ephemeral=True)
 
         if not self.duel_view.sword_visible or self.duel_view.clicked:
-            return await interaction.response.send_message("❌ No hay espada o ya fue clickeada.", ephemeral=True)
+            return
 
         if (self.x, self.y) != self.duel_view.sword_pos:
             return await interaction.response.send_message("❌ Esa no es la espada.", ephemeral=True)
