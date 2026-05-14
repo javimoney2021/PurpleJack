@@ -496,7 +496,7 @@ class Staff(commands.Cog):
         ][:25]
 
     @app_commands.command(name="stock_add", description="Añade stock a un item de la tienda")
-    @app_commands.describe(nombre="Nombre exacto del item", cantidad="Cantidad de stock a añadir")
+    @app_commands.describe(nombre="Selecciona el item", cantidad="Cantidad de stock a añadir")
     @is_staff()
     async def stock_add(self, interaction, nombre: str, cantidad: int):
         if cantidad <= 0:
@@ -512,6 +512,15 @@ class Staff(commands.Cog):
             f"✅ Stock de **{item['nombre']}** actualizado: `{item['stock']}` → `{nuevo_stock}`",
             ephemeral=False
         )
+
+    @stock_add.autocomplete("nombre")
+    async def stock_add_autocomplete(self, interaction: discord.Interaction, current: str):
+        items = cache.get_items_cache()
+        return [
+            app_commands.Choice(name=i["nombre"], value=i["nombre"])
+            for i in items
+            if current.lower() in i["nombre"].lower()
+        ][:25]
 
     @app_commands.command(name="collect_config", description="Configura collect para un rol")
     @app_commands.describe(rol="Rol", cantidad="PurpleCoins a otorgar", cooldown="Cooldown: ej 2h o 30m")
