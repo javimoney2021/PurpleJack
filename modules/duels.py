@@ -65,6 +65,16 @@ class AcceptDuelView(discord.ui.View):
         # Detener la vista de aceptación para evitar timeouts posteriores
         self.stop()
 
+        # Auto-eliminar mensaje de reto en 3 segundos
+        async def delete_message():
+            await asyncio.sleep(3)
+            try:
+                await self.message.delete()
+            except:
+                pass
+        
+        asyncio.create_task(delete_message())
+
         # Mensaje anunciando el inicio sin embed
         await interaction.response.defer()
         msg_anuncio = await self.ctx.send(f"⚔️ La batalla entre <@{self.retador_id}> y <@{self.retado_id}> Comenzará en segundos.... ⚔️")
@@ -96,11 +106,24 @@ class AcceptDuelView(discord.ui.View):
 
         embed = discord.Embed(
             title="❌ Reto Rechazado",
-            description=f"<@{self.retado_id}> ha rechazado el reto.",
+            description=f"<@{self.retado_id}> Se siente indispuesto/a hoy y ha rechazado este duelo...",
             color=discord.Color.red()
         )
         self.stop()
         await interaction.response.edit_message(embed=embed, view=None)
+        
+        # Resetear cooldown para que otros puedan retar
+        self.ctx.command.reset_cooldown(self.ctx)
+        
+        # Auto-eliminar mensaje de reto en 3 segundos
+        async def delete_message():
+            await asyncio.sleep(3)
+            try:
+                await self.message.delete()
+            except:
+                pass
+        
+        asyncio.create_task(delete_message())
 
 
 class DuelButton(discord.ui.Button):
