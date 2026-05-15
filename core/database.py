@@ -370,7 +370,7 @@ async def save_collect_cooldowns(user_id, cobros: dict):
 # ── GAME CONFIG ────────────────────────────────────────
 
 async def create_game_config_table():
-    from core.config import game_config, rr_config, ruleta_config, rob_config
+    from core.config import game_config, rr_config, ruleta_config, rob_config, dados_config
     async with pool.acquire() as conn:
         await conn.execute("""
         CREATE TABLE IF NOT EXISTS game_config (
@@ -452,17 +452,45 @@ async def create_game_config_table():
         CREATE TABLE IF NOT EXISTS rob_config_db (
             id SERIAL PRIMARY KEY,
             activa BOOLEAN DEFAULT TRUE,
-            cooldown INTEGER
+            cooldown INTEGER,
+            exito_prob DOUBLE PRECISION DEFAULT 0.5,
+            fallo_prob DOUBLE PRECISION DEFAULT 0.5
         )
         """)
         rob_exists = await conn.fetchrow("SELECT * FROM rob_config_db LIMIT 1")
         if not rob_exists:
             await conn.execute("""
-            INSERT INTO rob_config_db (activa, cooldown)
-            VALUES ($1, $2)
+            INSERT INTO rob_config_db (activa, cooldown, exito_prob, fallo_prob)
+            VALUES ($1, $2, $3, $4)
             """,
             rob_config["activa"],
-            rob_config["cooldown"]
+            rob_config["cooldown"],
+            rob_config["exito_prob"],
+            rob_config["fallo_prob"]
+        )
+
+        await conn.execute("""
+        CREATE TABLE IF NOT EXISTS dados_config (
+            id SERIAL PRIMARY KEY,
+            max_apuesta INTEGER DEFAULT 100,
+            cooldown INTEGER DEFAULT 60,
+            exito_prob DOUBLE PRECISION DEFAULT 0.5,
+            fallo_prob DOUBLE PRECISION DEFAULT 0.5,
+            activa BOOLEAN DEFAULT TRUE
+        )
+        """)
+        dados_exists = await conn.fetchrow("SELECT * FROM dados_config LIMIT 1")
+        if not dados_exists:
+            await conn.execute("""
+            INSERT INTO dados_config (
+                max_apuesta, cooldown, exito_prob, fallo_prob, activa
+            ) VALUES ($1, $2, $3, $4, $5)
+            """,
+            dados_config["max_apuesta"],
+            dados_config["cooldown"],
+            dados_config["exito_prob"],
+            dados_config["fallo_prob"],
+            dados_config["activa"]
         )
 
         await conn.execute("""
@@ -473,7 +501,7 @@ async def create_game_config_table():
         """)
 
 async def load_game_config():
-    from core.config import game_config, rr_config, ruleta_config, rob_config
+    from core.config import game_config, rr_config, ruleta_config, rob_config, dados_config
     async with pool.acquire() as conn:
         row = await conn.fetchrow("SELECT * FROM game_config LIMIT 1")
         if not row:
@@ -507,6 +535,14 @@ async def load_game_config():
             rob_config["cooldown"] = rob_row["cooldown"]
             rob_config["exito_prob"] = rob_row["exito_prob"]
             rob_config["fallo_prob"] = rob_row["fallo_prob"]
+
+        dados_row = await conn.fetchrow("SELECT * FROM dados_config LIMIT 1")
+        if dados_row:
+            dados_config["max_apuesta"] = dados_row["max_apuesta"]
+            dados_config["cooldown"] = dados_row["cooldown"]
+            dados_config["exito_prob"] = dados_row["exito_prob"]
+            dados_config["fallo_prob"] = dados_row["fallo_prob"]
+            dados_config["activa"] = dados_row["activa"]
 
 async def save_game_config():
     from core.config import game_config
@@ -564,6 +600,21 @@ async def save_rob_config():
         rob_config["cooldown"],
         rob_config["exito_prob"],
         rob_config["fallo_prob"]
+        )
+
+async def save_dados_config():
+    from core.config import dados_config
+    async with pool.acquire() as conn:
+        await conn.execute("""
+        UPDATE dados_config SET
+            max_apuesta=$1, cooldown=$2, exito_prob=$3,
+            fallo_prob=$4, activa=$5
+        """,
+        dados_config["max_apuesta"],
+        dados_config["cooldown"],
+        dados_config["exito_prob"],
+        dados_config["fallo_prob"],
+        dados_config["activa"]
         )
 
 async def get_nave_contenido():

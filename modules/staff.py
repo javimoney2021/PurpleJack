@@ -12,10 +12,10 @@ from core.database import (
     get_all_inventarios, load_items_to_cache, add_stock,
     upsert_collect_config_db, delete_collect_config_db,
     save_game_config, save_rr_config, save_ruleta_config,
-    save_rob_config, clear_game_cooldowns
+    save_rob_config, save_dados_config, clear_game_cooldowns
 )
 from core import cache
-from core.config import ruleta_config, rr_config, game_config, COIN
+from core.config import ruleta_config, rr_config, game_config, dados_config, COIN
 
 STAFF_ROLE = "Equipo de Eventos"
 COORDINADOR_ROLE = "Coordinador-ES"
@@ -855,6 +855,64 @@ class Staff(commands.Cog):
         await save_game_config()
         await interaction.response.send_message(
             f"✅ Crime actualizado:\n• Min: {minimo}\n• Max: {maximo}\n• CD: {cooldown}\n• Éxito: {int(ganar*100)}%\n• Fallo: {int(perder*100)}%",
+            ephemeral=False
+        )
+
+    @app_commands.command(name="dados_edit", description="Edita configuración del sistema de dados")
+    @app_commands.describe(
+        cooldown="Cooldown en segundos",
+        max_apuesta="Apuesta máxima permitida",
+        prob_exito="Probabilidad de éxito en % (ej: 50 o 0.5)",
+        prob_fallo="Probabilidad de fallo en % (ej: 50 o 0.5)"
+    )
+    @is_staff()
+    async def dados_edit(self, interaction, cooldown: int, max_apuesta: int,
+                         prob_exito: float = None, prob_fallo: float = None):
+        def parse_prob(value):
+            if value is None:
+                return None
+            if value > 1:
+                if value > 100:
+                    raise ValueError
+                value = value / 100
+            if value < 0 or value > 1:
+                raise ValueError
+            return value
+
+        try:
+            exito = parse_prob(prob_exito)
+            fallo = parse_prob(prob_fallo)
+        except ValueError:
+            return await interaction.response.send_message(
+                "❌ Probabilidades inválidas. Usa 0-100 o 0.0-1.0.", ephemeral=True
+            )
+
+        if exito is None and fallo is None:
+            exito = dados_config["exito_prob"]
+            fallo = dados_config["fallo_prob"]
+        elif exito is None:
+            exito = 1 - fallo
+        elif fallo is None:
+            fallo = 1 - exito
+
+        if abs((exito + fallo) - 1) > 0.01:
+            return await interaction.response.send_message(
+                "❌ Las probabilidades deben sumar 100%.", ephemeral=True
+            )
+
+        if cooldown < 0 or max_apuesta <= 0:
+            return await interaction.response.send_message(
+                "❌ Cooldown y apuesta máxima deben ser mayores a 0.", ephemeral=True
+            )
+
+        dados_config["cooldown"] = cooldown
+        dados_config["max_apuesta"] = max_apuesta
+        dados_config["exito_prob"] = exito
+        dados_config["fallo_prob"] = fallo
+        await save_dados_config()
+
+        await interaction.response.send_message(
+            f"✅ Dados actualizados:\n• Max apuesta: {max_apuesta}\n• CD: {cooldown}s\n• Éxito: {int(exito*100)}%\n• Fallo: {int(fallo*100)}%",
             ephemeral=False
         )
 

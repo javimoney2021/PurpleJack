@@ -8,7 +8,7 @@ from settings import TOKEN
 from core.database import (
     init_db, load_items_to_cache, load_cargos_to_cache,
     load_collect_config_to_cache, delete_cargo_temporal,
-    create_game_config_table, load_game_config
+    create_game_config_table, load_game_config, load_dados_config
 )
 from core import cache
 
@@ -27,6 +27,7 @@ async def load_modules():
     await bot.load_extension("modules.rob")
     await bot.load_extension("modules.shop")
     await bot.load_extension("modules.collect")
+    await bot.load_extension("modules.dados")
     await bot.load_extension("modules.duels")
 
 
@@ -81,6 +82,7 @@ def run_bot():
         await init_db()
         await create_game_config_table()  # crea tabla si no existe + inserta defaults
         await load_game_config()          # sobrescribe config.py con valores de DB
+        await load_dados_config()
         await load_items_to_cache()
         await load_cargos_to_cache()
         await load_collect_config_to_cache()

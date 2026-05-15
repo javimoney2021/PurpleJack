@@ -21,6 +21,14 @@ rob_config = {
     "fallo_prob": 0.5
 }
 
+dados_config = {
+    "max_apuesta": 100,
+    "cooldown": 60,
+    "exito_prob": 0.5,
+    "fallo_prob": 0.5,
+    "activa": True
+}
+
 game_config = {
     "work": {
         "min": 100,
