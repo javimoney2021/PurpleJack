@@ -1,6 +1,7 @@
 import discord
 import random
 import time
+import asyncio
 from discord.ext import commands
 from core.database import get_user, update_balance, get_game_cooldown, set_game_cooldown
 from core.config import COIN, dados_config
@@ -65,6 +66,19 @@ class DadosRollView(discord.ui.View):
 
         await interaction.response.defer()
 
+        suspense_embed = discord.Embed(
+            title=f"🎲 Lanzando los dados... — {interaction.user.display_name}",
+            description="Un momento... el destino está en el aire.",
+            color=discord.Color.dark_purple()
+        )
+        suspense_embed.set_thumbnail(url=DICE_GIF)
+        try:
+            await interaction.message.edit(embed=suspense_embed, view=self)
+        except Exception:
+            pass
+
+        await asyncio.sleep(4)
+
         exito = random.random() <= dados_config["exito_prob"]
         autor_dado_1, autor_dado_2, bot_dado_1, bot_dado_2 = choose_dice_rolls(exito)
         autor_suma = autor_dado_1 + autor_dado_2
@@ -89,7 +103,7 @@ class DadosRollView(discord.ui.View):
         await set_game_cooldown(self.author_id, "dados", expira_en)
 
         embed = discord.Embed(
-            title="🎲 Resultado de Dados",
+            title=f"🎲 Resultado de Dados — {interaction.user.display_name}",
             description=(
                 f"**Tus dados:** {format_roll(autor_dado_1)} + {format_roll(autor_dado_2)} = **{autor_suma}**\n"
                 f"**Dados del bot:** {format_roll(bot_dado_1)} + {format_roll(bot_dado_2)} = **{bot_suma}**\n\n"
@@ -98,13 +112,15 @@ class DadosRollView(discord.ui.View):
             color=color
         )
         embed.set_thumbnail(url=DICE_GIF)
-        embed.set_footer(text=f"Cooldown: {dados_config['cooldown']}s | Máx apuesta: {dados_config['max_apuesta']} {COIN}")
+        embed.set_footer(text=f"Cooldown: {dados_config['cooldown']}s | Máx apuesta: {dados_config['max_apuesta']} PurpleCoins")
 
         for child in self.children:
             child.disabled = True
 
         try:
             await interaction.message.edit(embed=embed, view=self)
+            if self.message:
+                asyncio.create_task(self.message.delete(delay=60))
         except Exception:
             pass
 
@@ -157,7 +173,7 @@ class Dados(commands.Cog):
             )
 
         embed = discord.Embed(
-            title="🎲 Apuesta de Dados",
+            title=f"🎲 Apuesta de Dados — {ctx.author.display_name}",
             description=(
                 f"{ctx.author.mention} ha apostado **{monto}** {COIN}.\n\n"
                 f"Haz clic en el botón para lanzar tus dados y enfrentarte al bot.\n"
@@ -167,11 +183,11 @@ class Dados(commands.Cog):
         )
         embed.set_thumbnail(url=DICE_GIF)
         embed.set_footer(
-            text=f"Cooldown: {dados_config['cooldown']}s | Máx apuesta: {dados_config['max_apuesta']} {COIN}"
+            text=f"Cooldown: {dados_config['cooldown']}s | Máx apuesta: {dados_config['max_apuesta']} PurpleCoins"
         )
 
         view = DadosRollView(ctx.author.id, monto)
-        message = await ctx.send(embed=embed, view=view)
+        message = await ctx.reply(embed=embed, view=view, mention_author=False)
         view.message = message
 
 
