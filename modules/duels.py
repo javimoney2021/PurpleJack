@@ -86,7 +86,7 @@ class AcceptDuelView(discord.ui.View):
         # Cerrar permisos de escritura para el rol Español
         rol_espanol = discord.utils.get(self.ctx.guild.roles, name=ESPANOL_ROLE)
         if rol_espanol:
-            await self.ctx.channel.set_permissions(rol_espanol, send_messages=False, read_message_history=True)
+            await self.ctx.channel.set_permissions(rol_espanol, send_messages=False, view_channel=True, read_message_history=True, add_reactions=True)
         
         await asyncio.sleep(3)
         await msg_anuncio.delete()
@@ -298,7 +298,7 @@ class DuelGameView(discord.ui.View):
         if self.channel and self.guild:
             rol_espanol = discord.utils.get(self.guild.roles, name=ESPANOL_ROLE)
             if rol_espanol:
-                await self.channel.set_permissions(rol_espanol, send_messages=True, read_message_history=True)
+                await self.channel.set_permissions(rol_espanol, send_messages=True, view_channel=True, read_message_history=True, add_reactions=True)
             # Anunciar fin de batalla
             await self.channel.send("Batalla Finalizada, Se Retoma la Actividad!")
 
