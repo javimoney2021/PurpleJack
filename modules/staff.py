@@ -1088,5 +1088,17 @@ class Staff(commands.Cog):
             )
 
 
+    @app_commands.command(name="retar_edit", description="Cambia el cooldown del comando !retar")
+    @app_commands.describe(cooldown="Cooldown en segundos")
+    @is_staff()
+    async def retar_edit(self, interaction, cooldown: int):
+        if cooldown < 0:
+            return await interaction.response.send_message("❌ El cooldown no puede ser negativo.", ephemeral=True)
+        
+        from modules.duels import _duel_cooldowns
+        _duel_cooldowns[interaction.guild.id] = cooldown
+        await interaction.response.send_message(f"✅ Cooldown de !retar cambiado a {cooldown} segundos.", ephemeral=True)
+
+
 async def setup(bot):
     await bot.add_cog(Staff(bot))
