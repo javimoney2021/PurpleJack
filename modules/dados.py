@@ -66,6 +66,9 @@ class DadosRollView(discord.ui.View):
 
         await interaction.response.defer()
 
+        for child in self.children:
+            child.disabled = True
+
         suspense_embed = discord.Embed(
             title=f"🎲 Lanzando los dados... — {interaction.user.display_name}",
             description="Un momento... el destino está en el aire.",
