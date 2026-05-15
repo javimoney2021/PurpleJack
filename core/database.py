@@ -617,6 +617,18 @@ async def save_dados_config():
         dados_config["activa"]
         )
 
+async def load_dados_config():
+    from core.config import dados_config
+    async with pool.acquire() as conn:
+        row = await conn.fetchrow("SELECT * FROM dados_config LIMIT 1")
+        if not row:
+            return
+        dados_config["max_apuesta"] = row["max_apuesta"]
+        dados_config["cooldown"] = row["cooldown"]
+        dados_config["exito_prob"] = row["exito_prob"]
+        dados_config["fallo_prob"] = row["fallo_prob"]
+        dados_config["activa"] = row["activa"]
+
 async def get_nave_contenido():
     async with pool.acquire() as conn:
         row = await conn.fetchrow("SELECT contenido FROM nave_config WHERE id=1")
