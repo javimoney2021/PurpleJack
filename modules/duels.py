@@ -8,8 +8,11 @@ from core.config import COIN
 # ── CONFIG ─────────────────────────────────────────────
 DUEL_TIMEOUT = 60  # segundos para aceptar/rechazar
 ROUND_TIMEOUT = 5  # segundos que la espada está visible
-TOTAL_ROUNDS = 7
+TOTAL_ROUNDS = 9
 GRID_SIZE = 5
+RETAL_THUMBNAIL = "https://pub-a09b3609b6b34dfab5c7aa7742cd1a8a.r2.dev/Purple%20jack%20Harcode/Kill.png"
+WIN_THUMBNAIL = "https://pub-a09b3609b6b34dfab5c7aa7742cd1a8a.r2.dev/Purple%20jack%20Harcode/win.png"
+ESPANOL_ROLE = "Español"
 
 # ── GLOBAL STATE ───────────────────────────────────────
 _active_duels = set()  # {guild_id} para evitar múltiples duelos por servidor
@@ -62,15 +65,28 @@ class AcceptDuelView(discord.ui.View):
         # Detener la vista de aceptación para evitar timeouts posteriores
         self.stop()
 
+        # Mensaje anunciando el inicio sin embed
+        await interaction.response.defer()
+        msg_anuncio = await self.ctx.send(f"⚔️ La batalla entre <@{self.retador_id}> y <@{self.retado_id}> Comenzará en segundos.... ⚔️")
+        
+        # Cerrar permisos de escritura para el rol Español
+        rol_espanol = discord.utils.get(self.ctx.guild.roles, name=ESPANOL_ROLE)
+        if rol_espanol:
+            await self.ctx.channel.set_permissions(rol_espanol, send_messages=False)
+        
+        await asyncio.sleep(3)
+        await msg_anuncio.delete()
+
         # Iniciar minijuego
-        duel_view = DuelGameView(self.retador_id, self.retado_id, self.monto * 2, self.ctx.guild.id)
+        duel_view = DuelGameView(self.retador_id, self.retado_id, self.monto * 2, self.ctx.guild.id, self.ctx.channel, self.ctx.guild)
         embed = discord.Embed(
             title="⚔️ Duelo Iniciado",
             description=f"¡Comienza el duelo entre <@{self.retador_id}> y <@{self.retado_id}>!\n\n**Pozo total:** {self.monto * 2} {COIN}\n\nRonda 1/{TOTAL_ROUNDS}",
             color=discord.Color.blue()
         )
-        await interaction.response.edit_message(embed=embed, view=duel_view)
-        duel_view.message = await interaction.original_response()
+        embed.set_thumbnail(url=RETAL_THUMBNAIL)
+        msg_duelo = await self.ctx.send(embed=embed, view=duel_view)
+        duel_view.message = msg_duelo
         await duel_view.start_game()
 
     @discord.ui.button(label="Rechazar Reto", style=discord.ButtonStyle.danger)
@@ -120,12 +136,14 @@ class DuelButton(discord.ui.Button):
 
 
 class DuelGameView(discord.ui.View):
-    def __init__(self, retador_id, retado_id, pozo, guild_id):
+    def __init__(self, retador_id, retado_id, pozo, guild_id, channel=None, guild=None):
         super().__init__(timeout=300)  # 5 min total
         self.retador_id = retador_id
         self.retado_id = retado_id
         self.pozo = pozo
         self.guild_id = guild_id
+        self.channel = channel
+        self.guild = guild
         self.round = 0
         self.retador_score = 0
         self.retado_score = 0
@@ -154,7 +172,7 @@ class DuelGameView(discord.ui.View):
                 # Actualizar embed
                 embed = discord.Embed(
                     title="⚔️ Duelo en Progreso",
-                    description=f"<@{self.retador_id}> vs <@{self.retado_id}>\n\n**Pozo:** {self.pozo} {COIN}\n**Ronda:** {round_num}/{TOTAL_ROUNDS}\n\nEspere la espada...",
+                    description=f"<@{self.retador_id}> vs <@{self.retado_id}>\n\n**Pozo:** {self.pozo} {COIN}\n**Ronda:** {round_num}/{TOTAL_ROUNDS}\n\n🧐 Preparate para Atacar!",
                     color=discord.Color.blue()
                 )
                 await self.message.edit(embed=embed, view=self)
@@ -177,7 +195,7 @@ class DuelGameView(discord.ui.View):
                             item.label = "⬜"
                             item.style = discord.ButtonStyle.secondary
 
-                embed.description = f"<@{self.retador_id}> vs <@{self.retado_id}>\n\n**Pozo:** {self.pozo} {COIN}\n**Ronda:** {round_num}/{TOTAL_ROUNDS}\n\n¡Encuentra la espada!"
+                embed.description = f"<@{self.retador_id}> vs <@{self.retado_id}>\n\n**Pozo:** {self.pozo} {COIN}\n**Ronda:** {round_num}/{TOTAL_ROUNDS}\n\n😈 Ataca !"
                 await self.message.edit(embed=embed, view=self)
 
                 # Esperar que alguien clickee o timeout
@@ -231,6 +249,7 @@ class DuelGameView(discord.ui.View):
             description=f"**Ganador:** {winner_name}\n\n**Puntuación:**\n<@{self.retador_id}>: {self.retador_score}\n<@{self.retado_id}>: {self.retado_score}\n\n**Recompensa:** {self.pozo} {COIN} al banco del ganador.",
             color=discord.Color.green() if winner_id else discord.Color.yellow()
         )
+        embed.set_thumbnail(url=WIN_THUMBNAIL)
 
         # Desactivar botones
         for item in self.children:
@@ -241,6 +260,21 @@ class DuelGameView(discord.ui.View):
         except:
             pass
 
+        # Esperar 6 segundos y eliminar el mensaje
+        await asyncio.sleep(6)
+        try:
+            await self.message.delete()
+        except:
+            pass
+        
+        # Abrir permisos de escritura para el rol Español
+        if self.channel and self.guild:
+            rol_espanol = discord.utils.get(self.guild.roles, name=ESPANOL_ROLE)
+            if rol_espanol:
+                await self.channel.set_permissions(rol_espanol, send_messages=True)
+            # Anunciar fin de batalla
+            await self.channel.send("Batalla Finalizada, Se Retoma la Actividad!")
+
         if self.game_task:
             self.game_task.cancel()
 
@@ -250,6 +284,7 @@ class Duels(commands.Cog):
         self.bot = bot
 
     @commands.command(name="retar")
+    @commands.cooldown(1, 600, commands.BucketType.guild)  # 10 minutos por servidor
     async def retar(self, ctx, usuario: discord.Member, monto: int):
         if ctx.author.id == usuario.id:
             return await ctx.send("❌ No puedes retarte a ti mismo.")
@@ -270,10 +305,21 @@ class Duels(commands.Cog):
             description=f"<@{usuario.id}> Has recibido un duelo por parte de <@{ctx.author.id}> por **{monto}** {COIN}.\n\n¿Aceptas?",
             color=discord.Color.orange()
         )
+        embed.set_thumbnail(url=RETAL_THUMBNAIL)
 
+        await ctx.send(f"{usuario.mention} Ha sido retado a un duelo.")
         view = AcceptDuelView(ctx.author.id, usuario.id, monto, ctx)
         message = await ctx.send(embed=embed, view=view)
         view.message = message
+
+    @retar.error
+    async def retar_error(self, ctx, error):
+        if isinstance(error, commands.CommandOnCooldown):
+            retry_after = error.retry_after
+            timestamp = int(ctx.message.created_at.timestamp()) + int(retry_after)
+            await ctx.send(f"🚀 La Arena de combate esta ocupada por Jugadores de otros universos Intenta <t:{timestamp}:R>")
+        else:
+            raise error
 
 
 async def setup(bot):
