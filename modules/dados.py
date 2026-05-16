@@ -22,6 +22,20 @@ def format_roll(value):
     return DICE_FACES.get(value, str(value))
 
 
+
+
+def format_cooldown(seconds):
+    """Convierte segundos a formato legible (45m, 2h, etc)"""
+    if seconds < 60:
+        return f"{seconds}s"
+    elif seconds < 3600:
+        minutes = seconds // 60
+        return f"{minutes}m"
+    else:
+        hours = seconds // 3600
+        return f"{hours}h"
+
+
 def choose_dice_rolls(success: bool):
     while True:
         autor_dado_1 = random.randint(1, 6)
@@ -115,7 +129,7 @@ class DadosRollView(discord.ui.View):
             color=color
         )
         embed.set_thumbnail(url=DICE_GIF)
-        embed.set_footer(text=f"Cooldown: {dados_config['cooldown']}s | Máx apuesta: {dados_config['max_apuesta']} PurpleCoins")
+        embed.set_footer(text=f"Cooldown: {format_cooldown(dados_config['cooldown'])} | Máx apuesta: {dados_config['max_apuesta']} PurpleCoins")
 
         for child in self.children:
             child.disabled = True
@@ -186,7 +200,7 @@ class Dados(commands.Cog):
         )
         embed.set_thumbnail(url=DICE_GIF)
         embed.set_footer(
-            text=f"Cooldown: {dados_config['cooldown']}s | Máx apuesta: {dados_config['max_apuesta']} PurpleCoins"
+            text=f"Cooldown: {format_cooldown(dados_config['cooldown'])} | Máx apuesta: {dados_config['max_apuesta']} PurpleCoins"
         )
 
         view = DadosRollView(ctx.author.id, monto)

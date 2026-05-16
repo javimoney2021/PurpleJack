@@ -1,3 +1,4 @@
+import re
 import discord
 import asyncio
 from io import BytesIO
@@ -815,6 +816,17 @@ class Staff(commands.Cog):
                 "❌ Formato inválido. Usa ejemplos como: 6h o 30m", ephemeral=True
             )
 
+        def parse_cooldown(value):
+            """Parsea formato 45m o 2h a segundos"""
+            match = re.match(r'^(\d+)([mh])$', value.lower())
+            if not match:
+                raise ValueError("Formato inválido. Usa: 45m o 2h")
+            amount, unit = int(match.group(1)), match.group(2)
+            if unit == 'm':
+                return amount * 60
+            else:
+                return amount * 3600
+
         def parse_prob(value):
             if value is None:
                 return None
@@ -860,14 +872,25 @@ class Staff(commands.Cog):
 
     @app_commands.command(name="dados_edit", description="Edita configuración del sistema de dados")
     @app_commands.describe(
-        cooldown="Cooldown en segundos",
+        cooldown="Cooldown (ej: 45m, 2h)",
         max_apuesta="Apuesta máxima permitida",
         prob_exito="Probabilidad de éxito en % (ej: 50 o 0.5)",
         prob_fallo="Probabilidad de fallo en % (ej: 50 o 0.5)"
     )
     @is_staff()
-    async def dados_edit(self, interaction, cooldown: int, max_apuesta: int,
+    async def dados_edit(self, interaction, cooldown: str, max_apuesta: int,
                          prob_exito: float = None, prob_fallo: float = None):
+        def parse_cooldown(value):
+            """Parsea formato 45m o 2h a segundos"""
+            match = re.match(r'^(\d+)([mh])$', value.lower())
+            if not match:
+                raise ValueError("Formato inválido. Usa: 45m o 2h")
+            amount, unit = int(match.group(1)), match.group(2)
+            if unit == 'm':
+                return amount * 60
+            else:
+                return amount * 3600
+
         def parse_prob(value):
             if value is None:
                 return None
@@ -880,11 +903,12 @@ class Staff(commands.Cog):
             return value
 
         try:
+            cooldown_seconds = parse_cooldown(cooldown)
             exito = parse_prob(prob_exito)
             fallo = parse_prob(prob_fallo)
-        except ValueError:
+        except ValueError as e:
             return await interaction.response.send_message(
-                "❌ Probabilidades inválidas. Usa 0-100 o 0.0-1.0.", ephemeral=True
+                f"❌ {str(e)}", ephemeral=True
             )
 
         if exito is None and fallo is None:
@@ -900,19 +924,19 @@ class Staff(commands.Cog):
                 "❌ Las probabilidades deben sumar 100%.", ephemeral=True
             )
 
-        if cooldown < 0 or max_apuesta <= 0:
+        if cooldown_seconds <= 0 or max_apuesta <= 0:
             return await interaction.response.send_message(
                 "❌ Cooldown y apuesta máxima deben ser mayores a 0.", ephemeral=True
             )
 
-        dados_config["cooldown"] = cooldown
+        dados_config["cooldown"] = cooldown_seconds
         dados_config["max_apuesta"] = max_apuesta
         dados_config["exito_prob"] = exito
         dados_config["fallo_prob"] = fallo
         await save_dados_config()
 
         await interaction.response.send_message(
-            f"✅ Dados actualizados:\n• Max apuesta: {max_apuesta}\n• CD: {cooldown}s\n• Éxito: {int(exito*100)}%\n• Fallo: {int(fallo*100)}%",
+            f"✅ Dados actualizados:\n• Max apuesta: {max_apuesta}\n• CD: {cooldown}\n• Éxito: {int(exito*100)}%\n• Fallo: {int(fallo*100)}%",
             ephemeral=False
         )
 
@@ -944,6 +968,17 @@ class Staff(commands.Cog):
 
         if seconds <= 0:
             return await interaction.response.send_message("❌ El cooldown debe ser mayor a 0.", ephemeral=True)
+
+        def parse_cooldown(value):
+            """Parsea formato 45m o 2h a segundos"""
+            match = re.match(r'^(\d+)([mh])$', value.lower())
+            if not match:
+                raise ValueError("Formato inválido. Usa: 45m o 2h")
+            amount, unit = int(match.group(1)), match.group(2)
+            if unit == 'm':
+                return amount * 60
+            else:
+                return amount * 3600
 
         def parse_prob(value):
             if value is None:

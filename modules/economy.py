@@ -116,12 +116,15 @@ class Economy(commands.Cog):
         rob_cd = self.format_cooldown(rob_config["cooldown"])
         rr_cd = self.format_cooldown(rr_config["cooldown"])
 
+        dados_cd = self.format_cooldown(dados_config["cooldown"])
+        
         descripcion = (
             f"**!work**     — Cada {work_cd}\n"
             f"**!crime**    — Cada {crime_cd}\n"
             f"**!ruleta**   — Cada {ruleta_cd}\n"
             f"**!rr**       — Cada {rr_cd}\n"
             f"**!rob**      — Cada {rob_cd}\n"
+            f"**!dados**    — Cada {dados_cd}\n"
             f"**!collect**  — Configurado por Rol **(ver !collect)**"
         )
 
