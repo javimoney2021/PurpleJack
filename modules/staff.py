@@ -314,12 +314,13 @@ class Staff(commands.Cog):
     @app_commands.describe(usuario="Miembro a consultar")
     @is_staff()
     async def balance_staff(self, interaction, usuario: discord.Member):
+        await interaction.response.defer(ephemeral=False)
         user = await get_user(usuario.id)
         embed = discord.Embed(title=f"💰 Finanzas de {usuario.display_name}", color=discord.Color.gold())
         embed.add_field(name=f"{COIN} Balance", value=f"{user['balance']} {COIN}", inline=True)
         embed.add_field(name="🏦 Banco", value=f"{user['bank']} {COIN}", inline=True)
         embed.set_thumbnail(url=usuario.display_avatar.url)
-        await interaction.response.send_message(embed=embed, ephemeral=False)
+        await interaction.followup.send(embed=embed, ephemeral=False)
 
     @app_commands.command(name="addcoins", description="Añade PurpleCoins a un miembro")
     @app_commands.describe(usuario="Miembro", cantidad="Cantidad a añadir", destino="Balance o Banco")
@@ -331,6 +332,7 @@ class Staff(commands.Cog):
     async def addcoins(self, interaction, usuario: discord.Member, cantidad: int, destino: app_commands.Choice[str]):
         if cantidad <= 0:
             return await interaction.response.send_message("❌ La cantidad debe ser mayor a 0.", ephemeral=False)
+        await interaction.response.defer(ephemeral=False)
         if destino.value == "balance":
             await update_balance(usuario.id, cantidad)
         else:
@@ -342,7 +344,7 @@ class Staff(commands.Cog):
                     "UPDATE users SET balance=$1, bank=$2 WHERE id=$3",
                     data["balance"], data["bank"], usuario.id
                 )
-        await interaction.response.send_message(
+        await interaction.followup.send(
             f"✅ Se añadieron **{cantidad}** {COIN} al **{destino.name}** de {usuario.mention}.", ephemeral=False
         )
 
@@ -356,6 +358,7 @@ class Staff(commands.Cog):
     async def removecoins(self, interaction, usuario: discord.Member, cantidad: int, destino: app_commands.Choice[str]):
         if cantidad <= 0:
             return await interaction.response.send_message("❌ La cantidad debe ser mayor a 0.", ephemeral=False)
+        await interaction.response.defer(ephemeral=False)
         if destino.value == "balance":
             await update_balance(usuario.id, -cantidad)
         else:
@@ -367,7 +370,7 @@ class Staff(commands.Cog):
                     "UPDATE users SET balance=$1, bank=$2 WHERE id=$3",
                     data["balance"], data["bank"], usuario.id
                 )
-        await interaction.response.send_message(
+        await interaction.followup.send(
             f"✅ Se removieron **{cantidad}** {COIN} del **{destino.name}** de {usuario.mention}.", ephemeral=False
         )
 
@@ -510,13 +513,7 @@ class Staff(commands.Cog):
         if precio <= 0:
             return await interaction.response.send_message("❌ El precio debe ser mayor a 0.", ephemeral=True)
 
-        existing = await get_item_by_name(nombre.strip())
-        if existing:
-            return await interaction.response.send_message(
-                f"❌ Ya existe un item llamado **{nombre}**.", ephemeral=True
-            )
-
-        # Parsear duración
+        # Parsear duración antes del defer para validar formato
         duracion_segundos = 0
         if duracion_rol:
             try:
@@ -535,6 +532,14 @@ class Staff(commands.Cog):
                 return await interaction.response.send_message(
                     "❌ Duración inválida.", ephemeral=True
                 )
+
+        await interaction.response.defer(ephemeral=False)
+
+        existing = await get_item_by_name(nombre.strip())
+        if existing:
+            return await interaction.followup.send(
+                f"❌ Ya existe un item llamado **{nombre}**.", ephemeral=True
+            )
 
         rol_id = rol.id if rol else None
 
@@ -559,7 +564,7 @@ class Staff(commands.Cog):
         limite_txt = str(cantid_por_user) if cantid_por_user > 0 else "∞"
 
         uso_txt = mensaje_uso.strip() if mensaje_uso.strip() else "Mensaje por defecto"
-        await interaction.response.send_message(
+        await interaction.followup.send(
             f"✅ Item **{icono_display} {nombre}** añadido a la tienda.\n"
             f"• Precio: **{precio}** {COIN}\n"
             f"• Stock total: **{'∞' if stock == -1 else stock}**\n"
@@ -636,14 +641,15 @@ class Staff(commands.Cog):
     @app_commands.describe(item="Selecciona el item a eliminar")
     @is_staff()
     async def eliminar_item(self, interaction, item: str):
+        await interaction.response.defer(ephemeral=False)
         found = await get_item_by_name(item.strip())
         if not found:
-            return await interaction.response.send_message(
+            return await interaction.followup.send(
                 f"❌ Item **{item}** no encontrado.", ephemeral=True
             )
         await delete_item(found["id"])
         icono = found["icono"] if found["icono"] else "🔹"
-        await interaction.response.send_message(
+        await interaction.followup.send(
             f"✅ Item **{icono} {found['nombre']}** eliminado de la tienda.",
             ephemeral=False
         )
@@ -669,13 +675,12 @@ class Staff(commands.Cog):
             return await interaction.response.send_message(
                 "❌ La cantidad debe ser mayor a 0.", ephemeral=True
             )
-
+        await interaction.response.defer(ephemeral=False)
         found = await get_item_by_name(item.strip())
         if not found:
-            return await interaction.response.send_message(
+            return await interaction.followup.send(
                 f"❌ Item **{item}** no encontrado.", ephemeral=True
             )
-
         await add_to_inventory(usuario.id, found["id"], cantidad)
         cache.add_to_inventory_cache(usuario.id, {
             "id": found["id"],
@@ -687,9 +692,8 @@ class Staff(commands.Cog):
             "duracion": found.get("duracion", 0),
             "cantidad": cantidad
         })
-
         icono = found["icono"] if found["icono"] else "🔹"
-        await interaction.response.send_message(
+        await interaction.followup.send(
             f"✅ Se han agregado {cantidad}x {icono} {found['nombre']} al inventario de {usuario.mention}.",
             ephemeral=False
         )
@@ -723,14 +727,15 @@ class Staff(commands.Cog):
     async def stock_add(self, interaction, nombre: str, cantidad: int):
         if cantidad <= 0:
             return await interaction.response.send_message("❌ La cantidad debe ser mayor a 0.", ephemeral=True)
+        await interaction.response.defer(ephemeral=False)
         item = await get_item_by_name(nombre.strip())
         if not item:
-            return await interaction.response.send_message(f"❌ Item **{nombre}** no encontrado.", ephemeral=True)
+            return await interaction.followup.send(f"❌ Item **{nombre}** no encontrado.", ephemeral=True)
         if item["stock"] == -1:
-            return await interaction.response.send_message(f"❌ **{item['nombre']}** tiene stock infinito, no aplica.", ephemeral=True)
+            return await interaction.followup.send(f"❌ **{item['nombre']}** tiene stock infinito, no aplica.", ephemeral=True)
         await add_stock(item["id"], cantidad)
         nuevo_stock = item["stock"] + cantidad
-        await interaction.response.send_message(
+        await interaction.followup.send(
             f"✅ Stock de **{item['nombre']}** actualizado: `{item['stock']}` → `{nuevo_stock}`",
             ephemeral=False
         )
