@@ -491,7 +491,8 @@ class Staff(commands.Cog):
         desc_larga="Descripción larga visible en !info. Opcional.",
         rol="Rol que se otorga al usar el item. Opcional.",
         duracion_rol="Duración del rol: ej 30m, 12h, 7d. Vacío = permanente. Opcional.",
-        cantid_por_user="Límite de compras por usuario. Vacío = ilimitado. Opcional."
+        cantid_por_user="Límite de compras por usuario. Vacío = ilimitado. Opcional.",
+        mensaje_uso="Mensaje al usar el item en !inv. Vacío = mensaje por defecto. Opcional."
     )
     @is_staff()
     async def item_new(self, interaction,
@@ -503,7 +504,8 @@ class Staff(commands.Cog):
                        desc_larga: str = "",
                        rol: discord.Role = None,
                        duracion_rol: str = "",
-                       cantid_por_user: int = 0):
+                       cantid_por_user: int = 0,
+                       mensaje_uso: str = ""):
 
         if precio <= 0:
             return await interaction.response.send_message("❌ El precio debe ser mayor a 0.", ephemeral=True)
@@ -545,7 +547,7 @@ class Staff(commands.Cog):
             stock=stock,
             icono=icono.strip(),
             utilizable=True,
-            mensaje_uso="",
+            mensaje_uso=mensaje_uso.strip(),
             rol_id=rol_id,
             duracion=duracion_segundos,
             limite_por_usuario=cantid_por_user if cantid_por_user > 0 else 0
@@ -556,12 +558,14 @@ class Staff(commands.Cog):
         icono_display = icono if icono else "🔹"
         limite_txt = str(cantid_por_user) if cantid_por_user > 0 else "∞"
 
+        uso_txt = mensaje_uso.strip() if mensaje_uso.strip() else "Mensaje por defecto"
         await interaction.response.send_message(
             f"✅ Item **{icono_display} {nombre}** añadido a la tienda.\n"
             f"• Precio: **{precio}** {COIN}\n"
             f"• Stock total: **{'∞' if stock == -1 else stock}**\n"
             f"• Límite por usuario: **{limite_txt}**\n"
-            f"• Rol: {rol_txt}  •  Duración: {dur_txt}",
+            f"• Rol: {rol_txt}  •  Duración: {dur_txt}\n"
+            f"• Mensaje de uso: {uso_txt}",
             ephemeral=False
         )
 
