@@ -306,7 +306,7 @@ class UseButton(discord.ui.Button):
         super().__init__(
             style=discord.ButtonStyle.primary,
             label="Usar",
-            emoji="💥​",
+            emoji="✔️",
             custom_id=f"use_{item['id']}"
         )
         self.item = item
@@ -370,7 +370,7 @@ class UseButton(discord.ui.Button):
             if log_channel:
                 nombre_log = interaction.user.nick or interaction.user.display_name
                 await log_channel.send(
-                    f"✨ **{nombre_log}** usó {icono} **{item['nombre']}**"
+                    f"✔️ **{nombre_log}** usó {icono} **{item['nombre']}**"
                 )
 
         except Exception as e:
@@ -422,7 +422,7 @@ class InventarioLayout(discord.ui.LayoutView):
 
             container.add_item(discord.ui.Separator())
             container.add_item(discord.ui.TextDisplay(
-                f"-# Total: **{len(self.items)}** tipo(s) de item  •  Usa ✨ para consumir un item usable."
+                f"-# Total: **{len(self.items)}** tipo(s) de item  •  Usa ✔️ para consumir un item usable."
             ))
 
             self.add_item(container)

@@ -64,6 +64,16 @@ async def check_cargos_loop():
             print(f"✅ Cargos temporales vencidos removidos: {len(vencidos)}")
 
 
+AYUDA_CHANNEL_ID = 1488006594976415786
+
+@bot.event
+async def on_command_error(ctx, error):
+    if isinstance(error, commands.CommandNotFound):
+        await ctx.send(
+            f"❌ Este comando no es válido, consulta **/ayuda_nave** en el canal <#{AYUDA_CHANNEL_ID}>",
+            delete_after=10
+        )
+
 @bot.event
 async def on_ready():
     print(f"✅ Bot conectado como {bot.user}")
