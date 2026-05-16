@@ -346,6 +346,25 @@ class Staff(commands.Cog):
             f"✅ Se añadieron **{cantidad}** {COIN} al **{destino.name}** de {usuario.mention}.", ephemeral=False
         )
 
+    @app_commands.command(name="migrar", description="Migra moneda de la nave antigua a la nueva")
+    @app_commands.describe(usuario="Miembro a migrar", monto="Monto original de la nave antigua")
+    @is_staff()
+    async def migrar(self, interaction, usuario: discord.Member, monto: int):
+        if monto <= 0:
+            return await interaction.response.send_message("❌ El monto debe ser mayor a 0.", ephemeral=False)
+        monto_final = int(monto * 0.08)
+        await update_balance(usuario.id, monto_final)
+        async with pool.acquire() as conn:
+            data = cache.get_cached(usuario.id)
+            if data:
+                await conn.execute(
+                    "UPDATE users SET balance=$1, bank=$2 WHERE id=$3",
+                    data["balance"], data["bank"], usuario.id
+                )
+        await interaction.response.send_message(
+            f"🚀 Migración de {usuario.mention} realizada...Monto: **{monto_final}** {COIN}", ephemeral=False
+        )
+
     @app_commands.command(name="removecoins", description="Remueve PurpleCoins a un miembro")
     @app_commands.describe(usuario="Miembro", cantidad="Cantidad a remover", destino="Balance o Banco")
     @app_commands.choices(destino=[
