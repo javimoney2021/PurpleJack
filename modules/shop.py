@@ -453,7 +453,7 @@ class Shop(commands.Cog):
         msg = await ctx.send(view=view)
 
         async def auto_delete():
-            await asyncio.sleep(60)
+            await asyncio.sleep(35)
             try:
                 await msg.delete()
             except Exception:
