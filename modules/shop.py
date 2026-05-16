@@ -79,7 +79,7 @@ class ConfirmBuyView(discord.ui.View):
             else:
                 if user["balance"] < total:
                     return await interaction.edit_original_response(
-                        content=f"❌ No tienes suficiente balance. Necesitas **{total}** {COIN}.",
+                        content=f"❌ No tienes suficiente balance. Necesitas **{total}** {COIN},\no una 💳 **Tarjeta de Credito para usar el dinero de tu banco directamente**",
                         view=self
                     )
                 await update_balance(interaction.user.id, -total)
