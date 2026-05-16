@@ -67,11 +67,12 @@ class ResetAllModal(discord.ui.Modal, title="Confirmar Reset Global"):
 # ── ANUNCIO CONFIRM VIEW ───────────────────────────────
 
 class AnuncioConfirmView(discord.ui.View):
-    def __init__(self, user_id, channel, content):
+    def __init__(self, user_id, channel, content, image_url=None):
         super().__init__(timeout=60)
         self.user_id = user_id
         self.channel = channel
         self.content = content
+        self.image_url = image_url
 
     @discord.ui.button(label="✅ Aceptar", style=discord.ButtonStyle.success)
     async def aceptar(self, interaction: discord.Interaction, button: discord.ui.Button):
@@ -86,7 +87,12 @@ class AnuncioConfirmView(discord.ui.View):
             ),
             view=self
         )
-        await self.channel.send(self.content)
+        if self.image_url:
+            embed_pub = discord.Embed(description=self.content or None, color=discord.Color.purple())
+            embed_pub.set_image(url=self.image_url)
+            await self.channel.send(embed=embed_pub)
+        else:
+            await self.channel.send(self.content)
         _pending_announcements.pop(self.user_id, None)
 
     @discord.ui.button(label="❌ Cancelar", style=discord.ButtonStyle.danger)
@@ -1160,7 +1166,8 @@ class Staff(commands.Cog):
             return
 
         content = message.content
-        entry["content"] = content
+        image_url = message.attachments[0].url if message.attachments else None
+        entry["content"] = content or "​"
 
         try:
             await message.delete()
@@ -1171,16 +1178,18 @@ class Staff(commands.Cog):
             title="📋 Confirma tu anuncio",
             description=(
                 f"**Canal destino:** {entry['channel'].mention}\n\n"
-                f"**Mensaje:**\n{content}"
+                f"**Mensaje:**\n{content or '*(sin texto)*'}"
             ),
             color=discord.Color.orange()
         )
+        if image_url:
+            confirm_embed.set_image(url=image_url)
         confirm_embed.set_footer(text="Tienes 60 segundos para confirmar.")
 
         await message.channel.send(
             content=message.author.mention,
             embed=confirm_embed,
-            view=AnuncioConfirmView(user_id, entry["channel"], content),
+            view=AnuncioConfirmView(user_id, entry["channel"], content, image_url),
             delete_after=65
         )
 
