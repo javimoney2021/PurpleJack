@@ -163,7 +163,7 @@ class Economy(commands.Cog):
                 inline=False
             )
 
-        await ctx.send(embed=embed, ephemeral=True)
+        await ctx.send(embed=embed, delete_after=15)
 
     @commands.command()
     async def top(self, ctx):
