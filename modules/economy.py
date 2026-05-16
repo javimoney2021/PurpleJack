@@ -239,6 +239,8 @@ class Economy(commands.Cog):
         rob_fallo = int(rob_config["fallo_prob"] * 100)
         rr_exito = int(rr_config["ganar_prob"] * 100)
         rr_fallo = int(rr_config["perder_prob"] * 100)
+        dados_exito = int(dados_config["exito_prob"] * 100)
+        dados_fallo = int(dados_config["fallo_prob"] * 100)
 
         embed = discord.Embed(
             title="🍀 Probabilidades Actuales",
@@ -249,7 +251,8 @@ class Economy(commands.Cog):
             value=(
                 f"**!crime** — Éxito: `{crime_exito}%` · Fallo: `{crime_fallo}%`\n"
                 f"**!rr** — Éxito: `{rr_exito}%` · Fallo: `{rr_fallo}%` *(por disparo)*\n"
-                f"**!rob** — Éxito: `{rob_exito}%` · Fallo: `{rob_fallo}%`"
+                f"**!rob** — Éxito: `{rob_exito}%` · Fallo: `{rob_fallo}%`\n"
+                f"**!dados** — Éxito: `{dados_exito}%` · Fallo: `{dados_fallo}%`"
             ),
             inline=False
         )
