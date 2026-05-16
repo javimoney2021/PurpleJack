@@ -339,7 +339,7 @@ class UseButton(discord.ui.Button):
                     await interaction.user.add_roles(role)
                     duracion = item.get("duracion", 0)
                     if duracion and duracion > 0:
-                        expira_en = time.time() + (duracion * 86400)
+                        expira_en = time.time() + duracion
                         await add_cargo_temporal(
                             interaction.user.id,
                             self.guild.id,
@@ -492,7 +492,14 @@ class Shop(commands.Cog):
 
         duracion = item.get("duracion", 0)
         if item["rol_id"] and duracion is not None:
-            dur_txt = "Permanente" if duracion == 0 else f"{duracion} día(s)"
+            if duracion == 0:
+                dur_txt = "Permanente"
+            elif duracion >= 86400:
+                dur_txt = f"{int(duracion // 86400)} día(s)"
+            elif duracion >= 3600:
+                dur_txt = f"{int(duracion // 3600)} hora(s)"
+            else:
+                dur_txt = f"{int(duracion // 60)} minuto(s)"
             embed.add_field(name="⏳ Duración del Cargo", value=dur_txt, inline=True)
 
         await ctx.send(embed=embed)
