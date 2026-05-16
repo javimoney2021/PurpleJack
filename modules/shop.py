@@ -1,7 +1,7 @@
 from discord.ext import commands
 import discord
 from core.database import (
-    get_user, update_balance, get_all_items, get_item_by_name,
+    get_user, update_balance, update_bank, get_all_items, get_item_by_name,
     add_to_inventory, get_inventory, remove_from_inventory,
     reduce_stock, add_cargo_temporal
 )
@@ -14,6 +14,7 @@ import re
 LOG_CHANNEL_ID = 1503681101422526494
 ITEMS_PER_PAGE = 5
 PURPLE = 0x9B59B6
+TARJETA_CREDITO_ROL_ID = 1505205139416551527
 
 
 # ── CONFIRMACION DE COMPRA ─────────────────────────────
@@ -66,13 +67,23 @@ class ConfirmBuyView(discord.ui.View):
             total = item_fresh["precio"]
             user = await get_user(interaction.user.id)
 
-            if user["balance"] < total:
-                return await interaction.edit_original_response(
-                    content=f"❌ No tienes suficiente balance. Necesitas **{total}** {COIN}.",
-                    view=self
-                )
+            tiene_tarjeta = any(r.id == TARJETA_CREDITO_ROL_ID for r in interaction.user.roles)
 
-            await update_balance(interaction.user.id, -total)
+            if tiene_tarjeta:
+                if user["bank"] < total:
+                    return await interaction.edit_original_response(
+                        content=f"❌ No tienes suficiente banco. Necesitas **{total}** {COIN}.",
+                        view=self
+                    )
+                await update_bank(interaction.user.id, -total)
+            else:
+                if user["balance"] < total:
+                    return await interaction.edit_original_response(
+                        content=f"❌ No tienes suficiente balance. Necesitas **{total}** {COIN}.",
+                        view=self
+                    )
+                await update_balance(interaction.user.id, -total)
+
             await add_to_inventory(interaction.user.id, item_fresh["id"], cantidad_compra)
 
             cache.add_to_inventory_cache(interaction.user.id, {
@@ -92,13 +103,25 @@ class ConfirmBuyView(discord.ui.View):
             icono = item_fresh["icono"] if item_fresh["icono"] else "🔹"
             nombre_display = interaction.user.nick or interaction.user.display_name
 
-            await interaction.edit_original_response(
-                content=(
-                    f"✅ **{nombre_display}** Has comprado **{cantidad_compra}x {icono} {item_fresh['nombre']}** "
-                    f"exitosamente. Consulta tu `!inv` para verificarlo."
-                ),
-                view=self
-            )
+            if tiene_tarjeta:
+                cashback = int(total * 0.08)
+                await update_bank(interaction.user.id, cashback)
+                await interaction.edit_original_response(
+                    content=(
+                        f"✅ **{nombre_display}** Has comprado **{cantidad_compra}x {icono} {item_fresh['nombre']}** "
+                        f"exitosamente. Consulta tu `!inv` para verificarlo.\n"
+                        f"💳 Por poseer **Tarjeta de Credito** Recibes: **{cashback}** {COIN} de Cashback depositado en tu banco."
+                    ),
+                    view=self
+                )
+            else:
+                await interaction.edit_original_response(
+                    content=(
+                        f"✅ **{nombre_display}** Has comprado **{cantidad_compra}x {icono} {item_fresh['nombre']}** "
+                        f"exitosamente. Consulta tu `!inv` para verificarlo."
+                    ),
+                    view=self
+                )
 
             # ── Log de compra ──────────────────────────
             log_channel = self.bot.get_channel(LOG_CHANNEL_ID)
