@@ -1,6 +1,7 @@
 import re
 import discord
 import asyncio
+import aiohttp
 from io import BytesIO
 from math import ceil
 from discord.ext import commands
@@ -88,9 +89,12 @@ class AnuncioConfirmView(discord.ui.View):
             view=self
         )
         if self.image_url:
-            embed_pub = discord.Embed(color=discord.Color.purple())
-            embed_pub.set_image(url=self.image_url)
-            await self.channel.send(content=self.content or None, embed=embed_pub)
+            async with aiohttp.ClientSession() as session:
+                async with session.get(self.image_url) as resp:
+                    img_bytes = await resp.read()
+            ext = self.image_url.split("?")[0].split(".")[-1] or "png"
+            file = discord.File(BytesIO(img_bytes), filename=f"imagen.{ext}")
+            await self.channel.send(content=self.content or None, file=file)
         else:
             await self.channel.send(self.content)
         _pending_announcements.pop(self.user_id, None)
