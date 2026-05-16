@@ -31,7 +31,7 @@ class ConfirmBuyView(discord.ui.View):
         if interaction.user.id != self.author_id:
             return await interaction.response.send_message("❌ No es tu confirmación.", ephemeral=True)
 
-        await interaction.response.defer(ephemeral=True)
+        await interaction.response.defer(ephemeral=False)
 
         for item in self.children:
             item.disabled = True
@@ -72,14 +72,14 @@ class ConfirmBuyView(discord.ui.View):
             if tiene_tarjeta:
                 if user["bank"] < total:
                     return await interaction.edit_original_response(
-                        content=f"❌ No tienes suficiente dinero en el banco. Necesitas **{total}** {COIN}.",
+                        content=f"❌ No tienes suficiente banco. Necesitas **{total}** {COIN}.",
                         view=self
                     )
                 await update_bank(interaction.user.id, -total)
             else:
                 if user["balance"] < total:
                     return await interaction.edit_original_response(
-                        content=f"❌ No tienes suficiente balance. Necesitas **{total}** {COIN},\nO una 💳 **Tarjeta de Credito** para usar el dinero de tu banco directamente**",
+                        content=f"❌ No tienes suficiente balance. Necesitas **{total}** {COIN}.",
                         view=self
                     )
                 await update_balance(interaction.user.id, -total)
@@ -306,7 +306,7 @@ class UseButton(discord.ui.Button):
         super().__init__(
             style=discord.ButtonStyle.primary,
             label="Usar",
-            emoji="✔️",
+            emoji="✨",
             custom_id=f"use_{item['id']}"
         )
         self.item = item
@@ -370,7 +370,7 @@ class UseButton(discord.ui.Button):
             if log_channel:
                 nombre_log = interaction.user.nick or interaction.user.display_name
                 await log_channel.send(
-                    f"✔️ **{nombre_log}** usó {icono} **{item['nombre']}**"
+                    f"✨ **{nombre_log}** usó {icono} **{item['nombre']}**"
                 )
 
         except Exception as e:
@@ -422,7 +422,7 @@ class InventarioLayout(discord.ui.LayoutView):
 
             container.add_item(discord.ui.Separator())
             container.add_item(discord.ui.TextDisplay(
-                f"-# Total: **{len(self.items)}** tipo(s) de item  •  Usa ✔️ para consumir un item usable."
+                f"-# Total: **{len(self.items)}** tipo(s) de item  •  Usa ✨ para consumir un item usable."
             ))
 
             self.add_item(container)
