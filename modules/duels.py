@@ -350,7 +350,9 @@ class Duels(commands.Cog):
 
     @retar.error
     async def retar_error(self, ctx, error):
-        if isinstance(error, commands.CommandOnCooldown):
+        if isinstance(error, commands.MissingRequiredArgument):
+            await ctx.send(f"{ctx.author.mention} Formato correcto **!retar usuario monto**")
+        elif isinstance(error, commands.CommandOnCooldown):
             retry_after = error.retry_after
             timestamp = int(ctx.message.created_at.timestamp()) + int(retry_after)
             await ctx.send(f"🚀 La Arena de combate esta ocupada por Jugadores de otros universos Intenta <t:{timestamp}:R>")

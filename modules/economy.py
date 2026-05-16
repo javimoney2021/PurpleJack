@@ -19,21 +19,29 @@ class FinanceView(ui.View):
     async def depositar(self, interaction: Interaction, button: ui.Button):
         if interaction.user.id != self.user_id:
             return await interaction.response.send_message("❌ No es tu menú.", ephemeral=True)
-        await interaction.response.send_modal(DepositModal(self.user_id))
+        await interaction.response.send_modal(DepositModal(self.user_id, interaction.message))
 
-    @ui.button(label="Retirar", style=ButtonStyle.red)
+    @ui.button(label="Retirar", style=ButtonStyle.primary)
     async def retirar(self, interaction: Interaction, button: ui.Button):
         if interaction.user.id != self.user_id:
             return await interaction.response.send_message("❌ No es tu menú.", ephemeral=True)
-        await interaction.response.send_modal(WithdrawModal(self.user_id))
+        await interaction.response.send_modal(WithdrawModal(self.user_id, interaction.message))
+
+    @ui.button(label="Salir", style=ButtonStyle.danger)
+    async def salir(self, interaction: Interaction, button: ui.Button):
+        if interaction.user.id != self.user_id:
+            return await interaction.response.send_message("❌ No es tu menú.", ephemeral=True)
+        await interaction.message.delete()
+        await interaction.response.defer()
 
 
 class DepositModal(ui.Modal, title="Depositar al Banco"):
     amount = ui.TextInput(label="¿Cuánto deseas depositar?", placeholder="Ej: 500 o All")
 
-    def __init__(self, user_id):
+    def __init__(self, user_id, message):
         super().__init__()
         self.user_id = user_id
+        self.message = message
 
     async def on_submit(self, interaction: Interaction):
         try:
@@ -46,11 +54,13 @@ class DepositModal(ui.Modal, title="Depositar al Banco"):
             if amount > user["balance"]:
                 return await interaction.response.send_message("❌ No tienes suficiente balance.", ephemeral=True)
             await update_balance(self.user_id, -amount)
-            nick = interaction.user.nick or interaction.user.display_name
             await update_bank(self.user_id, amount)
-            await interaction.response.send_message(
-                f"💸 {nick} Depositaste **{amount}** {COIN} al banco.", ephemeral=False
-            )
+            user = await get_user(self.user_id)
+            embed = self.message.embeds[0]
+            embed.set_field_at(0, name=embed.fields[0].name, value=f"{user['balance']} {COIN}", inline=True)
+            embed.set_field_at(1, name=embed.fields[1].name, value=f"{user['bank']} {COIN}", inline=True)
+            await self.message.edit(embed=embed)
+            await interaction.response.defer()
         except ValueError:
             await interaction.response.send_message("❌ Ingresa un número válido.", ephemeral=True)
 
@@ -58,9 +68,10 @@ class DepositModal(ui.Modal, title="Depositar al Banco"):
 class WithdrawModal(ui.Modal, title="Retirar del Banco"):
     amount = ui.TextInput(label="¿Cuánto deseas retirar?", placeholder="Ej: 500 o All")
 
-    def __init__(self, user_id):
+    def __init__(self, user_id, message):
         super().__init__()
         self.user_id = user_id
+        self.message = message
 
     async def on_submit(self, interaction: Interaction):
         try:
@@ -72,11 +83,13 @@ class WithdrawModal(ui.Modal, title="Retirar del Banco"):
             if amount > user["bank"]:
                 return await interaction.response.send_message("❌ No tienes suficiente en el banco.", ephemeral=True)
             await update_bank(self.user_id, -amount)
-            nick = interaction.user.nick or interaction.user.display_name
             await update_balance(self.user_id, amount)
-            await interaction.response.send_message(
-                f"💸 {nick} Retiraste **{amount}** {COIN} del banco.", ephemeral=True
-            )
+            user = await get_user(self.user_id)
+            embed = self.message.embeds[0]
+            embed.set_field_at(0, name=embed.fields[0].name, value=f"{user['balance']} {COIN}", inline=True)
+            embed.set_field_at(1, name=embed.fields[1].name, value=f"{user['bank']} {COIN}", inline=True)
+            await self.message.edit(embed=embed)
+            await interaction.response.defer()
         except ValueError:
             await interaction.response.send_message("❌ Ingresa un número válido.", ephemeral=True)
 
@@ -95,7 +108,7 @@ class Economy(commands.Cog):
         embed.add_field(name=f"{COIN} Balance", value=f"{user['balance']} {COIN}", inline=True)
         embed.add_field(name="🏦 Banco", value=f"{user['bank']} {COIN}", inline=True)
         embed.set_thumbnail(url=ctx.author.display_avatar.url)
-        await ctx.message.reply(embed=embed, view=FinanceView(ctx.author.id), delete_after=25)
+        await ctx.message.reply(embed=embed, view=FinanceView(ctx.author.id))
 
     def format_cooldown(self, seconds: int) -> str:
         if seconds >= 3600:

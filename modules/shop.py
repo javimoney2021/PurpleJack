@@ -306,7 +306,7 @@ class UseButton(discord.ui.Button):
         super().__init__(
             style=discord.ButtonStyle.primary,
             label="Usar",
-            emoji="✨",
+            emoji="💥​",
             custom_id=f"use_{item['id']}"
         )
         self.item = item
