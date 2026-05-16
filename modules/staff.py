@@ -1022,10 +1022,10 @@ class Staff(commands.Cog):
             ephemeral=False
         )
 
-    @app_commands.command(name="anunciar", description="Envía un anuncio a un canal escogido")
+    @app_commands.command(name="call_post", description="Envía un anuncio a un canal escogido")
     @app_commands.describe(canal="Canal donde se enviará el anuncio")
     @is_staff()
-    async def anunciar(self, interaction: discord.Interaction, canal: discord.TextChannel):
+    async def call_post(self, interaction: discord.Interaction, canal: discord.TextChannel):
         try:
             role = discord.utils.get(interaction.user.roles, name=COORDINADOR_ROLE)
             if not role:
@@ -1168,17 +1168,12 @@ class Staff(commands.Cog):
         )
         confirm_embed.set_footer(text="Tienes 60 segundos para confirmar.")
 
-        try:
-            await message.author.send(
-                embed=confirm_embed,
-                view=AnuncioConfirmView(user_id, entry["channel"], content)
-            )
-        except discord.Forbidden:
-            await message.channel.send(
-                embed=confirm_embed,
-                view=AnuncioConfirmView(user_id, entry["channel"], content),
-                delete_after=60
-            )
+        await message.channel.send(
+            content=message.author.mention,
+            embed=confirm_embed,
+            view=AnuncioConfirmView(user_id, entry["channel"], content),
+            delete_after=65
+        )
 
 
     @app_commands.command(name="retar_edit", description="Cambia el cooldown del comando !retar")
