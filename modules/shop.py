@@ -306,7 +306,7 @@ class UseButton(discord.ui.Button):
         super().__init__(
             style=discord.ButtonStyle.primary,
             label="Usar",
-            emoji="👉​",
+            emoji="⚡​",
             custom_id=f"use_{item['id']}"
         )
         self.item = item
@@ -422,7 +422,7 @@ class InventarioLayout(discord.ui.LayoutView):
 
             container.add_item(discord.ui.Separator())
             container.add_item(discord.ui.TextDisplay(
-                f"-# Total: **{len(self.items)}** tipo(s) de item  •  Usa ✨ para consumir un item usable."
+                f"-# Total: **{len(self.items)}** tipo(s) de item  •  Usa ⚡ para consumir un item usable."
             ))
 
             self.add_item(container)
