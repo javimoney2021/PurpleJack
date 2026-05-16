@@ -68,12 +68,13 @@ class ResetAllModal(discord.ui.Modal, title="Confirmar Reset Global"):
 # ── ANUNCIO CONFIRM VIEW ───────────────────────────────
 
 class AnuncioConfirmView(discord.ui.View):
-    def __init__(self, user_id, channel, content, image_url=None):
+    def __init__(self, user_id, channel, content, img_bytes=None, img_filename=None):
         super().__init__(timeout=60)
         self.user_id = user_id
         self.channel = channel
         self.content = content
-        self.image_url = image_url
+        self.img_bytes = img_bytes
+        self.img_filename = img_filename or "imagen.png"
 
     @discord.ui.button(label="✅ Aceptar", style=discord.ButtonStyle.success)
     async def aceptar(self, interaction: discord.Interaction, button: discord.ui.Button):
@@ -88,10 +89,9 @@ class AnuncioConfirmView(discord.ui.View):
             ),
             view=self
         )
-        if self.image_url:
-            embed_img = discord.Embed(color=discord.Color.default())
-            embed_img.set_image(url=self.image_url)
-            await self.channel.send(content=self.content or None, embed=embed_img)
+        if self.img_bytes:
+            file = discord.File(BytesIO(self.img_bytes), filename=self.img_filename)
+            await self.channel.send(content=self.content or None, file=file)
         else:
             await self.channel.send(self.content)
         _pending_announcements.pop(self.user_id, None)
@@ -1167,8 +1167,21 @@ class Staff(commands.Cog):
             return
 
         content = message.content
-        image_url = message.attachments[0].url if message.attachments else None
         entry["content"] = content or "​"
+
+        # Capturar imagen ANTES de borrar el mensaje
+        img_bytes = None
+        img_filename = None
+        if message.attachments:
+            att = message.attachments[0]
+            img_filename = att.filename
+            try:
+                import aiohttp
+                async with aiohttp.ClientSession() as session:
+                    async with session.get(att.url) as resp:
+                        img_bytes = await resp.read()
+            except Exception:
+                img_bytes = None
 
         try:
             await message.delete()
@@ -1183,14 +1196,15 @@ class Staff(commands.Cog):
             ),
             color=discord.Color.orange()
         )
-        if image_url:
-            confirm_embed.set_image(url=image_url)
-        confirm_embed.set_footer(text="Tienes 60 segundos para confirmar.")
+        if img_bytes:
+            confirm_embed.set_footer(text="✅ Imagen adjunta detectada | Tienes 60 segundos para confirmar.")
+        else:
+            confirm_embed.set_footer(text="Tienes 60 segundos para confirmar.")
 
         await message.channel.send(
             content=message.author.mention,
             embed=confirm_embed,
-            view=AnuncioConfirmView(user_id, entry["channel"], content, image_url),
+            view=AnuncioConfirmView(user_id, entry["channel"], content, img_bytes, img_filename),
             delete_after=65
         )
 
