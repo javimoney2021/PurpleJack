@@ -89,8 +89,9 @@ class AnuncioConfirmView(discord.ui.View):
             view=self
         )
         if self.image_url:
-            msg = self.content or ""
-            await self.channel.send(f"{msg}\n{self.image_url}".strip())
+            embed_img = discord.Embed(color=discord.Color.default())
+            embed_img.set_image(url=self.image_url)
+            await self.channel.send(content=self.content or None, embed=embed_img)
         else:
             await self.channel.send(self.content)
         _pending_announcements.pop(self.user_id, None)
