@@ -89,12 +89,8 @@ class AnuncioConfirmView(discord.ui.View):
             view=self
         )
         if self.image_url:
-            async with aiohttp.ClientSession() as session:
-                async with session.get(self.image_url) as resp:
-                    img_bytes = await resp.read()
-            ext = self.image_url.split("?")[0].split(".")[-1] or "png"
-            file = discord.File(BytesIO(img_bytes), filename=f"imagen.{ext}")
-            await self.channel.send(content=self.content or None, file=file)
+            msg = self.content or ""
+            await self.channel.send(f"{msg}\n{self.image_url}".strip())
         else:
             await self.channel.send(self.content)
         _pending_announcements.pop(self.user_id, None)
