@@ -180,7 +180,7 @@ class BuyButton(discord.ui.Button):
                 f"**{icono} {self.item['nombre']}** por **{self.item['precio']} {COIN}**?"
             ),
             view=ConfirmBuyView(self.author_id, self.item, self.bot),
-            ephemeral=True
+            ephemeral=False
         )
 
 

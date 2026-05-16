@@ -34,7 +34,7 @@ async def load_modules():
 async def check_cargos_loop():
     await bot.wait_until_ready()
     while not bot.is_closed():
-        await asyncio.sleep(43200)
+        await asyncio.sleep(60)
         now = time.time()
         cargos = cache.get_cargos_cache()
         vencidos = []
