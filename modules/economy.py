@@ -5,7 +5,7 @@ import time
 
 from core.database import get_user, update_balance, update_bank
 from core import cache
-from core.config import COIN, game_config, ruleta_config, rob_config, rr_config
+from core.config import COIN, game_config, ruleta_config, rob_config, rr_config, dados_config
 
 TOP_COOLDOWN = 300
 
