@@ -176,7 +176,7 @@ class BuyButton(discord.ui.Button):
         icono = self.item["icono"] if self.item["icono"] else "🔹"
         await interaction.response.send_message(
             content=(
-                f"🛒 ¿Estás seguro que deseas comprar "
+                f"{interaction.user.mention} 🛒 ¿Estás seguro que deseas comprar "
                 f"**{icono} {self.item['nombre']}** por **{self.item['precio']} {COIN}**?"
             ),
             view=ConfirmBuyView(self.author_id, self.item, self.bot),
@@ -441,7 +441,22 @@ class Shop(commands.Cog):
     def __init__(self, bot):
         self.bot = bot
 
+    async def cog_command_error(self, ctx, error):
+        if isinstance(error, commands.CommandOnCooldown):
+            retry = int(error.retry_after)
+            if retry >= 60:
+                tiempo = f"{retry // 60}m {retry % 60}s" if retry % 60 else f"{retry // 60}m"
+            else:
+                tiempo = f"{retry}s"
+            await ctx.send(
+                f"⏳ {ctx.author.mention} Podrás usar este comando de nuevo en **{tiempo}**.",
+                delete_after=10
+            )
+        else:
+            raise error
+
     @commands.command()
+    @commands.cooldown(1, 150, commands.BucketType.user)
     async def tienda(self, ctx):
         items = await get_all_items()
         if not items:

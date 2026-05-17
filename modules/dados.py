@@ -46,7 +46,7 @@ def choose_dice_rolls(success: bool):
         bot_suma = bot_dado_1 + bot_dado_2
         if success and autor_suma > bot_suma:
             return autor_dado_1, autor_dado_2, bot_dado_1, bot_dado_2
-        if not success and autor_suma <= bot_suma:
+        if not success and autor_suma < bot_suma:
             return autor_dado_1, autor_dado_2, bot_dado_1, bot_dado_2
 
 
@@ -101,18 +101,17 @@ class DadosRollView(discord.ui.View):
         autor_suma = autor_dado_1 + autor_dado_2
         bot_suma = bot_dado_1 + bot_dado_2
 
-        if exito:
+        if autor_suma == bot_suma:
+            resultado_text = f"🤝 ¡Empate! Se devuelve tu apuesta de {self.monto} {COIN}."
+            color = discord.Color.yellow()
+        elif exito:
             ganancia = self.monto * 2
             await update_balance(self.author_id, ganancia)
-            resultado_text = (
-                f"🎉 ¡Ganaste! Tu apuesta se duplica: +{ganancia} {COIN}."
-            )
+            resultado_text = f"🎉 ¡Ganaste! Tu apuesta se duplica: +{ganancia} {COIN}."
             color = discord.Color.green()
         else:
             await update_balance(self.author_id, -self.monto)
-            resultado_text = (
-                f"💀 Perdiste tu apuesta inicial de {self.monto} {COIN}."
-            )
+            resultado_text = f"💀 Perdiste tu apuesta inicial de {self.monto} {COIN}."
             color = discord.Color.red()
 
         expira_en = time.time() + dados_config["cooldown"]

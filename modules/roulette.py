@@ -110,7 +110,7 @@ class Roulette(commands.Cog):
         )
 
         embed.set_footer(
-            text="🌀 Girando la ruleta... Espera 10 segundos"
+            text="🌀 Girando la ruleta... Espera 6 segundos"
         )
 
         embed.set_thumbnail(
@@ -119,7 +119,7 @@ class Roulette(commands.Cog):
 
         await ctx.send(embed=embed)
 
-        await asyncio.sleep(10)
+        await asyncio.sleep(6)
 
         resultado = random.choice(list(SLOTS.keys()))
         color_resultado = SLOTS[resultado]

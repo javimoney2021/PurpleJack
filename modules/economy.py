@@ -115,7 +115,22 @@ class Economy(commands.Cog):
             return f"{seconds // 3600}h"
         return f"{seconds // 60}m"
 
+    async def cog_command_error(self, ctx, error):
+        if isinstance(error, commands.CommandOnCooldown):
+            retry = int(error.retry_after)
+            if retry >= 60:
+                tiempo = f"{retry // 60}m {retry % 60}s" if retry % 60 else f"{retry // 60}m"
+            else:
+                tiempo = f"{retry}s"
+            await ctx.send(
+                f"⏳ {ctx.author.mention} Podrás usar este comando de nuevo en **{tiempo}**.",
+                delete_after=10
+            )
+        else:
+            raise error
+
     @commands.command(name="cd")
+    @commands.cooldown(1, 150, commands.BucketType.user)
     async def cooldowns(self, ctx):
         embed = discord.Embed(
             title="⏱️ Cooldowns Actuales",
@@ -232,6 +247,7 @@ class Economy(commands.Cog):
         await interaction.response.send_message(embed=embed, ephemeral=True, delete_after=25)
 
     @commands.command(name="prob")
+    @commands.cooldown(1, 150, commands.BucketType.user)
     async def probabilidades(self, ctx):
         crime_exito = int(game_config["crime"]["ganar_prob"] * 100)
         crime_fallo = int(game_config["crime"]["perder_prob"] * 100)
