@@ -7,7 +7,7 @@ from core.database import get_user, update_balance, update_bank
 from core.config import COIN
 
 # ── CONFIG ─────────────────────────────────────────────
-DUEL_TIMEOUT = 60  # segundos para aceptar/rechazar
+DUEL_TIMEOUT = 20  # segundos para aceptar/rechazar
 ROUND_TIMEOUT = 5  # segundos que la espada está visible
 TOTAL_ROUNDS = 9
 GRID_SIZE = 5
@@ -31,15 +31,18 @@ class AcceptDuelView(discord.ui.View):
         self.ctx = ctx
 
     async def on_timeout(self):
-        embed = discord.Embed(
-            title="⏰ Duelo Expirado",
-            description="El reto ha expirado por inactividad.",
-            color=discord.Color.red()
-        )
         try:
-            await self.message.edit(embed=embed, view=None)
+            await self.message.delete()
         except:
             pass
+        try:
+            await self.ctx.send(
+                f"⚔️ {self.ctx.author.mention} **Reto anulado (Sin Respuesta)** Intenta retar a otra persona.",
+                delete_after=15
+            )
+        except:
+            pass
+        self.ctx.command.reset_cooldown(self.ctx)
 
     @discord.ui.button(label="Aceptar Reto", style=discord.ButtonStyle.success)
     async def aceptar(self, interaction: discord.Interaction, button: discord.ui.Button):
