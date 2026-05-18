@@ -50,12 +50,26 @@ class GolpearView(discord.ui.View):
         for item in self.children:
             item.disabled = True
 
-        embed = discord.Embed(
-            title="💨 Cofre Vencido",
-            description="El cofre desapareció... Nadie golpeó a tiempo.",
-            color=discord.Color.dark_gray()
-        )
-        embed.set_image(url=GOLPEAR_GIF)
+        if self.golpeadores:
+            await asyncio.sleep(3)
+            lineas = "\n".join(
+                f"**{u.display_name}** obtuvo **{m}** {COIN}"
+                for u, m in self.golpeadores
+            )
+            embed = discord.Embed(
+                title="💥 ¡Cofre Destruido!",
+                description=f"Los aventureros que golpearon primero:\n\n{lineas}",
+                color=discord.Color.gold()
+            )
+            embed.set_image(url=GOLPEAR_GIF)
+            embed.set_footer(text="Este mensaje se eliminará en 15 segundos.")
+        else:
+            embed = discord.Embed(
+                title="💨 Cofre Vencido",
+                description="El cofre desapareció... Nadie golpeó a tiempo.",
+                color=discord.Color.dark_gray()
+            )
+            embed.set_image(url=GOLPEAR_GIF)
 
         try:
             await self.message.edit(embed=embed, view=self)
