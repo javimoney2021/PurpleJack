@@ -29,6 +29,7 @@ async def load_modules():
     await bot.load_extension("modules.collect")
     await bot.load_extension("modules.dados")
     await bot.load_extension("modules.duels")
+    await bot.load_extension("modules.golpear")
 
 
 async def check_cargos_loop():
@@ -74,6 +75,12 @@ async def on_command_error(ctx, error):
             delete_after=10
         )
 
+async def shutdown():
+    print("⚠️ Apagando bot — flusheando caché a DB...")
+    await cache.flush_to_db()
+    print("✅ Caché flusheada correctamente.")
+    await bot.close()
+
 @bot.event
 async def on_ready():
     print(f"✅ Bot conectado como {bot.user}")
@@ -90,14 +97,18 @@ async def on_ready():
 def run_bot():
     async def main():
         await init_db()
-        await create_game_config_table()  # crea tabla si no existe + inserta defaults
-        await load_game_config()          # sobrescribe config.py con valores de DB
+        await create_game_config_table()
+        await load_game_config()
         await load_dados_config()
         await load_items_to_cache()
         await load_cargos_to_cache()
         await load_collect_config_to_cache()
         await load_modules()
-        await bot.start(TOKEN)
+        try:
+            await bot.start(TOKEN)
+        finally:
+            await cache.flush_to_db()
+            print("✅ Flush final completado al cerrar.")
 
     asyncio.run(main())
 

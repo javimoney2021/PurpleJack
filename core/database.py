@@ -121,10 +121,29 @@ async def get_user(user_id):
 async def update_balance(user_id, amount):
     await get_user(user_id)
     cache.update_cached_balance(user_id, amount)
+    await _flush_user(user_id)
 
 async def update_bank(user_id, amount):
     await get_user(user_id)
     cache.update_cached_bank(user_id, amount)
+    await _flush_user(user_id)
+
+async def _flush_user(user_id):
+    data = cache.get_cached(user_id)
+    if not data:
+        return
+    try:
+        async with pool.acquire() as conn:
+            await conn.execute(
+                """UPDATE users SET balance=$1, bank=$2,
+                cooldown_work=$3, cooldown_crime=$4 WHERE id=$5""",
+                data["balance"], data["bank"],
+                data["cooldown_work"], data["cooldown_crime"],
+                user_id
+            )
+        cache.clear_dirty(user_id)
+    except Exception as e:
+        print(f"⚠️ Error en flush inmediato para {user_id}: {e}")
 
 async def update_cooldown(user_id, command, timestamp):
     await get_user(user_id)
