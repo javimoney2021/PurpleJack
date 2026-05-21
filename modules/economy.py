@@ -197,14 +197,17 @@ class Economy(commands.Cog):
 
         async with pool.acquire() as conn:
             rows = await conn.fetch(
-                "SELECT id, balance FROM users ORDER BY balance DESC LIMIT 10"
+                "SELECT id, balance, bank FROM users ORDER BY (balance + bank) DESC LIMIT 10"
             )
 
         resultados = []
         for row in rows:
             uid = row["id"]
-            balance = user_cache[uid]["balance"] if uid in user_cache else row["balance"]
-            resultados.append((uid, balance))
+            if uid in user_cache:
+                total = user_cache[uid]["balance"] + user_cache[uid]["bank"]
+            else:
+                total = row["balance"] + row["bank"]
+            resultados.append((uid, total))
 
         resultados.sort(key=lambda x: x[1], reverse=True)
 
