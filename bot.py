@@ -93,7 +93,7 @@ async def verificar_acceso(ctx):
     if dias < REQUIRED_DAYS or not tiene_rol:
         await ctx.send(
             f"❌ {ctx.author.mention} Necesitas algunos dias de **antigüedad** en el servidor y el Rol <@&{REQUIRED_ROLE_ID}> para usar la Nave.",
-            delete_after=5
+            delete_after=7
         )
         return False
     return True
