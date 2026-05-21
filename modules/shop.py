@@ -94,6 +94,7 @@ class ConfirmBuyView(discord.ui.View):
                 "mensaje_uso": item_fresh["mensaje_uso"],
                 "rol_id": item_fresh["rol_id"],
                 "duracion": item_fresh.get("duracion", 0),
+                "limite_uso": item_fresh.get("limite_uso", 0),
                 "cantidad": cantidad_compra
             })
 
@@ -331,6 +332,18 @@ class UseButton(discord.ui.Button):
                     f"❌ Ya no tienes **{self.item['nombre']}** en tu inventario.", ephemeral=True
                 )
 
+            # ── Verificar límite de uso diario ─────────
+            limite_uso = item.get("limite_uso", 0)
+            if limite_uso and limite_uso > 0:
+                from core.database import get_usos_diarios
+                usos_hoy = await get_usos_diarios(interaction.user.id, item["id"])
+                if usos_hoy >= limite_uso:
+                    icono = item["icono"] if item["icono"] else "🔹"
+                    return await interaction.followup.send(
+                        f"⏳ Solo puedes utilizar **{limite_uso}** de {icono} **{item['nombre']}** cada día.",
+                        ephemeral=True
+                    )
+
             await remove_from_inventory(interaction.user.id, item["nombre"])
 
             if item.get("rol_id"):
@@ -346,6 +359,11 @@ class UseButton(discord.ui.Button):
                             int(item["rol_id"]),
                             expira_en
                         )
+
+            # ── Registrar uso diario si tiene límite ───
+            if limite_uso and limite_uso > 0:
+                from core.database import registrar_uso_diario
+                await registrar_uso_diario(interaction.user.id, item["id"])
 
             icono = item["icono"] if item["icono"] else "🔹"
             mensaje = item["mensaje_uso"] if item["mensaje_uso"] else f"Usaste {icono} **{item['nombre']}**."

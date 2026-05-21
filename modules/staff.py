@@ -502,7 +502,8 @@ class Staff(commands.Cog):
         rol="Rol que se otorga al usar el item. Opcional.",
         duracion_rol="Duración del rol: ej 30m, 12h, 7d. Vacío = permanente. Opcional.",
         cantid_por_user="Límite de compras por usuario. Vacío = ilimitado. Opcional.",
-        mensaje_uso="Mensaje al usar el item en !inv. Vacío = mensaje por defecto. Opcional."
+        mensaje_uso="Mensaje al usar el item en !inv. Vacío = mensaje por defecto. Opcional.",
+        limite_uso="Máximo de usos por día por usuario. Ej: 1. Vacío = sin límite. Opcional."
     )
     @is_staff()
     async def item_new(self, interaction,
@@ -515,7 +516,8 @@ class Staff(commands.Cog):
                        rol: discord.Role = None,
                        duracion_rol: str = "",
                        cantid_por_user: int = 0,
-                       mensaje_uso: str = ""):
+                       mensaje_uso: str = "",
+                       limite_uso: int = 0):
 
         if precio <= 0:
             return await interaction.response.send_message("❌ El precio debe ser mayor a 0.", ephemeral=True)
@@ -562,13 +564,15 @@ class Staff(commands.Cog):
             mensaje_uso=mensaje_uso.strip(),
             rol_id=rol_id,
             duracion=duracion_segundos,
-            limite_por_usuario=cantid_por_user if cantid_por_user > 0 else 0
+            limite_por_usuario=cantid_por_user if cantid_por_user > 0 else 0,
+            limite_uso=limite_uso if limite_uso > 0 else 0
         )
 
         dur_txt = duracion_rol if duracion_rol else "Permanente"
         rol_txt = rol.mention if rol else "Ninguno"
         icono_display = icono if icono else "🔹"
         limite_txt = str(cantid_por_user) if cantid_por_user > 0 else "∞"
+        limite_uso_txt = str(limite_uso) if limite_uso > 0 else "∞"
 
         uso_txt = mensaje_uso.strip() if mensaje_uso.strip() else "Mensaje por defecto"
         await interaction.followup.send(
@@ -576,6 +580,7 @@ class Staff(commands.Cog):
             f"• Precio: **{precio}** {COIN}\n"
             f"• Stock total: **{'∞' if stock == -1 else stock}**\n"
             f"• Límite por usuario: **{limite_txt}**\n"
+            f"• Usos por día: **{limite_uso_txt}**\n"
             f"• Rol: {rol_txt}  •  Duración: {dur_txt}\n"
             f"• Mensaje de uso: {uso_txt}",
             ephemeral=False
@@ -586,14 +591,16 @@ class Staff(commands.Cog):
         item="Selecciona el item a editar",
         nuevo_nombre="Nuevo nombre. Vacío = sin cambio. Opcional.",
         nuevo_precio="Nuevo precio. Vacío = sin cambio. Opcional.",
-        nueva_desc="Nueva descripción corta. Vacío = sin cambio. Opcional."
+        nueva_desc="Nueva descripción corta. Vacío = sin cambio. Opcional.",
+        nuevo_mensaje_uso="Nuevo mensaje al usar el item. Vacío = sin cambio. Opcional."
     )
     @is_staff()
     async def editar_item(self, interaction,
                           item: str,
                           nuevo_nombre: str = "",
                           nuevo_precio: int = None,
-                          nueva_desc: str = ""):
+                          nueva_desc: str = "",
+                          nuevo_mensaje_uso: str = ""):
 
         await interaction.response.defer()
 
@@ -604,7 +611,7 @@ class Staff(commands.Cog):
                     f"❌ Item **{item}** no encontrado.", ephemeral=True
                 )
 
-            if not any([nuevo_nombre, nuevo_precio is not None, nueva_desc]):
+            if not any([nuevo_nombre, nuevo_precio is not None, nueva_desc, nuevo_mensaje_uso]):
                 return await interaction.followup.send(
                     "❌ Debes cambiar al menos un campo.", ephemeral=True
                 )
@@ -612,8 +619,9 @@ class Staff(commands.Cog):
             nombre = nuevo_nombre.strip() or None
             precio = nuevo_precio if nuevo_precio is not None else None
             desc = nueva_desc.strip() or None
+            msg_uso = nuevo_mensaje_uso.strip() if nuevo_mensaje_uso.strip() else None
 
-            await edit_item(found["id"], nombre=nombre, precio=precio, descripcion=desc)
+            await edit_item(found["id"], nombre=nombre, precio=precio, descripcion=desc, mensaje_uso=msg_uso)
 
             cambios = []
             if nombre:
@@ -622,6 +630,8 @@ class Staff(commands.Cog):
                 cambios.append(f"• Precio: **{found['precio']}** → **{precio}** {COIN}")
             if desc:
                 cambios.append(f"• Descripción: **{desc}**")
+            if msg_uso is not None:
+                cambios.append(f"• Mensaje de uso: **{msg_uso}**")
 
             icono = found["icono"] if found["icono"] else "🔹"
             await interaction.followup.send(
@@ -634,7 +644,6 @@ class Staff(commands.Cog):
                 "❌ Ocurrió un error al editar el item. Intenta de nuevo más tarde.",
                 ephemeral=True
             )
-
     @editar_item.autocomplete("item")
     async def editar_item_autocomplete(self, interaction: discord.Interaction, current: str):
         items = cache.get_items_cache()

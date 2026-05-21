@@ -34,7 +34,8 @@ async def init_db():
             mensaje_uso TEXT DEFAULT '',
             rol_id BIGINT DEFAULT NULL,
             duracion INTEGER DEFAULT 0,
-            limite_por_usuario INTEGER DEFAULT 0
+            limite_por_usuario INTEGER DEFAULT 0,
+            limite_uso INTEGER DEFAULT 0
         )
         """)
 
@@ -44,6 +45,7 @@ async def init_db():
             ("cantidad",             "INTEGER DEFAULT 1"),
             ("duracion",             "INTEGER DEFAULT 0"),
             ("limite_por_usuario",   "INTEGER DEFAULT 0"),
+            ("limite_uso",           "INTEGER DEFAULT 0"),
         ]:
             await conn.execute(
                 f"ALTER TABLE items ADD COLUMN IF NOT EXISTS {col} {definition}"
@@ -91,6 +93,16 @@ async def init_db():
             game TEXT,
             expira_en DOUBLE PRECISION,
             PRIMARY KEY (user_id, game)
+        )
+        """)
+
+        await conn.execute("""
+        CREATE TABLE IF NOT EXISTS item_uso_diario (
+            user_id BIGINT,
+            item_id INTEGER,
+            fecha DATE NOT NULL,
+            usos INTEGER DEFAULT 0,
+            PRIMARY KEY (user_id, item_id, fecha)
         )
         """)
 
@@ -174,20 +186,20 @@ async def get_item_by_name(nombre):
 
 async def add_item(nombre, descripcion, descripcion_larga, precio, cantidad,
                    stock, icono, utilizable, mensaje_uso, rol_id, duracion,
-                   limite_por_usuario=0):
+                   limite_por_usuario=0, limite_uso=0):
     async with pool.acquire() as conn:
         await conn.execute("""
             INSERT INTO items
                 (nombre, descripcion, descripcion_larga, precio, cantidad,
                  stock, icono, utilizable, mensaje_uso, rol_id, duracion,
-                 limite_por_usuario)
-                VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12)
+                 limite_por_usuario, limite_uso)
+                VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13)
         """, nombre, descripcion, descripcion_larga, precio, cantidad,
              stock, icono, utilizable, mensaje_uso, rol_id, duracion,
-             limite_por_usuario)
+             limite_por_usuario, limite_uso)
     await load_items_to_cache()
 
-async def edit_item(item_id, nombre=None, precio=None, stock=None, descripcion=None):
+async def edit_item(item_id, nombre=None, precio=None, stock=None, descripcion=None, mensaje_uso=None):
     async with pool.acquire() as conn:
         if nombre:
             await conn.execute("UPDATE items SET nombre=$1 WHERE id=$2", nombre, item_id)
@@ -197,6 +209,8 @@ async def edit_item(item_id, nombre=None, precio=None, stock=None, descripcion=N
             await conn.execute("UPDATE items SET stock=$1 WHERE id=$2", stock, item_id)
         if descripcion:
             await conn.execute("UPDATE items SET descripcion=$1 WHERE id=$2", descripcion, item_id)
+        if mensaje_uso is not None:
+            await conn.execute("UPDATE items SET mensaje_uso=$1 WHERE id=$2", mensaje_uso, item_id)
     await load_items_to_cache()
 
 async def delete_item(item_id):
@@ -247,7 +261,7 @@ async def get_inventory_from_db(user_id):
     async with pool.acquire() as conn:
         rows = await conn.fetch("""
             SELECT i.id, i.nombre, i.icono, i.utilizable, i.mensaje_uso,
-                   i.rol_id, i.duracion, inv.cantidad
+                   i.rol_id, i.duracion, i.limite_uso, inv.cantidad
             FROM inventario inv
             JOIN items i ON inv.item_id = i.id
             WHERE inv.user_id = $1
@@ -283,6 +297,36 @@ async def remove_from_inventory(user_id, item_nombre):
             )
     cache.remove_from_inventory_cache(user_id, item_nombre)
     return True
+
+
+async def get_usos_diarios(user_id: int, item_id: int) -> int:
+    """Devuelve cuántas veces usó el usuario ese item hoy (UTC)."""
+    from datetime import date
+    today = date.today()
+    async with pool.acquire() as conn:
+        row = await conn.fetchrow(
+            "SELECT usos FROM item_uso_diario WHERE user_id=$1 AND item_id=$2 AND fecha=$3",
+            user_id, item_id, today
+        )
+    return row["usos"] if row else 0
+
+
+async def registrar_uso_diario(user_id: int, item_id: int) -> int:
+    """Incrementa el contador diario de uso y devuelve el nuevo total."""
+    from datetime import date
+    today = date.today()
+    async with pool.acquire() as conn:
+        await conn.execute("""
+            INSERT INTO item_uso_diario (user_id, item_id, fecha, usos)
+            VALUES ($1, $2, $3, 1)
+            ON CONFLICT (user_id, item_id, fecha)
+            DO UPDATE SET usos = item_uso_diario.usos + 1
+        """, user_id, item_id, today)
+        row = await conn.fetchrow(
+            "SELECT usos FROM item_uso_diario WHERE user_id=$1 AND item_id=$2 AND fecha=$3",
+            user_id, item_id, today
+        )
+    return row["usos"] if row else 1
 
 
 async def get_all_users_net_worth(minimum=0):

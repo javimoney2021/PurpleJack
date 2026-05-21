@@ -117,7 +117,9 @@ def add_to_inventory_cache(user_id, item):
     if existing:
         existing["cantidad"] += item.get("cantidad", 1)
     else:
-        _inventory_cache[user_id].append(dict(item))
+        entry = dict(item)
+        entry.setdefault("limite_uso", 0)
+        _inventory_cache[user_id].append(entry)
     touch_user(user_id)
 
 def remove_from_inventory_cache(user_id, nombre):
