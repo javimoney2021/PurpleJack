@@ -11,7 +11,7 @@ GOLPEAR_GIF = "https://pub-a09b3609b6b34dfab5c7aa7742cd1a8a.r2.dev/Purple%20jack
 MIN_COINS = 150
 MAX_COINS = 800
 MAX_GOLPES = 3
-COFRE_TIMEOUT = 10
+COFRE_TIMEOUT = 6
 STAFF_ROLE = "Equipo de Eventos"
 
 # ── ESTADO GLOBAL ──────────────────────────────────────
@@ -62,7 +62,7 @@ class GolpearView(discord.ui.View):
                 color=discord.Color.gold()
             )
             embed.set_image(url=GOLPEAR_GIF)
-            embed.set_footer(text="Este mensaje se eliminará en 15 segundos.")
+            embed.set_footer(text="Este mensaje se eliminará en breve.")
         else:
             embed = discord.Embed(
                 title="💨 Cofre Vencido",
@@ -142,7 +142,7 @@ class GolpearView(discord.ui.View):
 async def spawn_cofre(canal: discord.TextChannel):
     embed = discord.Embed(
         title="💥 ¡Cofre Misterioso!",
-        description="¡Un cofre misterioso ha aparecido!\n\n¡Sé el primero en golpearlo!",
+        description="¡Un cofre misterioso ha aparecido!\n\n¡Sé de los primeros en golpearlo!",
         color=discord.Color.purple()
     )
     embed.set_image(url=GOLPEAR_GIF)
@@ -230,14 +230,14 @@ class Golpear(commands.Cog):
             ephemeral=False
         )
 
-    @app_commands.command(name="golpear_test", description="Spawna un cofre de prueba en un canal")
+    @app_commands.command(name="golpear_test", description="Spawna un cofre en un canal")
     @app_commands.describe(canal="Canal donde aparecerá el cofre de prueba")
     @is_staff()
     async def golpear_test(self, interaction: discord.Interaction, canal: discord.TextChannel):
         await interaction.response.defer(ephemeral=True)
         await spawn_cofre(canal)
         await interaction.followup.send(
-            f"✅ Cofre de prueba enviado a {canal.mention}.", ephemeral=True
+            f"✅ Cofre enviado a {canal.mention}.", ephemeral=True
         )
 
 

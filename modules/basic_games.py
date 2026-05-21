@@ -57,11 +57,10 @@ class BasicGames(commands.Cog):
             game_config["work"]["max"]
         )
 
-        nick = ctx.author.nick or ctx.author.display_name
 
         await update_balance(ctx.author.id, amount)
         await update_cooldown(ctx.author.id, "work", now)
-        await ctx.message.reply(f"**{nick}** " + random.choice(WORK_MESSAGES).format(monto=amount))
+        await ctx.message.reply(f"{ctx.author.mention} " + random.choice(WORK_MESSAGES).format(monto=amount))
 
     @commands.command()
     async def crime(self, ctx):
@@ -82,7 +81,6 @@ class BasicGames(commands.Cog):
         )
 
         success = random.random() <= game_config["crime"]["ganar_prob"]
-        nick = ctx.author.nick or ctx.author.display_name
 
         if success:
             await update_balance(ctx.author.id, amount)
@@ -92,7 +90,7 @@ class BasicGames(commands.Cog):
             msg = random.choice(CRIME_FAIL)
 
         await update_cooldown(ctx.author.id, "crime", now)
-        await ctx.message.reply(f"**{nick}** " + msg.format(monto=amount))
+        await ctx.message.reply(f"{ctx.author.mention} " + msg.format(monto=amount))
 
 
 async def setup(bot):
