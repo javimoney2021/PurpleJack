@@ -706,6 +706,7 @@ class Staff(commands.Cog):
             "mensaje_uso": found["mensaje_uso"],
             "rol_id": found["rol_id"],
             "duracion": found.get("duracion", 0),
+            "limite_uso": found.get("limite_uso", 0),
             "cantidad": cantidad
         })
         icono = found["icono"] if found["icono"] else "🔹"
