@@ -93,11 +93,9 @@ class JoinRaceView(discord.ui.View):
 
 # ── RACE LOGIC ─────────────────────────────────────────
 def build_track(position, emoji):
-    filled = int((position / TRACK_LENGTH) * TRACK_LENGTH)
-    track = "░" * TRACK_LENGTH
-    pos = min(filled, TRACK_LENGTH - 1)
-    track = "░" * pos + emoji + "░" * (TRACK_LENGTH - pos - 1)
-    return f"`{track}` 🏁"
+    pos = min(int((position / TRACK_LENGTH) * TRACK_LENGTH), TRACK_LENGTH - 1)
+    track = "░" * pos + "●" + "░" * (TRACK_LENGTH - pos - 1)
+    return f"{emoji}`{track}`🏁"
 
 
 def build_race_embed(horses, step, total_steps, monto):
