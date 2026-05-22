@@ -30,6 +30,7 @@ async def load_modules():
     await bot.load_extension("modules.dados")
     await bot.load_extension("modules.duels")
     await bot.load_extension("modules.golpear")
+    await bot.load_extension("modules.carrera")
 
 
 async def check_cargos_loop():
@@ -80,23 +81,6 @@ async def shutdown():
     await cache.flush_to_db()
     print("✅ Caché flusheada correctamente.")
     await bot.close()
-    
-REQUIRED_ROLE_ID = 1409401827065204786
-REQUIRED_DAYS = 10
-
-@bot.check
-async def verificar_acceso(ctx):
-    if ctx.guild is None:
-        return True
-    dias = (discord.utils.utcnow() - ctx.author.joined_at).days
-    tiene_rol = any(r.id == REQUIRED_ROLE_ID for r in ctx.author.roles)
-    if dias < REQUIRED_DAYS or not tiene_rol:
-        await ctx.send(
-            f"❌ {ctx.author.mention} Necesitas algunos dias de **antigüedad** en el servidor y el Rol **@Verificado** para usar la Nave.",
-            delete_after=7
-        )
-        return False
-    return True
 
 @bot.event
 async def on_ready():
