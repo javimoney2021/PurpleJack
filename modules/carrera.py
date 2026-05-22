@@ -81,6 +81,9 @@ class JoinRaceView(discord.ui.View):
         await interaction.response.edit_message(embed=self.build_embed(countdown=None), view=self)
 
     async def on_timeout(self):
+        # Si la carrera ya arrancó no hacer nada, run_race maneja el mensaje
+        if self.started:
+            return
         self.started = True
         for item in self.children:
             item.disabled = True
@@ -94,8 +97,9 @@ class JoinRaceView(discord.ui.View):
 # ── RACE LOGIC ─────────────────────────────────────────
 def build_track(position, emoji):
     pos = min(int((position / TRACK_LENGTH) * TRACK_LENGTH), TRACK_LENGTH - 1)
-    track = "░" * pos + "●" + "░" * (TRACK_LENGTH - pos - 1)
-    return f"{emoji}`{track}`🏁"
+    before = "▬" * pos
+    after = "▬" * (TRACK_LENGTH - pos - 1)
+    return f"{before}{emoji}{after}🏁"
 
 
 def build_race_embed(horses, step, total_steps, monto):
