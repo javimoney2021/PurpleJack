@@ -7,8 +7,8 @@ from core.config import COIN
 
 # ── CONFIG ─────────────────────────────────────────────
 TRACK_LENGTH = 20
-RACE_DURATION = 12      # segundos totales de carrera
-RACE_STEPS = 8          # cuántas veces se actualiza el embed
+RACE_DURATION = 16      # segundos totales de carrera
+RACE_STEPS = 12          # cuántas veces se actualiza el embed
 STEP_SLEEP = RACE_DURATION / RACE_STEPS
 JOIN_TIMEOUT = 10       # segundos de inscripción
 MAX_PLAYERS = 5
