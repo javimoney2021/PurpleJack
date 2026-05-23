@@ -173,8 +173,7 @@ class ConfirmBuyView(discord.ui.View):
 
 class QuantityModal(discord.ui.Modal):
     def __init__(self, item, author_id, bot):
-        icono = item["icono"] if item["icono"] else "🔹"
-        super().__init__(title=f"Comprar {icono} {item['nombre'][:40]}")
+        super().__init__(title=f"Comprar {item['nombre'][:40]}")
         self.item = item
         self.author_id = author_id
         self.bot = bot
