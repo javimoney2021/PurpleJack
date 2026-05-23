@@ -31,6 +31,7 @@ async def load_modules():
     await bot.load_extension("modules.duels")
     await bot.load_extension("modules.golpear")
     await bot.load_extension("modules.carrera")
+    await bot.load_extension("modules.registro_ruleta")
 
 
 async def check_cargos_loop():
