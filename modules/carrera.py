@@ -9,14 +9,12 @@ from core.config import COIN
 # ── CONFIG ─────────────────────────────────────────────
 TRACK_LENGTH = 20
 RACE_DURATION = 12      # segundos totales de carrera
-RACE_STEPS = 8          # cuántas veces se actualiza el embed
-STEP_SLEEP = RACE_DURATION / RACE_STEPS
-JOIN_TIMEOUT = 10       # segundos de inscripción
-MAX_PLAYERS = 5
-WIN_PROB = 0.70
-MULTIPLIER_WIN = 3.5
-MULTIPLIER_LOSS = 1.5   # se descuenta apuesta x1.5
+RACE_STEPS    = 8       # cuántas veces se actualiza el embed
+STEP_SLEEP    = RACE_DURATION / RACE_STEPS
+JOIN_TIMEOUT  = 10      # segundos de inscripción
+MAX_PLAYERS   = 5       # máximo jugadores reales (sin bots)
 
+# Emojis de caballos precargados (uno por slot)
 HORSE_EMOJIS = [
     "<:c1:1506999542074183791>",
     "<:c2:1506999577386160170>",
@@ -25,13 +23,11 @@ HORSE_EMOJIS = [
     "<:c5:1506999643110637598>",
 ]
 
-BOT_NAMES = ["Trueno", "Relámpago", "Fantasma", "Tormenta", "Sombra"]
-
 STAFF_ROLE = "Equipo de Eventos"
 
 # ── ESTADO GLOBAL ──────────────────────────────────────
-_active_races = set()  # {channel_id}
-_carrera_activa = True  # sistema habilitado/deshabilitado
+_active_races  = set()   # {channel_id}
+_carrera_activa = True   # sistema habilitado/deshabilitado
 
 
 def is_staff():
@@ -50,23 +46,27 @@ def is_staff():
 class JoinRaceView(discord.ui.View):
     def __init__(self, author, monto):
         super().__init__(timeout=JOIN_TIMEOUT)
-        self.author = author
-        self.monto = monto
-        self.players = [author]   # lista de Member (reales)
+        self.author  = author
+        self.monto   = monto
+        self.players = [author]   # lista de Member (solo reales)
         self.message = None
         self.started = False
 
     def build_embed(self, countdown=None):
+        # Asignar emoji fijo por posición de inscripción
         inscritos = "\n".join(
-            f"🏇 {p.display_name}" for p in self.players
+            f"{HORSE_EMOJIS[i]} {p.display_name}"
+            for i, p in enumerate(self.players)
         )
         desc = (
-            f"{self.author.mention} ha llamado a una carrera por **{self.monto}** {COIN}\n\n"
-            f"Presiona el botón para participar por el mismo monto.\n\n"
+            f"{self.author.mention} ha convocado una carrera por **{self.monto}** {COIN}\n\n"
+            f"Presiona el botón para participar con la misma apuesta.\n\n"
             f"**Inscritos ({len(self.players)}/{MAX_PLAYERS}):**\n{inscritos}\n\n"
         )
-        if countdown is not None:
-            desc += f"⏳ La carrera inicia en **{countdown}s**"
+        if countdown is not None and countdown > 0:
+            desc += f"⏳ Inscripciones abiertas por **{countdown}s**"
+        elif countdown == 0:
+            desc += "🏁 ¡Cerrando inscripciones…!"
         else:
             desc += "🏁 ¡Arrancando!"
 
@@ -86,7 +86,6 @@ class JoinRaceView(discord.ui.View):
         if len(self.players) >= MAX_PLAYERS:
             return await interaction.response.send_message("❌ La carrera está llena.", ephemeral=True)
 
-        # Verificar balance
         user_data = await get_user(interaction.user.id)
         if user_data["balance"] < self.monto:
             return await interaction.response.send_message(
@@ -97,7 +96,6 @@ class JoinRaceView(discord.ui.View):
         await interaction.response.edit_message(embed=self.build_embed(countdown=None), view=self)
 
     async def on_timeout(self):
-        # Si la carrera ya arrancó no hacer nada, run_race maneja el mensaje
         if self.started:
             return
         self.started = True
@@ -110,45 +108,50 @@ class JoinRaceView(discord.ui.View):
                 pass
 
 
-# ── RACE LOGIC ─────────────────────────────────────────
+# ── TRACK HELPERS ──────────────────────────────────────
 def build_track(position, emoji):
-    pos = min(int((position / TRACK_LENGTH) * TRACK_LENGTH), TRACK_LENGTH - 1)
+    pos    = min(int((position / TRACK_LENGTH) * TRACK_LENGTH), TRACK_LENGTH - 1)
     before = "▬" * pos
-    after = "▬" * (TRACK_LENGTH - pos - 1)
+    after  = "▬" * (TRACK_LENGTH - pos - 1)
     return f"{before}{emoji}{after}🏁"
 
 
-def build_race_embed(horses, step, total_steps, monto):
+def build_race_embed(horses, step, total_steps, monto, n_players):
     lines = []
-    for name, emoji, pos, is_bot in horses:
-        tag = "🤖" if is_bot else "👤"
-        lines.append(f"{tag} **{name}**\n{build_track(pos, emoji)}")
+    for name, emoji, pos in horses:
+        lines.append(f"**{name}**\n{build_track(pos, emoji)}")
 
+    pot = monto * n_players
     embed = discord.Embed(
         title=f"🏇 ¡CARRERA EN CURSO! — Tramo {step}/{total_steps}",
         description="\n\n".join(lines),
         color=discord.Color.gold()
     )
-    embed.set_footer(text=f"Apuesta: {monto} {COIN} por participante")
+    embed.set_footer(text=f"Apuesta: {monto} {COIN} c/u  •  Pozo total: {pot} {COIN}")
     return embed
 
 
-def build_result_embed(horses, winner_name, winner_is_bot, monto, real_players):
+def build_result_embed(horses, winner_name, monto, players):
+    # Ordenar por posición descendente para mostrar podio
+    sorted_horses = sorted(horses, key=lambda h: h[2], reverse=True)
     lines = []
-    for name, emoji, pos, is_bot in sorted(horses, key=lambda h: h[2], reverse=True):
-        crown = "🥇" if name == winner_name else ""
-        tag = "🤖" if is_bot else "👤"
-        lines.append(f"{crown}{tag} **{name}** — {build_track(pos, emoji)}")
+    for i, (name, emoji, pos) in enumerate(sorted_horses):
+        crown = "🥇" if name == winner_name else f"#{i+1}"
+        lines.append(f"{crown} **{name}** — {build_track(pos, emoji)}")
 
-    ganancia = int(monto * MULTIPLIER_WIN)
-    perdida = int(monto * MULTIPLIER_LOSS)
+    # Calcular ganancias: ganador recibe apuesta + 150% del pozo de los demás
+    pot_others   = monto * (len(players) - 1)
+    ganancia_net = int(pot_others * 1.5)   # lo extra que recibe encima de recuperar su apuesta
 
     result_lines = []
-    for player in real_players:
+    for player in players:
         if player.display_name == winner_name:
-            result_lines.append(f"🥇 {player.mention} ganó **+{ganancia}** {COIN}")
+            result_lines.append(
+                f"🥇 {player.mention} ganó **+{ganancia_net}** {COIN} "
+                f"*(apuesta devuelta + 150% del pozo)*"
+            )
         else:
-            result_lines.append(f"💀 {player.mention} perdió **-{perdida}** {COIN}")
+            result_lines.append(f"💀 {player.mention} perdió **-{monto}** {COIN}")
 
     embed = discord.Embed(
         title="🏁 ¡CARRERA FINALIZADA!",
@@ -158,37 +161,29 @@ def build_result_embed(horses, winner_name, winner_is_bot, monto, real_players):
     return embed
 
 
+# ── RACE LOGIC ─────────────────────────────────────────
 async def run_race(message, players, monto, channel_id):
-    emojis = random.sample(HORSE_EMOJIS, MAX_PLAYERS)
-    bot_pool = [n for n in BOT_NAMES if n not in [p.display_name for p in players]]
-    random.shuffle(bot_pool)
+    n = len(players)
+    emojis = random.sample(HORSE_EMOJIS, n)
 
-    # Construir lista de caballos: (nombre, emoji, posicion, es_bot)
-    horses = []
-    for i, player in enumerate(players):
-        horses.append([player.display_name, emojis[i], 0, False])
-    for i in range(len(players), MAX_PLAYERS):
-        horses.append([bot_pool[i - len(players)], emojis[i], 0, True])
+    # Construir caballos: (nombre, emoji, posicion)
+    horses = [
+        [player.display_name, emojis[i], 0]
+        for i, player in enumerate(players)
+    ]
 
-    # Determinar ganador real entre jugadores humanos
-    # 70% chance de que un humano gane, 30% un bot
-    if random.random() <= WIN_PROB and players:
-        winner_name = random.choice(players).display_name
-    else:
-        bot_horses = [h for h in horses if h[3]]
-        winner_name = random.choice(bot_horses)[0] if bot_horses else random.choice(horses)[0]
+    # ── Ganador completamente aleatorio entre los participantes reales ──
+    winner_name = random.choice(players).display_name
 
-    # Simular carrera
+    # Simular carrera paso a paso
     for step in range(1, RACE_STEPS + 1):
         for horse in horses:
-            name = horse[0]
-            if name == winner_name:
-                # El ganador avanza más
+            if horse[0] == winner_name:
                 horse[2] = min(TRACK_LENGTH, horse[2] + random.randint(2, 4))
             else:
                 horse[2] = min(TRACK_LENGTH, horse[2] + random.randint(1, 3))
 
-        # Asegurar que el ganador llegue primero al final
+        # Último paso: ganador llega exactamente al final
         if step == RACE_STEPS:
             for horse in horses:
                 if horse[0] == winner_name:
@@ -196,7 +191,7 @@ async def run_race(message, players, monto, channel_id):
                 else:
                     horse[2] = min(TRACK_LENGTH - 1, horse[2])
 
-        embed = build_race_embed(horses, step, RACE_STEPS, monto)
+        embed = build_race_embed(horses, step, RACE_STEPS, monto, n)
         try:
             await message.edit(embed=embed, view=None)
         except Exception:
@@ -205,15 +200,20 @@ async def run_race(message, players, monto, channel_id):
         if step < RACE_STEPS:
             await asyncio.sleep(STEP_SLEEP)
 
-    # Aplicar resultados
-    winner_is_bot = next(h[3] for h in horses if h[0] == winner_name)
+    # ── Aplicar resultados económicos ──────────────────────────────────
+    # Ganador: recupera su apuesta + 150% del pozo ajeno
+    pot_others   = monto * (n - 1)
+    ganancia_net = int(pot_others * 1.5)
+
     for player in players:
         if player.display_name == winner_name:
-            await update_balance(player.id, int(monto * MULTIPLIER_WIN))
+            # No se le descontó nada aún → recibe solo la ganancia neta
+            await update_balance(player.id, ganancia_net)
         else:
-            await update_balance(player.id, -int(monto * MULTIPLIER_LOSS))
+            # Pierde su apuesta
+            await update_balance(player.id, -monto)
 
-    result_embed = build_result_embed(horses, winner_name, winner_is_bot, monto, players)
+    result_embed = build_result_embed(horses, winner_name, monto, players)
     try:
         await message.edit(embed=result_embed)
     except Exception:
@@ -255,12 +255,12 @@ class Carrera(commands.Cog):
 
         _active_races.add(ctx.channel.id)
 
-        view = JoinRaceView(ctx.author, monto)
-        embed = view.build_embed(countdown=JOIN_TIMEOUT)
+        view    = JoinRaceView(ctx.author, monto)
+        embed   = view.build_embed(countdown=JOIN_TIMEOUT)
         message = await ctx.send(embed=embed, view=view)
         view.message = message
 
-        # Countdown
+        # ── Countdown de inscripciones ──────────────────────────────
         for i in range(JOIN_TIMEOUT - 1, 0, -1):
             await asyncio.sleep(1)
             if len(view.players) >= MAX_PLAYERS:
@@ -274,6 +274,20 @@ class Carrera(commands.Cog):
         for item in view.children:
             item.disabled = True
 
+        # ── Verificar mínimo de jugadores ───────────────────────────
+        if len(view.players) < 2:
+            _active_races.discard(ctx.channel.id)
+            try:
+                await message.delete()
+            except Exception:
+                pass
+            return await ctx.send(
+                f"🏇 {ctx.author.mention} Se necesita mínimo **2 participantes** para iniciar la carrera.\n"
+                f"El cooldown ha sido restablecido, puedes volver a convocar con `!carrera`.",
+                delete_after=20
+            )
+
+        # ── Cerrar inscripciones e iniciar ──────────────────────────
         try:
             await message.edit(embed=view.build_embed(countdown=0), view=view)
         except Exception:
@@ -296,6 +310,13 @@ class Carrera(commands.Cog):
     async def carrera_error(self, ctx, error):
         if isinstance(error, commands.MissingRequiredArgument):
             await ctx.send(f"❌ {ctx.author.mention} Formato correcto: `!carrera {{monto}}`")
+        elif isinstance(error, commands.CommandOnCooldown):
+            retry = int(error.retry_after)
+            tiempo = f"{retry // 60}m {retry % 60}s" if retry >= 60 else f"{retry}s"
+            await ctx.send(
+                f"⏳ {ctx.author.mention} Podrás convocar otra carrera en **{tiempo}**.",
+                delete_after=10
+            )
         else:
             raise error
 

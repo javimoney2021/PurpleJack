@@ -20,11 +20,12 @@ TARJETA_CREDITO_ROL_ID = 1505205139416551527
 # ── CONFIRMACION DE COMPRA ─────────────────────────────
 
 class ConfirmBuyView(discord.ui.View):
-    def __init__(self, author_id, item, bot):
+    def __init__(self, author_id, item, bot, unidades: int = 1):
         super().__init__(timeout=30)
         self.author_id = author_id
         self.item = item
         self.bot = bot
+        self.unidades = unidades  # cantidad elegida en el modal
 
     @discord.ui.button(label="Comprar", style=discord.ButtonStyle.success)
     async def confirmar(self, interaction: discord.Interaction, button: discord.ui.Button):
@@ -49,6 +50,13 @@ class ConfirmBuyView(discord.ui.View):
                     content=f"❌ **{item_fresh['nombre']}** sin stock.", view=self
                 )
 
+            # ── Validar stock suficiente para la cantidad pedida ───
+            if item_fresh["stock"] != -1 and item_fresh["stock"] < self.unidades:
+                return await interaction.edit_original_response(
+                    content=f"❌ Solo hay **{item_fresh['stock']}** unidad/es disponibles de **{item_fresh['nombre']}**.",
+                    view=self
+                )
+
             # ── Validar límite por usuario ─────────────
             limite = item_fresh.get("limite_por_usuario", 0)
             if limite and limite > 0:
@@ -57,29 +65,37 @@ class ConfirmBuyView(discord.ui.View):
                     from core.database import get_inventory
                     inv = await get_inventory(interaction.user.id)
                 poseidos = next((i["cantidad"] for i in inv if i["id"] == item_fresh["id"]), 0)
-                if poseidos >= limite:
+                if poseidos + self.unidades > limite:
+                    disponibles = limite - poseidos
+                    if disponibles <= 0:
+                        return await interaction.edit_original_response(
+                            content=f"🫤 Has alcanzado el limite de compra de **{limite}** unidad/es de **{item_fresh['nombre']}** Por usuario.",
+                            view=self
+                        )
                     return await interaction.edit_original_response(
-                        content=f"🫤 Has alcanzado el limite de compra de **{limite}** unidad/es de **{item_fresh['nombre']}** Por usuario.",
+                        content=f"🫤 Solo puedes comprar **{disponibles}** unidad/es más de **{item_fresh['nombre']}** (límite: {limite} por usuario).",
                         view=self
                     )
 
-            cantidad_compra = item_fresh.get("cantidad", 1)
-            total = item_fresh["precio"]
-            user = await get_user(interaction.user.id)
+            # ── Calcular precio total según unidades elegidas ──────
+            precio_unitario = item_fresh["precio"]
+            total = precio_unitario * self.unidades
+            cantidad_compra = item_fresh.get("cantidad", 1) * self.unidades
 
+            user = await get_user(interaction.user.id)
             tiene_tarjeta = any(r.id == TARJETA_CREDITO_ROL_ID for r in interaction.user.roles)
 
             if tiene_tarjeta:
                 if user["bank"] < total:
                     return await interaction.edit_original_response(
-                        content=f"❌ No tienes suficiente banco. Necesitas **{total}** {COIN}.",
+                        content=f"❌ No tienes suficiente banco. Necesitas **{total}** {COIN} ({self.unidades}x {precio_unitario}).",
                         view=self
                     )
                 await update_bank(interaction.user.id, -total)
             else:
                 if user["balance"] < total:
                     return await interaction.edit_original_response(
-                        content=f"❌ {interaction.user.mention} No tienes suficiente balance. Necesitas **{total}** {COIN},\nO una 💳 **Tarjeta de Crédito para usar el dinero de tu Banco directamente**",
+                        content=f"❌ {interaction.user.mention} No tienes suficiente balance. Necesitas **{total}** {COIN} ({self.unidades}x {precio_unitario}),\nO una 💳 **Tarjeta de Crédito para usar el dinero de tu Banco directamente**",
                         view=self
                     )
                 await update_balance(interaction.user.id, -total)
@@ -98,8 +114,10 @@ class ConfirmBuyView(discord.ui.View):
                 "cantidad": cantidad_compra
             })
 
+            # ── Reducir stock por las unidades compradas ───────────
             if item_fresh["stock"] != -1:
-                await reduce_stock(item_fresh["id"])
+                for _ in range(self.unidades):
+                    await reduce_stock(item_fresh["id"])
 
             icono = item_fresh["icono"] if item_fresh["icono"] else "🔹"
             nombre_display = interaction.user.nick or interaction.user.display_name
@@ -110,7 +128,7 @@ class ConfirmBuyView(discord.ui.View):
                 await interaction.edit_original_response(
                     content=(
                         f"✅ **{nombre_display}** Has comprado **{cantidad_compra}x {icono} {item_fresh['nombre']}** "
-                        f"exitosamente. Consulta tu `!inv` para verificarlo.\n"
+                        f"por **{total}** {COIN} exitosamente. Consulta tu `!inv` para verificarlo.\n"
                         f"💳 Por poseer **Tarjeta de Credito** Recibes: **{cashback}** {COIN} de Cashback depositado en tu banco."
                     ),
                     view=self
@@ -119,7 +137,7 @@ class ConfirmBuyView(discord.ui.View):
                 await interaction.edit_original_response(
                     content=(
                         f"✅ **{nombre_display}** Has comprado **{cantidad_compra}x {icono} {item_fresh['nombre']}** "
-                        f"exitosamente. Consulta tu `!inv` para verificarlo."
+                        f"por **{total}** {COIN} exitosamente. Consulta tu `!inv` para verificarlo."
                     ),
                     view=self
                 )
@@ -129,7 +147,7 @@ class ConfirmBuyView(discord.ui.View):
             if log_channel:
                 nombre_log = interaction.user.nick or interaction.user.display_name
                 await log_channel.send(
-                    f"🛒 **{nombre_log}** compró {icono} **{item_fresh['nombre']}**"
+                    f"🛒 **{nombre_log}** compró {cantidad_compra}x {icono} **{item_fresh['nombre']}** por **{total}** {COIN}"
                 )
 
         except Exception as e:
@@ -148,6 +166,67 @@ class ConfirmBuyView(discord.ui.View):
         await interaction.response.edit_message(
             content="🚫 Compra cancelada.",
             view=self
+        )
+
+
+# ── MODAL DE CANTIDAD ──────────────────────────────────
+
+class QuantityModal(discord.ui.Modal):
+    def __init__(self, item, author_id, bot):
+        icono = item["icono"] if item["icono"] else "🔹"
+        super().__init__(title=f"Comprar {icono} {item['nombre'][:40]}")
+        self.item = item
+        self.author_id = author_id
+        self.bot = bot
+
+        # Calcular máximo según stock (∞ → sin límite superior en el campo)
+        stock = item["stock"]
+        placeholder = "Ej: 1" if stock == -1 else f"Máx disponible: {stock}"
+
+        self.cantidad_input = discord.ui.TextInput(
+            label=f"¿Cuántas unidades deseas adquirir?",
+            placeholder=placeholder,
+            min_length=1,
+            max_length=4,
+            required=True
+        )
+        self.add_item(self.cantidad_input)
+
+    async def on_submit(self, interaction: discord.Interaction):
+        # ── Validar que sea un número entero positivo ──────────
+        try:
+            unidades = int(self.cantidad_input.value.strip())
+        except ValueError:
+            return await interaction.response.send_message(
+                "❌ Ingresa un número entero válido.", ephemeral=True
+            )
+
+        if unidades <= 0:
+            return await interaction.response.send_message(
+                "❌ La cantidad debe ser mayor a 0.", ephemeral=True
+            )
+
+        # ── Validar contra el stock disponible ─────────────────
+        stock = self.item["stock"]
+        if stock != -1 and unidades > stock:
+            return await interaction.response.send_message(
+                f"❌ Solo hay **{stock}** unidad/es disponibles de **{self.item['nombre']}**.",
+                ephemeral=True
+            )
+
+        icono = self.item["icono"] if self.item["icono"] else "🔹"
+        precio_unitario = self.item["precio"]
+        total = precio_unitario * unidades
+
+        await interaction.response.send_message(
+            content=(
+                f"{interaction.user.mention} 🛒 ¿Confirmas la compra de "
+                f"**{unidades}x {icono} {self.item['nombre']}**?\n"
+                f"💰 Precio unitario: **{precio_unitario}** {COIN}  •  "
+                f"**Total: {total} {COIN}**"
+            ),
+            view=ConfirmBuyView(self.author_id, self.item, self.bot, unidades=unidades),
+            ephemeral=False
         )
 
 
@@ -174,14 +253,9 @@ class BuyButton(discord.ui.Button):
             return await interaction.response.send_message(
                 "❌ Este panel no fue generado por ti.", ephemeral=True
             )
-        icono = self.item["icono"] if self.item["icono"] else "🔹"
-        await interaction.response.send_message(
-            content=(
-                f"{interaction.user.mention} 🛒 ¿Estás seguro que deseas comprar "
-                f"**{icono} {self.item['nombre']}** por **{self.item['precio']} {COIN}**?"
-            ),
-            view=ConfirmBuyView(self.author_id, self.item, self.bot),
-            ephemeral=False
+        # ── Abrir modal de cantidad antes de confirmar ─────────
+        await interaction.response.send_modal(
+            QuantityModal(self.item, self.author_id, self.bot)
         )
 
 
@@ -474,7 +548,7 @@ class Shop(commands.Cog):
             raise error
 
     @commands.command()
-    @commands.cooldown(1, 150, commands.BucketType.user)
+    @commands.cooldown(1, 30, commands.BucketType.user)
     async def tienda(self, ctx):
         items = await get_all_items()
         if not items:
@@ -486,7 +560,7 @@ class Shop(commands.Cog):
         msg = await ctx.send(view=view)
 
         async def auto_delete():
-            await asyncio.sleep(35)
+            await asyncio.sleep(60)
             try:
                 await msg.delete()
             except Exception:

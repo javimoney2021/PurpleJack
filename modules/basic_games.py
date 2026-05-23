@@ -1,9 +1,11 @@
 from discord.ext import commands
 import random
 import time
+import asyncio
 
 from core.database import get_user, update_bank, update_balance, update_cooldown
 from core.config import game_config, COIN
+from core import cache as _cache_mod
 
 WORK_MESSAGES = [
     "🔧 Trabajaste duro y ganaste **{monto}** " + COIN,
@@ -41,56 +43,93 @@ class BasicGames(commands.Cog):
 
     @commands.command()
     async def work(self, ctx):
-        user = await get_user(ctx.author.id)
         now = int(time.time())
-
         cooldown = game_config["work"]["cooldown"]
-        last = user.get("cooldown_work", 0)
+
+        # ── Leer cooldown desde cache si ya existe, sin hit a DB ──────
+        cached = _cache_mod.get_cached(ctx.author.id)
+        if cached:
+            last = cached.get("cooldown_work", 0)
+        else:
+            # Primera vez del usuario: carga de DB inevitable
+            user = await get_user(ctx.author.id)
+            last = user.get("cooldown_work", 0)
 
         if now - last < cooldown:
             remaining = cooldown - (now - last)
             nick = ctx.author.nick or ctx.author.display_name
             return await ctx.message.reply(f"**{nick}** ⏳ Podrás volver a trabajar <t:{int(now + remaining)}:R>.")
 
-        amount = random.randint(
-            game_config["work"]["min"],
-            game_config["work"]["max"]
-        )
+        amount = random.randint(game_config["work"]["min"], game_config["work"]["max"])
+        msg = random.choice(WORK_MESSAGES).format(monto=amount)
 
+        # ── Actualizar cache en memoria al instante (sin await) ───────
+        _cache_mod.update_cached_cooldown(ctx.author.id, "work", now)
+        _cache_mod.update_cached_balance(ctx.author.id, amount)
 
-        await update_balance(ctx.author.id, amount)
-        await update_cooldown(ctx.author.id, "work", now)
-        await ctx.message.reply(f"{ctx.author.mention} " + random.choice(WORK_MESSAGES).format(monto=amount))
+        # ── Responder de inmediato ─────────────────────────────────────
+        await ctx.message.reply(f"{ctx.author.mention} {msg}")
+
+        # ── Persistir a DB en background sin bloquear el reply ────────
+        async def _persist():
+            try:
+                await get_user(ctx.author.id)          # garantiza fila en DB
+                await update_balance(ctx.author.id, 0)  # flush con datos ya actualizados
+                await update_cooldown(ctx.author.id, "work", now)
+            except Exception as e:
+                print(f"⚠️ work persist error [{ctx.author.id}]: {e}")
+
+        asyncio.create_task(_persist())
 
     @commands.command()
     async def crime(self, ctx):
-        user = await get_user(ctx.author.id)
         now = int(time.time())
-
         cooldown = game_config["crime"]["cooldown"]
-        last = user.get("cooldown_crime", 0)
+
+        # ── Leer cooldown desde cache si ya existe, sin hit a DB ──────
+        cached = _cache_mod.get_cached(ctx.author.id)
+        if cached:
+            last = cached.get("cooldown_crime", 0)
+        else:
+            user = await get_user(ctx.author.id)
+            last = user.get("cooldown_crime", 0)
 
         if now - last < cooldown:
             remaining = cooldown - (now - last)
             nick = ctx.author.nick or ctx.author.display_name
-            return await ctx.message.reply(f"**{nick}** ⏳ Podrás volver a cometer un crimen <t:{int(now + remaining)}:R>.", delete_after=30)
+            return await ctx.message.reply(
+                f"**{nick}** ⏳ Podrás volver a cometer un crimen <t:{int(now + remaining)}:R>.",
+                delete_after=30
+            )
 
-        amount = random.randint(
-            game_config["crime"]["min"],
-            game_config["crime"]["max"]
-        )
-
+        amount = random.randint(game_config["crime"]["min"], game_config["crime"]["max"])
         success = random.random() <= game_config["crime"]["ganar_prob"]
 
         if success:
-            await update_balance(ctx.author.id, amount)
-            msg = random.choice(CRIME_SUCCESS)
+            _cache_mod.update_cached_balance(ctx.author.id, amount)
+            msg = random.choice(CRIME_SUCCESS).format(monto=amount)
         else:
-            await update_bank(ctx.author.id, -amount)
-            msg = random.choice(CRIME_FAIL)
+            _cache_mod.update_cached_bank(ctx.author.id, -amount)
+            msg = random.choice(CRIME_FAIL).format(monto=amount)
 
-        await update_cooldown(ctx.author.id, "crime", now)
-        await ctx.message.reply(f"{ctx.author.mention} " + msg.format(monto=amount))
+        _cache_mod.update_cached_cooldown(ctx.author.id, "crime", now)
+
+        # ── Responder de inmediato ─────────────────────────────────────
+        await ctx.message.reply(f"{ctx.author.mention} {msg}")
+
+        # ── Persistir a DB en background sin bloquear el reply ────────
+        async def _persist():
+            try:
+                await get_user(ctx.author.id)
+                if success:
+                    await update_balance(ctx.author.id, 0)
+                else:
+                    await update_bank(ctx.author.id, 0)
+                await update_cooldown(ctx.author.id, "crime", now)
+            except Exception as e:
+                print(f"⚠️ crime persist error [{ctx.author.id}]: {e}")
+
+        asyncio.create_task(_persist())
 
 
 async def setup(bot):
