@@ -421,13 +421,14 @@ async def load_collect_cooldowns_for_user(user_id):
     return data
 
 async def save_collect_cooldowns(user_id, cobros: dict):
+    # ── executemany: un solo roundtrip para todos los roles ───────
+    rows = [(user_id, rol_id, ultima_vez) for rol_id, ultima_vez in cobros.items()]
     async with pool.acquire() as conn:
-        for rol_id, ultima_vez in cobros.items():
-            await conn.execute("""
-                INSERT INTO collect_cooldowns (user_id, rol_id, ultima_vez)
-                VALUES ($1, $2, $3)
-                ON CONFLICT (user_id, rol_id) DO UPDATE SET ultima_vez=$3
-            """, user_id, rol_id, ultima_vez)
+        await conn.executemany("""
+            INSERT INTO collect_cooldowns (user_id, rol_id, ultima_vez)
+            VALUES ($1, $2, $3)
+            ON CONFLICT (user_id, rol_id) DO UPDATE SET ultima_vez=$3
+        """, rows)
             
             
 # ── GAME CONFIG ────────────────────────────────────────

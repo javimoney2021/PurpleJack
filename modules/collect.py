@@ -1,5 +1,6 @@
 from discord.ext import commands
 import discord
+import asyncio
 import time
 from core.database import (
     update_bank,
@@ -34,6 +35,7 @@ class Collect(commands.Cog):
                     f"❌ {ctx.author.mention} No tienes ningún Rol con collect disponible. Adquiérelos en la **!tienda**"
                 )
 
+            # ── Leer cooldowns desde cache (sin await si ya están) ─────
             cooldowns = cache.get_collect_cooldowns(user_id)
             if cooldowns is None:
                 cooldowns = await load_collect_cooldowns_for_user(user_id)
@@ -58,28 +60,37 @@ class Collect(commands.Cog):
                     ts = int(disponible_en)
                     lineas.append(f"{nombre_rol}  →  <t:{ts}:R>")
 
-            if cobros:
-                await update_bank(user_id, total_ganado)
-                await save_collect_cooldowns(user_id, cobros)
+            # ── Actualizar banco en cache al instante (sin await) ──────
+            if cobros and total_ganado > 0:
+                cache.update_cached_bank(user_id, total_ganado)
 
-            descripcion = "\n".join(lineas)
+            # ── Construir y enviar embed de inmediato ──────────────────
             nick = ctx.author.nick or ctx.author.display_name
-
             embed = discord.Embed(
                 title=f"💷 Mis Collects - {nick} 💷",
-                description=descripcion,
+                description="\n".join(lineas),
                 color=discord.Color.purple()
             )
-
             if total_ganado > 0:
                 embed.add_field(
                     name="Total cobrado",
                     value=f"{COIN} **{total_ganado}** Enviados a tu banco.",
                     inline=False
                 )
-
             embed.set_footer(text="💷 Tus collects se enviarán al banco.")
+
             await ctx.message.reply(embed=embed)
+
+            # ── Persistir a DB en background (no bloquea el reply) ─────
+            if cobros:
+                async def _persist():
+                    try:
+                        await update_bank(user_id, 0)          # flush con dato ya en cache
+                        await save_collect_cooldowns(user_id, cobros)
+                    except Exception as e:
+                        print(f"⚠️ collect persist error [{user_id}]: {e}")
+
+                asyncio.create_task(_persist())
 
         except Exception as e:
             print(f"ERROR !collect: {e}")
