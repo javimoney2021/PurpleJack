@@ -136,7 +136,7 @@ class Economy(commands.Cog):
             title="⏱️ Cooldowns Actuales",
             color=discord.Color.purple()
         )
-
+        embed.set_thumbnail(url="https://raw.githubusercontent.com/javimoney2021/PurpleJack/main/Thumbs/CD.png")
 
         work_cd = self.format_cooldown(game_config["work"]["cooldown"])
         crime_cd = self.format_cooldown(game_config["crime"]["cooldown"])
