@@ -130,7 +130,7 @@ class Economy(commands.Cog):
             raise error
 
     @commands.command(name="cd")
-    @commands.cooldown(1, 150, commands.BucketType.user)
+    @commands.cooldown(1, 30, commands.BucketType.user)
     async def cooldowns(self, ctx):
         embed = discord.Embed(
             title="⏱️ Cooldowns Actuales",
