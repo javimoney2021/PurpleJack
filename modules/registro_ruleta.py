@@ -47,10 +47,8 @@ class RegistroModal(discord.ui.Modal, title="Registro de Evento"):
                 pass
 
         # ── Mensaje efímero al usuario ─────────────────
-        canal_voz = interaction.guild.get_channel(CANAL_VOZ_ID)
-        voz_mention = canal_voz.mention if canal_voz else f"<#{CANAL_VOZ_ID}>"
         await interaction.response.send_message(
-            f"🎖️ **Registro Exitoso**, Nos vemos a la hora del evento 🤝 en el canal de voz {voz_mention}",
+            "🎖️ **¡Registro Exitoso!** Nos vemos a la hora del evento 🤝",
             ephemeral=True
         )
 
