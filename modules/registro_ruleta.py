@@ -9,13 +9,12 @@ CANAL_VOZ_ID      = 1507791449985646723
 STAFF_ROLE        = "Equipo de Eventos"
 
 # ── ESTADO GLOBAL (RAM) ────────────────────────────────
-# Guarda el mensaje del panel activo por canal {channel_id: message}
 _panel_activo: dict[int, discord.Message] = {}
 _registro_abierto: dict[int, bool] = {}
 
 
 # ── MODAL ──────────────────────────────────────────────
-class RegistroModal(discord.ui.Modal, title="Registro - Ruleta Sortuda"):
+class RegistroModal(discord.ui.Modal, title="Registro de Evento"):
 
     nickname = discord.ui.TextInput(
         label="Nickname",
@@ -33,16 +32,17 @@ class RegistroModal(discord.ui.Modal, title="Registro - Ruleta Sortuda"):
         required=True
     )
 
-    def __init__(self, bot: commands.Bot):
+    def __init__(self, bot: commands.Bot, nombre_evento: str):
         super().__init__()
         self.bot = bot
+        self.nombre_evento = nombre_evento
 
     async def on_submit(self, interaction: discord.Interaction):
         # ── Asignar rol ────────────────────────────────
         rol = interaction.guild.get_role(ROL_REGISTRO_ID)
         if rol:
             try:
-                await interaction.user.add_roles(rol, reason="Registro Ruleta Sortuda")
+                await interaction.user.add_roles(rol, reason=f"Registro {self.nombre_evento}")
             except discord.Forbidden:
                 pass
 
@@ -54,11 +54,11 @@ class RegistroModal(discord.ui.Modal, title="Registro - Ruleta Sortuda"):
             ephemeral=True
         )
 
-        # ── Reenviar datos al canal de staff (tiempo real, sin DB) ────
+        # ── Reenviar datos al canal de staff (RAM, sin DB) ─────────
         canal_staff = self.bot.get_channel(CANAL_STAFF_ID)
         if canal_staff:
             embed = discord.Embed(
-                title="✨ Nuevo Registro en La Ruleta Sortuda",
+                title=f"✨ Nuevo Registro — {self.nombre_evento}",
                 color=discord.Color.gold()
             )
             embed.add_field(name="Discord User", value=interaction.user.mention, inline=False)
@@ -68,15 +68,15 @@ class RegistroModal(discord.ui.Modal, title="Registro - Ruleta Sortuda"):
             await canal_staff.send(embed=embed)
 
 
-# ── VIEW PANEL (sin timeout — vive indefinidamente) ────
+# ── VIEW PANEL ─────────────────────────────────────────
 class RegistroView(discord.ui.View):
-    def __init__(self, bot: commands.Bot, abierto: bool = True):
+    def __init__(self, bot: commands.Bot, nombre_evento: str, abierto: bool = True):
         super().__init__(timeout=None)
         self.bot = bot
+        self.nombre_evento = nombre_evento
         self._set_estado(abierto)
 
     def _set_estado(self, abierto: bool):
-        """Activa o desactiva el botón según estado."""
         self.registrarse.disabled = not abierto
         self.registrarse.style = (
             discord.ButtonStyle.primary if abierto
@@ -85,15 +85,17 @@ class RegistroView(discord.ui.View):
 
     @discord.ui.button(label="Registrarse", emoji="✍️",
                        style=discord.ButtonStyle.primary,
-                       custom_id="registro_ruleta:btn")
+                       custom_id="registro_evento:btn")
     async def registrarse(self, interaction: discord.Interaction, button: discord.ui.Button):
-        await interaction.response.send_modal(RegistroModal(self.bot))
+        await interaction.response.send_modal(
+            RegistroModal(self.bot, self.nombre_evento)
+        )
 
 
 # ── EMBEDS ─────────────────────────────────────────────
-def embed_abierto() -> discord.Embed:
+def embed_abierto(nombre_evento: str) -> discord.Embed:
     embed = discord.Embed(
-        title="🎡 Ruleta Sortuda — Registro Abierto",
+        title=f"{nombre_evento} — Registro Abierto",
         description=(
             "¡El evento está por comenzar!\n\n"
             "Presiona el botón **Registrarse** para apartar tu lugar.\n"
@@ -105,10 +107,10 @@ def embed_abierto() -> discord.Embed:
     return embed
 
 
-def embed_cerrado() -> discord.Embed:
+def embed_cerrado(nombre_evento: str) -> discord.Embed:
     embed = discord.Embed(
-        title="🔒 Registro Cerrado — Evento Iniciado",
-        description="**Registro Cerrado, Evento Iniciado…Hasta la próxima Ruleta.**",
+        title=f"{nombre_evento} — Registro Cerrado",
+        description="**Registro Cerrado, Evento Iniciado…Hasta la próxima vez.**",
         color=discord.Color.dark_gray()
     )
     return embed
@@ -119,53 +121,55 @@ class RegistroRuleta(commands.Cog):
     def __init__(self, bot: commands.Bot):
         self.bot = bot
 
-    # ── /abrir_registro ────────────────────────────────
     @app_commands.command(
         name="abrir_registro",
-        description="Publica el panel de registro de la Ruleta Sortuda en este canal."
+        description="Publica el panel de registro del evento en este canal."
     )
+    @app_commands.describe(nombre_evento="Nombre del evento que aparecerá en el embed")
     @app_commands.checks.has_role(STAFF_ROLE)
-    async def abrir_registro(self, interaction: discord.Interaction):
-        # Si ya hay un panel activo en este canal, avisarlo
+    async def abrir_registro(self, interaction: discord.Interaction, nombre_evento: str):
         if interaction.channel_id in _panel_activo:
             return await interaction.response.send_message(
                 "❌ Ya hay un panel activo en este canal. Usa `/cerrar_registro` primero.",
                 ephemeral=True
             )
 
-        view = RegistroView(self.bot, abierto=True)
-        msg  = await interaction.channel.send(embed=embed_abierto(), view=view)
+        view = RegistroView(self.bot, nombre_evento, abierto=True)
+        msg  = await interaction.channel.send(embed=embed_abierto(nombre_evento), view=view)
 
-        _panel_activo[interaction.channel_id]   = msg
+        _panel_activo[interaction.channel_id]    = (msg, nombre_evento)
         _registro_abierto[interaction.channel_id] = True
 
-        await interaction.response.send_message("✅ Panel de registro publicado.", ephemeral=True)
+        await interaction.response.send_message(
+            f"✅ Panel de registro **{nombre_evento}** publicado.", ephemeral=True
+        )
 
-    # ── /cerrar_registro ───────────────────────────────
     @app_commands.command(
         name="cerrar_registro",
-        description="Cierra el registro de la Ruleta Sortuda en este canal."
+        description="Cierra el registro del evento activo en este canal."
     )
     @app_commands.checks.has_role(STAFF_ROLE)
     async def cerrar_registro(self, interaction: discord.Interaction):
-        msg = _panel_activo.get(interaction.channel_id)
-        if not msg:
+        entry = _panel_activo.get(interaction.channel_id)
+        if not entry:
             return await interaction.response.send_message(
                 "❌ No hay un panel activo en este canal.", ephemeral=True
             )
 
-        view = RegistroView(self.bot, abierto=False)
+        msg, nombre_evento = entry
+        view = RegistroView(self.bot, nombre_evento, abierto=False)
         try:
-            await msg.edit(embed=embed_cerrado(), view=view)
+            await msg.edit(embed=embed_cerrado(nombre_evento), view=view)
         except discord.NotFound:
             pass
 
         _panel_activo.pop(interaction.channel_id, None)
         _registro_abierto.pop(interaction.channel_id, None)
 
-        await interaction.response.send_message("🔒 Registro cerrado correctamente.", ephemeral=True)
+        await interaction.response.send_message(
+            f"🔒 Registro de **{nombre_evento}** cerrado.", ephemeral=True
+        )
 
-    # ── Error handlers ─────────────────────────────────
     @abrir_registro.error
     @cerrar_registro.error
     async def sin_permisos(self, interaction: discord.Interaction, error: app_commands.AppCommandError):
