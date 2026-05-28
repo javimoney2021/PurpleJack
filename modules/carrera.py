@@ -7,27 +7,20 @@ from core.database import update_balance, get_user
 from core.config import COIN
 
 # ── CONFIG ─────────────────────────────────────────────
-TRACK_LENGTH = 20
-RACE_DURATION = 12      # segundos totales de carrera
-RACE_STEPS    = 8       # cuántas veces se actualiza el embed
-STEP_SLEEP    = RACE_DURATION / RACE_STEPS
-JOIN_TIMEOUT  = 10      # segundos de inscripción
-MAX_PLAYERS   = 5       # máximo jugadores reales (sin bots)
-
-# Emojis de caballos precargados (uno por slot)
-HORSE_EMOJIS = [
-    "<:c1:1506999542074183791>",
-    "<:c2:1506999577386160170>",
-    "<:c3:1506999604661714964>",
-    "<:c4:1506999620977561640>",
-    "<:c5:1506999643110637598>",
-]
+JOIN_TIMEOUT  = 12
+MAX_PLAYERS   = 5
+GIF_URL       = "https://pub-a09b3609b6b34dfab5c7aa7742cd1a8a.r2.dev/Purple%20jack%20Harcode/carrera.gif"
+GIF_DURATION  = 6    # segundos que se muestra el gif antes del resultado
+RESULT_DELETE = 10   # segundos antes de borrar el embed final
 
 STAFF_ROLE = "Equipo de Eventos"
 
+# Nombre del bot de relleno
+BOT_NAME = "Jack"
+
 # ── ESTADO GLOBAL ──────────────────────────────────────
-_active_races  = set()   # {channel_id}
-_carrera_activa = True   # sistema habilitado/deshabilitado
+_active_races   = set()
+_carrera_activa = True
 
 
 def is_staff():
@@ -48,15 +41,14 @@ class JoinRaceView(discord.ui.View):
         super().__init__(timeout=JOIN_TIMEOUT)
         self.author  = author
         self.monto   = monto
-        self.players = [author]   # lista de Member (solo reales)
+        self.players = [author]   # solo jugadores reales
         self.message = None
         self.started = False
 
     def build_embed(self, countdown=None):
-        # Asignar emoji fijo por posición de inscripción
         inscritos = "\n".join(
-            f"{HORSE_EMOJIS[i]} {p.display_name}"
-            for i, p in enumerate(self.players)
+            f"🏎️ {p.display_name}"
+            for p in self.players
         )
         desc = (
             f"{self.author.mention} ha convocado una carrera por **{self.monto}** {COIN}\n\n"
@@ -70,14 +62,13 @@ class JoinRaceView(discord.ui.View):
         else:
             desc += "🏁 ¡Arrancando!"
 
-        embed = discord.Embed(
-            title="🏇 ¡Carrera de Caballos!",
+        return discord.Embed(
+            title="🏎️ ¡Carrera de Autos!",
             description=desc,
             color=discord.Color.blurple()
         )
-        return embed
 
-    @discord.ui.button(label="🏇 Unirse", style=discord.ButtonStyle.primary)
+    @discord.ui.button(label="🏎️ Unirse", style=discord.ButtonStyle.primary)
     async def unirse(self, interaction: discord.Interaction, button: discord.ui.Button):
         if self.started:
             return await interaction.response.send_message("❌ La carrera ya comenzó.", ephemeral=True)
@@ -108,118 +99,81 @@ class JoinRaceView(discord.ui.View):
                 pass
 
 
-# ── TRACK HELPERS ──────────────────────────────────────
-def build_track(position, emoji):
-    pos    = min(int((position / TRACK_LENGTH) * TRACK_LENGTH), TRACK_LENGTH - 1)
-    before = "▬" * pos
-    after  = "▬" * (TRACK_LENGTH - pos - 1)
-    return f"{before}{emoji}{after}🏁"
+# ── RESULT EMBED ───────────────────────────────────────
+def build_result_embed(winner_name, monto, players, has_bot: bool):
+    """
+    players: lista de Member reales.
+    has_bot: si Jack (bot) participó.
+    """
+    n_total  = len(players) + (1 if has_bot else 0)
+    pot_others  = monto * (n_total - 1)
+    ganancia_net = int(pot_others * 1.5)
 
-
-def build_race_embed(horses, step, total_steps, monto, n_players):
     lines = []
-    for name, emoji, pos in horses:
-        lines.append(f"**{name}**\n{build_track(pos, emoji)}")
-
-    pot = monto * n_players
-    embed = discord.Embed(
-        title=f"🏇 ¡CARRERA EN CURSO! — Tramo {step}/{total_steps}",
-        description="\n\n".join(lines),
-        color=discord.Color.gold()
-    )
-    embed.set_footer(text=f"Apuesta: {monto} {COIN} c/u  •  Pozo total: {pot} {COIN}")
-    return embed
-
-
-def build_result_embed(horses, winner_name, monto, players):
-    # Ordenar por posición descendente para mostrar podio
-    sorted_horses = sorted(horses, key=lambda h: h[2], reverse=True)
-    lines = []
-    for i, (name, emoji, pos) in enumerate(sorted_horses):
-        crown = "🥇" if name == winner_name else f"#{i+1}"
-        lines.append(f"{crown} **{name}** — {build_track(pos, emoji)}")
-
-    # Calcular ganancias: ganador recibe apuesta + 150% del pozo de los demás
-    pot_others   = monto * (len(players) - 1)
-    ganancia_net = int(pot_others * 1.5)   # lo extra que recibe encima de recuperar su apuesta
-
-    result_lines = []
     for player in players:
         if player.display_name == winner_name:
-            result_lines.append(
-                f"🥇 {player.mention} ganó **+{ganancia_net}** {COIN} "
+            lines.append(
+                f"🥇 {player.mention} **¡GANÓ!** **+{ganancia_net}** {COIN} "
                 f"*(apuesta devuelta + 150% del pozo)*"
             )
         else:
-            result_lines.append(f"💀 {player.mention} perdió **-{monto}** {COIN}")
+            lines.append(f"💀 {player.mention} perdió **-{monto}** {COIN}")
 
-    embed = discord.Embed(
+    # Si Jack ganó (bot), nadie recibe nada extra — solo se muestra
+    if has_bot and winner_name == BOT_NAME:
+        lines.insert(0, f"🥇 **{BOT_NAME}** (Bot) se llevó la carrera — nadie ganó el pozo.")
+
+    return discord.Embed(
         title="🏁 ¡CARRERA FINALIZADA!",
-        description="\n\n".join(lines) + "\n\n" + "\n".join(result_lines),
+        description="\n\n".join(lines),
         color=discord.Color.green()
     )
-    return embed
 
 
 # ── RACE LOGIC ─────────────────────────────────────────
-async def run_race(message, players, monto, channel_id):
-    n = len(players)
-    emojis = random.sample(HORSE_EMOJIS, n)
+async def run_race(message, real_players, monto, channel_id):
+    has_bot  = len(real_players) == 1
+    all_names = [p.display_name for p in real_players]
+    if has_bot:
+        all_names.append(BOT_NAME)
 
-    # Construir caballos: (nombre, emoji, posicion)
-    horses = [
-        [player.display_name, emojis[i], 0]
-        for i, player in enumerate(players)
-    ]
+    # ── Ganador aleatorio entre todos (reales + bot si aplica) ────
+    winner_name = random.choice(all_names)
 
-    # ── Ganador completamente aleatorio entre los participantes reales ──
-    winner_name = random.choice(players).display_name
+    # ── Mostrar embed con GIF mientras "corre" la carrera ─────────
+    gif_embed = discord.Embed(
+        title="🏎️ ¡La carrera ha comenzado!",
+        color=discord.Color.gold()
+    )
+    gif_embed.set_image(url=GIF_URL)
+    pot = monto * len(all_names)
+    gif_embed.set_footer(text=f"Apuesta: {monto} {COIN} c/u  •  Pozo total: {pot} {COIN}")
 
-    # Simular carrera paso a paso
-    for step in range(1, RACE_STEPS + 1):
-        for horse in horses:
-            if horse[0] == winner_name:
-                horse[2] = min(TRACK_LENGTH, horse[2] + random.randint(2, 4))
-            else:
-                horse[2] = min(TRACK_LENGTH, horse[2] + random.randint(1, 3))
+    try:
+        await message.edit(embed=gif_embed, view=None)
+    except Exception:
+        pass
 
-        # Último paso: ganador llega exactamente al final
-        if step == RACE_STEPS:
-            for horse in horses:
-                if horse[0] == winner_name:
-                    horse[2] = TRACK_LENGTH
-                else:
-                    horse[2] = min(TRACK_LENGTH - 1, horse[2])
+    await asyncio.sleep(GIF_DURATION)
 
-        embed = build_race_embed(horses, step, RACE_STEPS, monto, n)
-        try:
-            await message.edit(embed=embed, view=None)
-        except Exception:
-            pass
-
-        if step < RACE_STEPS:
-            await asyncio.sleep(STEP_SLEEP)
-
-    # ── Aplicar resultados económicos ──────────────────────────────────
-    # Ganador: recupera su apuesta + 150% del pozo ajeno
-    pot_others   = monto * (n - 1)
-    ganancia_net = int(pot_others * 1.5)
-
-    for player in players:
+    # ── Aplicar resultados económicos (solo jugadores reales) ──────
+    for player in real_players:
         if player.display_name == winner_name:
-            # No se le descontó nada aún → recibe solo la ganancia neta
+            n_total      = len(all_names)
+            pot_others   = monto * (n_total - 1)
+            ganancia_net = int(pot_others * 1.5)
             await update_balance(player.id, ganancia_net)
         else:
-            # Pierde su apuesta
             await update_balance(player.id, -monto)
 
-    result_embed = build_result_embed(horses, winner_name, monto, players)
+    # ── Embed de resultado final ───────────────────────────────────
+    result_embed = build_result_embed(winner_name, monto, real_players, has_bot)
     try:
         await message.edit(embed=result_embed)
     except Exception:
         pass
 
-    await asyncio.sleep(20)
+    await asyncio.sleep(RESULT_DELETE)
     try:
         await message.delete()
     except Exception:
@@ -274,27 +228,25 @@ class Carrera(commands.Cog):
         for item in view.children:
             item.disabled = True
 
-        # ── Verificar mínimo de jugadores ───────────────────────────
-        if len(view.players) < 2:
-            _active_races.discard(ctx.channel.id)
-            try:
-                await message.delete()
-            except Exception:
-                pass
-            return await ctx.send(
-                f"🏇 {ctx.author.mention} Se necesita mínimo **2 participantes** para iniciar la carrera.\n"
-                f"El cooldown ha sido restablecido, puedes volver a convocar con `!carrera`.",
-                delete_after=20
-            )
+        real_players = view.players
 
-        # ── Cerrar inscripciones e iniciar ──────────────────────────
+        # ── Si solo hay 1 jugador real → añadir Jack como bot ──────
+        # ── Si hay 0 (nadie más se unió al convocante) → cancelar ──
+        # Nota: el convocante siempre está, así que mínimo hay 1
+        if len(real_players) < 2:
+            # Un solo jugador → Jack se suma automáticamente
+            has_bot = True
+        else:
+            has_bot = False
+
+        # ── Mostrar inscritos finales antes de arrancar ─────────────
         try:
             await message.edit(embed=view.build_embed(countdown=0), view=view)
         except Exception:
             pass
 
         await asyncio.sleep(1)
-        await run_race(message, view.players, monto, ctx.channel.id)
+        await run_race(message, real_players, monto, ctx.channel.id)
 
     @app_commands.command(name="carrera_alternar", description="Activa o desactiva el sistema de carreras")
     @is_staff()
