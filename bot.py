@@ -77,8 +77,8 @@ async def on_command_error(ctx, error):
             f"❌ Este comando no es válido, consulta **/ayuda_nave** en el canal <#{AYUDA_CHANNEL_ID}>",
             delete_after=10
         )
-    elif hasattr(ctx.command, 'on_error'):
-        return
+    elif isinstance(error, commands.CommandOnCooldown):
+        return  # deja que el handler del módulo lo maneje
     else:
         raise error
 

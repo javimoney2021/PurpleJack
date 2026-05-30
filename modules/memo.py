@@ -96,11 +96,11 @@ class MemoView(discord.ui.View):
                     self._build_buttons()
 
                     if self.pares_ok == 8:
-                        # 🏆 Ganó
-                        ganancia = self.monto * 2
+                        # 🏆 Ganó — devuelve apuesta + ganancia neta
+                        ganancia = self.monto * 3  # apuesta ya descontada, esto devuelve todo
                         await update_balance(self.author.id, ganancia)
                         embed = self._build_embed(
-                            estado=f"🏆 ¡Ganaste! Recibes **+{ganancia}** {COIN}"
+                            estado=f"🏆 ¡Ganaste! Recibes **+{self.monto * 2}** {COIN} de ganancia"
                         )
                         self.stop()
                         self._deshabilitar_todo()
@@ -130,8 +130,7 @@ class MemoView(discord.ui.View):
                     intentos_restantes = MAX_INTENTOS - self.intentos_fail
 
                     if intentos_restantes <= 0:
-                        # 💀 Perdió
-                        await update_balance(self.author.id, -self.monto)
+                        # 💀 Perdió — apuesta ya descontada al iniciar
                         self.revelado = [True] * 16   # revelar todo
                         self._build_buttons()
                         self._deshabilitar_todo()
@@ -241,6 +240,7 @@ class Memo(commands.Cog):
         tablero = EMOJIS_PARES * 2
         random.shuffle(tablero)
 
+        await update_balance(ctx.author.id, -monto)  # descuenta al iniciar
         _active_memo.add(ctx.author.id)
 
         view = MemoView(ctx.author, monto, tablero)
