@@ -77,6 +77,10 @@ async def on_command_error(ctx, error):
             f"❌ Este comando no es válido, consulta **/ayuda_nave** en el canal <#{AYUDA_CHANNEL_ID}>",
             delete_after=10
         )
+    elif hasattr(ctx.command, 'on_error'):
+        return
+    else:
+        raise error
 
 async def shutdown():
     print("⚠️ Apagando bot — flusheando caché a DB...")
