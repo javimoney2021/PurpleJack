@@ -32,6 +32,7 @@ async def load_modules():
     await bot.load_extension("modules.golpear")
     await bot.load_extension("modules.carrera")
     await bot.load_extension("modules.registro_ruleta")
+    await bot.load_extension("modules.memo")
 
 
 async def check_cargos_loop():
