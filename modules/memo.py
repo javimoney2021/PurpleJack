@@ -6,10 +6,11 @@ from core.database import get_user, update_balance
 from core.config import COIN
 
 # ── CONFIG ─────────────────────────────────────────────
-MAX_INTENTOS  = 5
-AUTO_DELETE   = 15
+MAX_INTENTOS  = 7
+AUTO_DELETE   = 20
+MAX_APUESTA   = 300
 HIDDEN_EMOJI  = "🟦"
-EMOJIS_PARES  = ["🍒", "🍋", "🍇", "🎯", "💎", "🔔", "👑", "🚀"]
+EMOJIS_PARES  = ["🎲", "🍪", "🍇", "🔪", "💎", "🍼", "👑", "🚀"]
 
 # ── ESTADO GLOBAL ──────────────────────────────────────
 _active_memo: set[int] = set()   # {user_id}
@@ -27,6 +28,7 @@ class MemoView(discord.ui.View):
         self.intentos_fail = 0
         self.pares_ok      = 0
         self.bloqueado     = False
+        self.racha         = 0
         self.message       = None
         self._build_buttons()
 
@@ -88,6 +90,7 @@ class MemoView(discord.ui.View):
                     self.revelado[i1] = True
                     self.revelado[i2] = True
                     self.pares_ok += 1
+                    self.racha += 1
                     self.seleccion = []
                     self.bloqueado = False
                     self._build_buttons()
@@ -123,6 +126,7 @@ class MemoView(discord.ui.View):
                 else:
                     # ❌ Par incorrecto
                     self.intentos_fail += 1
+                    self.racha = 0
                     intentos_restantes = MAX_INTENTOS - self.intentos_fail
 
                     if intentos_restantes <= 0:
@@ -177,7 +181,7 @@ class MemoView(discord.ui.View):
             description=desc,
             color=discord.Color.blurple()
         )
-        embed.set_footer(text=f"Apuesta: {self.monto} {COIN}  •  Solo tú puedes jugar")
+        embed.set_footer(text=f"Apuesta: {self.monto} PurpleCoins  •  Solo tú puedes jugar")
         return embed
 
     def _deshabilitar_todo(self):
@@ -205,6 +209,7 @@ class Memo(commands.Cog):
         self.bot = bot
 
     @commands.command(name="memo")
+    @commands.cooldown(1, 300, commands.BucketType.user)
     async def memo(self, ctx, monto: int = None):
         if monto is None:
             return await ctx.send(
@@ -218,6 +223,10 @@ class Memo(commands.Cog):
             return await ctx.send(
                 f"❌ {ctx.author.mention} Ya tienes una partida activa."
             )
+        if monto > MAX_APUESTA:
+            return await ctx.send(
+                f"❌ {ctx.author.mention} La apuesta máxima es **{MAX_APUESTA}** {COIN}."
+            )    
 
         user_data = await get_user(ctx.author.id)
         if user_data["balance"] < monto:
@@ -243,7 +252,14 @@ class Memo(commands.Cog):
                 f"❌ {ctx.author.mention} El monto debe ser un número entero. "
                 f"Formato: `!memo {{monto}}`"
             )
-        else:
+        elif isinstance(error, commands.CommandOnCooldown):
+            retry = int(error.retry_after)
+            tiempo = f"{retry // 60}m {retry % 60}s" if retry >= 60 else f"{retry}s"
+            await ctx.send(
+                f"⏳ {ctx.author.mention} Podrás jugar nuevamente en **{tiempo}**.",
+                delete_after=10
+            )
+        else:    
             raise error
 
 
