@@ -216,6 +216,7 @@ class Memo(commands.Cog):
                 f"❌ {ctx.author.mention} Formato correcto: `!memo {{monto}}`"
             )
         if monto <= 0:
+            ctx.command.reset_cooldown(ctx)
             return await ctx.send(
                 f"❌ {ctx.author.mention} El monto debe ser mayor a 0."
             )
@@ -224,6 +225,7 @@ class Memo(commands.Cog):
                 f"❌ {ctx.author.mention} Ya tienes una partida activa."
             )
         if monto > MAX_APUESTA:
+            ctx.command.reset_cooldown(ctx)
             return await ctx.send(
                 f"❌ {ctx.author.mention} La apuesta máxima es **{MAX_APUESTA}** {COIN}."
             )    
