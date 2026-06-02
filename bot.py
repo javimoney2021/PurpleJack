@@ -4,7 +4,7 @@ import asyncio
 import time
 import discord
 print(f"discord.py version: {discord.__version__}")
-from settings import TOKEN
+from settings import TOKEN, GUILD_ID
 from core.database import (
     init_db, load_items_to_cache, load_cargos_to_cache,
     load_collect_config_to_cache, delete_cargo_temporal,
@@ -26,6 +26,7 @@ async def load_modules():
     await bot.load_extension("modules.russian_roulette")
     await bot.load_extension("modules.rob")
     await bot.load_extension("modules.shop")
+    await bot.load_extension("modules.Empleos")
     await bot.load_extension("modules.collect")
     await bot.load_extension("modules.dados")
     await bot.load_extension("modules.duels")
@@ -93,8 +94,17 @@ async def on_ready():
     print(f"✅ Bot conectado como {bot.user}")
     print(f"✅ Caché iniciada | Flush cada 5 minutos")
     print(f"✅ Servidores activos: {len(bot.guilds)}")
-    await bot.tree.sync()
-    print("✅ Comandos Slash/Staff sincronizados.")
+
+    try:
+        if GUILD_ID:
+            guild = discord.Object(id=int(GUILD_ID))
+            synced = await bot.tree.sync(guild=guild)
+            print(f"✅ Comandos Slash/Staff sincronizados en el servidor {GUILD_ID}: {len(synced)} comandos.")
+        else:
+            synced = await bot.tree.sync()
+            print(f"✅ Comandos Slash/Staff sincronizados globalmente: {len(synced)} comandos.")
+    except Exception as e:
+        print(f"⚠️ Error sincronizando comandos slash: {e}")
     asyncio.create_task(cache.flush_loop())
     asyncio.create_task(check_cargos_loop())
     print("✅ Task de cargos temporales iniciada | Revisión cada 12 horas")
