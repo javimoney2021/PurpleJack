@@ -650,17 +650,18 @@ class Shop(commands.Cog):
             )
             return await ctx.send(embed=embed)
 
-        embed = discord.Embed(
-            title="🟢 ROLES - TIEMPO RESTANTE",
-            color=discord.Color.green()
-        )
+        lines = [
+            "🟢 **ROLES - TIEMPO RESTANTE**",
+            ""
+        ]
         for role, segundos, rol_id in roles_activos:
             role_mention = role.mention if role else f"<@&{rol_id}>"
-            embed.add_field(
-                name="Rol",
-                value=f"{role_mention}\n⏳ {format_tiempo_restante(segundos)}",
-                inline=False
-            )
+            lines.append(f"➔ {role_mention} - {format_tiempo_restante(segundos)}")
+
+        embed = discord.Embed(
+            description="\n".join(lines),
+            color=discord.Color.green()
+        )
 
         await ctx.send(embed=embed)
 
