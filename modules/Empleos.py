@@ -416,7 +416,11 @@ class Empleos(commands.Cog):
             data['historial_reciente_de_jornadas'] = historial[-10:]
             await save_empleo_user(data)
             await append_historial(ctx.author.id, empleo, True, pago, random.choice(info['mensajes_exito']))
-            await ctx.send(f"✅ {ctx.author.mention} {random.choice(info['mensajes_exito'])}\n💰 Ganaste **{pago}** PurpleCoins.{'\n✨ Por tu gran rendimiento ... 20% adicional.' if bonus else ''}")
+            await ctx.send(
+                f"✅ {ctx.author.mention} {random.choice(info['mensajes_exito'])}\n"
+                f"💰 Ganaste **{pago}** {COIN}."
+                + ("\n✨ Por tu gran rendimiento ... 20% adicional." if bonus else "")
+            )
         else:
             pago = -info['pago_perdida']
             await update_bank(ctx.author.id, pago)
@@ -425,7 +429,7 @@ class Empleos(commands.Cog):
             data['historial_reciente_de_jornadas'] = (data.get('historial_reciente_de_jornadas', []) + [now])[-10:]
             await save_empleo_user(data)
             await append_historial(ctx.author.id, empleo, False, pago, random.choice(info['mensajes_fracaso']))
-            await ctx.send(f"❌ {ctx.author.mention} {random.choice(info['mensajes_fracaso'])}\n💸 Perdiste **{abs(pago)}** PurpleCoins.")
+            await ctx.send(f"❌ {ctx.author.mention} {random.choice(info['mensajes_fracaso'])}\n💸 Perdiste **{abs(pago)}** {COIN}.")
 
 
 async def setup(bot):
