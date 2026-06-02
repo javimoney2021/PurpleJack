@@ -254,7 +254,7 @@ class ConfirmarEmpleoView(ui.View):
             "empleo_actual": self.empleo,
             "dificultad": EMPLEOS[self.empleo]['dificultad'],
             "fecha_contratacion": now,
-            "ultimo_trabajo": now,
+            "ultimo_trabajo": 0,
             "historial_reciente_de_jornadas": [],
             "cooldown_renuncia": 0,
             "progreso_permanencia": 0,
