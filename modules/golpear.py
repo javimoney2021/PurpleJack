@@ -204,29 +204,55 @@ class Golpear(commands.Cog):
     @app_commands.command(name="golpear_editar", description="Configura canal y tiempos del sistema de cofres")
     @app_commands.describe(
         canal="Canal donde aparecerán los cofres",
-        min_time="Tiempo mínimo entre cofres (en minutos)",
-        max_time="Tiempo máximo entre cofres (en minutos)"
+        min_time="Tiempo mínimo (ej. 30s o 2m)",
+        max_time="Tiempo máximo (ej. 60s o 5m)"
     )
     @is_staff()
     async def golpear_editar(self, interaction: discord.Interaction,
                               canal: discord.TextChannel,
-                              min_time: int,
-                              max_time: int):
+                              min_time: str,
+                              max_time: str):
         await interaction.response.defer(ephemeral=False)
 
-        if min_time <= 0 or max_time <= 0:
-            return await interaction.followup.send("❌ Los tiempos deben ser mayores a 0.", ephemeral=True)
-        if min_time >= max_time:
+        def parse_time(value: str) -> int:
+            text = value.strip().lower()
+            total = 0
+            current = 0
+            for ch in text:
+                if ch.isdigit():
+                    current = current * 10 + int(ch)
+                elif ch in ('m', 's'):
+                    if current <= 0:
+                        raise ValueError("Valor inválido")
+                    total += current * (60 if ch == 'm' else 1)
+                    current = 0
+                else:
+                    raise ValueError("Formato inválido")
+            if current != 0:
+                total += current
+            if total <= 0:
+                raise ValueError("El tiempo debe ser mayor a 0")
+            return total
+
+        try:
+            min_seconds = parse_time(min_time)
+            max_seconds = parse_time(max_time)
+        except ValueError:
+            return await interaction.followup.send(
+                "❌ Usa formatos válidos como `30s`, `2m` o `1m30s`.", ephemeral=True
+            )
+
+        if min_seconds >= max_seconds:
             return await interaction.followup.send("❌ El tiempo mínimo debe ser menor al máximo.", ephemeral=True)
 
         _golpear_config["canal_id"] = canal.id
-        _golpear_config["min_time"] = min_time * 60
-        _golpear_config["max_time"] = max_time * 60
+        _golpear_config["min_time"] = min_seconds
+        _golpear_config["max_time"] = max_seconds
 
         await interaction.followup.send(
             f"✅ Sistema de Cofres configurado:\n"
             f"📌 Canal: {canal.mention}\n"
-            f"⏱️ Intervalo: **{min_time}m** — **{max_time}m**",
+            f"⏱️ Intervalo: **{min_seconds}s** — **{max_seconds}s**",
             ephemeral=False
         )
 

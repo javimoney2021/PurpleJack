@@ -2,6 +2,7 @@ import discord
 import asyncio
 import random
 from discord.ext import commands
+from discord import app_commands
 from core.database import get_user, update_balance
 from core.config import COIN
 
@@ -9,11 +10,23 @@ from core.config import COIN
 MAX_INTENTOS  = 7
 AUTO_DELETE   = 20
 MAX_APUESTA   = 300
+STAFF_ROLE    = "Equipo de Eventos"
 HIDDEN_EMOJI  = "🟦"
 EMOJIS_PARES  = ["🎲", "🍪", "🍇", "🔪", "💎", "🍼", "👑", "🚀"]
 
 # ── ESTADO GLOBAL ──────────────────────────────────────
 _active_memo: set[int] = set()   # {user_id}
+_memo_config = {"activa": True}
+
+
+def is_staff():
+    async def predicate(interaction: discord.Interaction):
+        role = discord.utils.get(interaction.user.roles, name=STAFF_ROLE)
+        if not role:
+            await interaction.response.send_message("❌ No tienes permisos para usar este comando.", ephemeral=True)
+            return False
+        return True
+    return app_commands.check(predicate)
 
 
 # ── VIEW ───────────────────────────────────────────────
@@ -91,16 +104,22 @@ class MemoView(discord.ui.View):
                     self.revelado[i2] = True
                     self.pares_ok += 1
                     self.racha += 1
+                    if self.racha >= 2 and self.racha % 2 == 0 and self.intentos_fail > 0:
+                        self.intentos_fail -= 1
                     self.seleccion = []
                     self.bloqueado = False
                     self._build_buttons()
 
                     if self.pares_ok == 8:
-                        # 🏆 Ganó — devuelve apuesta + ganancia neta
-                        ganancia = self.monto * 3  # apuesta ya descontada, esto devuelve todo
-                        await update_balance(self.author.id, ganancia)
+                        # 🏆 Ganó — devuelve la apuesta + premio total
+                        recompensa_total = self.monto * 3
+                        ganancia_neta = self.monto * 2
+                        await update_balance(self.author.id, recompensa_total)
                         embed = self._build_embed(
-                            estado=f"🏆 ¡Ganaste! Recibes **+{self.monto * 2}** {COIN} de ganancia"
+                            estado=(
+                                f"🏆 ¡Ganaste! Recibes **+{recompensa_total}** {COIN} en total "
+                                f"({ganancia_neta} de ganancia)."
+                            )
                         )
                         self.stop()
                         self._deshabilitar_todo()
@@ -207,6 +226,18 @@ class Memo(commands.Cog):
     def __init__(self, bot):
         self.bot = bot
 
+    @app_commands.command(name="memo_alternar", description="Activa o desactiva el sistema de memoria")
+    @is_staff()
+    async def memo_alternar(self, interaction: discord.Interaction):
+        await interaction.response.defer(ephemeral=False)
+        _memo_config["activa"] = not _memo_config["activa"]
+        estado = "✅ Activado" if _memo_config["activa"] else "🔴 Desactivado"
+        await interaction.followup.send(
+            f"🧠 Sistema de Memoria: **{estado}**\n"
+            f"📌 Apuesta máxima: **{MAX_APUESTA}** {COIN}",
+            ephemeral=False,
+        )
+
     @commands.command(name="memo")
     @commands.cooldown(1, 300, commands.BucketType.user)
     async def memo(self, ctx, monto: int = None):
@@ -214,6 +245,9 @@ class Memo(commands.Cog):
             return await ctx.send(
                 f"❌ {ctx.author.mention} Formato correcto: `!memo {{monto}}`"
             )
+        if not _memo_config["activa"]:
+            return await ctx.send("🔧 El sistema de Memo está desactivado. Intenta después.")
+
         if monto <= 0:
             ctx.command.reset_cooldown(ctx)
             return await ctx.send(

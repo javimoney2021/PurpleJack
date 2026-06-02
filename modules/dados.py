@@ -3,11 +3,14 @@ import random
 import time
 import asyncio
 from discord.ext import commands
-from core.database import get_user, update_balance, get_game_cooldown, set_game_cooldown
+from discord import app_commands
+from core.database import get_user, update_balance, get_game_cooldown, set_game_cooldown, save_dados_config
 from core.config import COIN, dados_config
 from core import cache
 
 DICE_GIF = "https://pub-a09b3609b6b34dfab5c7aa7742cd1a8a.r2.dev/Purple%20jack%20Harcode/dice.gif"
+STAFF_ROLE = "Equipo de Eventos"
+_ACTIVE_DADOS: set[int] = set()
 DICE_FACES = {
     1: "1️⃣",
     2: "2️⃣",
@@ -22,6 +25,14 @@ def format_roll(value):
     return DICE_FACES.get(value, str(value))
 
 
+def is_staff():
+    async def predicate(interaction: discord.Interaction):
+        role = discord.utils.get(interaction.user.roles, name=STAFF_ROLE)
+        if not role:
+            await interaction.response.send_message("❌ No tienes permisos para usar este comando.", ephemeral=True)
+            return False
+        return True
+    return app_commands.check(predicate)
 
 
 def format_cooldown(seconds):
@@ -58,6 +69,7 @@ class DadosRollView(discord.ui.View):
         self.message = None
 
     async def on_timeout(self):
+        _ACTIVE_DADOS.discard(self.author_id)
         for child in self.children:
             child.disabled = True
         if self.message:
@@ -101,10 +113,7 @@ class DadosRollView(discord.ui.View):
         autor_suma = autor_dado_1 + autor_dado_2
         bot_suma = bot_dado_1 + bot_dado_2
 
-        if autor_suma == bot_suma:
-            resultado_text = f"🤝 ¡Empate! Se devuelve tu apuesta de {self.monto} {COIN}."
-            color = discord.Color.yellow()
-        elif exito:
+        if exito:
             ganancia = self.monto * 2
             await update_balance(self.author_id, ganancia)
             resultado_text = f"🎉 ¡Ganaste! Tu apuesta se duplica: +{ganancia} {COIN}."
@@ -113,6 +122,8 @@ class DadosRollView(discord.ui.View):
             await update_balance(self.author_id, -self.monto)
             resultado_text = f"💀 Perdiste tu apuesta inicial de {self.monto} {COIN}."
             color = discord.Color.red()
+
+        _ACTIVE_DADOS.discard(self.author_id)
 
         expira_en = time.time() + dados_config["cooldown"]
         cache.set_game_cooldown_cache(self.author_id, "dados", expira_en)
@@ -145,6 +156,20 @@ class Dados(commands.Cog):
     def __init__(self, bot):
         self.bot = bot
 
+    @app_commands.command(name="dados_alternar", description="Activa o desactiva el sistema de dados")
+    @is_staff()
+    async def dados_alternar(self, interaction: discord.Interaction):
+        await interaction.response.defer(ephemeral=False)
+        dados_config["activa"] = not dados_config["activa"]
+        await save_dados_config()
+        estado = "✅ Activado" if dados_config["activa"] else "🔴 Desactivado"
+        await interaction.followup.send(
+            f"🎲 Sistema de Dados: **{estado}**\n"
+            f"📌 Apuesta máxima: **{dados_config['max_apuesta']}** {COIN}\n"
+            f"⏱️ Cooldown: **{format_cooldown(dados_config['cooldown'])}**",
+            ephemeral=False,
+        )
+
     @commands.command(name="dados")
     async def dados(self, ctx, monto: int = None):
         if monto is None:
@@ -165,6 +190,11 @@ class Dados(commands.Cog):
         if monto > dados_config["max_apuesta"]:
             return await ctx.send(
                 f"❌ {ctx.author.mention} No puedes apostar más de **{dados_config['max_apuesta']}** {COIN}."
+            )
+
+        if ctx.author.id in _ACTIVE_DADOS:
+            return await ctx.send(
+                f"❌ {ctx.author.mention} Ya tienes un juego de Dados en curso. Termina la apuesta actual antes de iniciar otra."
             )
 
         user = await get_user(ctx.author.id)
@@ -201,6 +231,8 @@ class Dados(commands.Cog):
         embed.set_footer(
             text=f"Cooldown: {format_cooldown(dados_config['cooldown'])} | Máx apuesta: {dados_config['max_apuesta']} PurpleCoins"
         )
+
+        _ACTIVE_DADOS.add(ctx.author.id)
 
         view = DadosRollView(ctx.author.id, monto)
         message = await ctx.reply(embed=embed, view=view, mention_author=False)
