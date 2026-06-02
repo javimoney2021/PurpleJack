@@ -4,7 +4,11 @@ import asyncio
 import time
 import discord
 print(f"discord.py version: {discord.__version__}")
-from settings import TOKEN, GUILD_ID
+from settings import TOKEN
+try:
+    from settings import GUILD_ID
+except ImportError:
+    GUILD_ID = None
 from core.database import (
     init_db, load_items_to_cache, load_cargos_to_cache,
     load_collect_config_to_cache, delete_cargo_temporal,
