@@ -528,6 +528,22 @@ class InventarioLayout(discord.ui.LayoutView):
 
 # ── SHOP COG ───────────────────────────────────────────
 
+
+def format_tiempo_restante(segundos: int) -> str:
+    if segundos <= 0:
+        return "Expirado"
+
+    dias = segundos // 86400
+    horas = (segundos % 86400) // 3600
+    minutos = (segundos % 3600) // 60
+
+    if dias >= 1:
+        return f"{dias} día{'s' if dias != 1 else ''}"
+    if horas >= 1:
+        return f"{horas} hora{'s' if horas != 1 else ''}"
+    return f"{minutos} minuto{'s' if minutos != 1 else ''}"
+
+
 class Shop(commands.Cog):
     def __init__(self, bot):
         self.bot = bot
@@ -607,6 +623,43 @@ class Shop(commands.Cog):
             else:
                 dur_txt = f"{int(duracion // 60)} minuto(s)"
             embed.add_field(name="⏳ Duración del Cargo", value=dur_txt, inline=True)
+
+        await ctx.send(embed=embed)
+
+    @commands.command(name="time")
+    async def tiempo_restante(self, ctx):
+        cargos = cache.get_cargos_cache().get(ctx.author.id, [])
+        ahora = time.time()
+
+        roles_activos = []
+        for cargo in cargos:
+            expira_en = cargo.get("expira_en", 0)
+            if expira_en <= ahora:
+                continue
+
+            guild = self.bot.get_guild(cargo.get("guild_id", ctx.guild.id)) if self.bot else ctx.guild
+            role = guild.get_role(int(cargo["rol_id"])) if guild else None
+            if role:
+                roles_activos.append((role, int(expira_en - ahora)))
+
+        if not roles_activos:
+            embed = discord.Embed(
+                title="🟢 ROLES - TIEMPO RESTANTE",
+                description="No tienes roles temporales activos en este momento.",
+                color=discord.Color.green()
+            )
+            return await ctx.send(embed=embed)
+
+        embed = discord.Embed(
+            title="🟢 ROLES - TIEMPO RESTANTE",
+            color=discord.Color.green()
+        )
+        for role, segundos in roles_activos:
+            embed.add_field(
+                name=role.mention,
+                value=format_tiempo_restante(segundos),
+                inline=False
+            )
 
         await ctx.send(embed=embed)
 
