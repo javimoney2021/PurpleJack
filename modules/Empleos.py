@@ -71,6 +71,13 @@ EMPLEOS = {
 _EMPLEOS_CACHE = {}
 
 
+def normalizar_empleo(nombre: str) -> str:
+    texto = nombre.lower().strip()
+    texto = texto.replace("í", "i").replace("á", "a").replace("é", "e").replace("ó", "o").replace("ú", "u")
+    texto = texto.replace("limpiador", "limpador")
+    return texto
+
+
 async def init_empleos_tables():
     if not pool:
         return
@@ -303,7 +310,7 @@ class Empleos(commands.Cog):
         if not empleo:
             return await ctx.send("❌ Usa: `!aplicar {empleo}`")
 
-        empleo = empleo.lower().strip()
+        empleo = normalizar_empleo(empleo)
         if empleo not in EMPLEOS:
             return await ctx.send("❌ Empleo no disponible.")
 
