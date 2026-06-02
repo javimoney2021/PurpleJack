@@ -2,7 +2,6 @@ import discord
 import asyncio
 import random
 from discord.ext import commands
-from discord import app_commands
 from core.database import update_balance
 from core.config import COIN
 
@@ -21,18 +20,6 @@ _golpear_config = {
     "min_time": 600,
     "max_time": 3600,
 }
-
-
-def is_staff():
-    async def predicate(interaction: discord.Interaction):
-        role = discord.utils.get(interaction.user.roles, name=STAFF_ROLE)
-        if not role:
-            await interaction.response.send_message(
-                "❌ No tienes permisos para usar este comando.", ephemeral=True
-            )
-            return False
-        return True
-    return app_commands.check(predicate)
 
 
 # ── VIEW ───────────────────────────────────────────────
@@ -178,93 +165,6 @@ async def golpear_loop(bot):
 class Golpear(commands.Cog):
     def __init__(self, bot):
         self.bot = bot
-
-    @app_commands.command(name="golpear_alternar", description="Activa o desactiva el sistema de cofres")
-    @is_staff()
-    async def golpear_alternar(self, interaction: discord.Interaction):
-        await interaction.response.defer(ephemeral=False)
-
-        if not _golpear_config["canal_id"]:
-            return await interaction.followup.send(
-                "❌ Primero configura el canal con **/golpear_editar**.", ephemeral=True
-            )
-
-        _golpear_config["activo"] = not _golpear_config["activo"]
-        estado = "✅ Activado" if _golpear_config["activo"] else "🔴 Desactivado"
-        canal = self.bot.get_channel(_golpear_config["canal_id"])
-        canal_txt = canal.mention if canal else f"<#{_golpear_config['canal_id']}>"
-
-        await interaction.followup.send(
-            f"💥 Sistema de Cofres: **{estado}**\n"
-            f"📌 Canal: {canal_txt}\n"
-            f"⏱️ Intervalo: **{_golpear_config['min_time'] // 60}m** — **{_golpear_config['max_time'] // 60}m**",
-            ephemeral=False
-        )
-
-    @app_commands.command(name="golpear_editar", description="Configura canal y tiempos del sistema de cofres")
-    @app_commands.describe(
-        canal="Canal donde aparecerán los cofres",
-        min_time="Tiempo mínimo (ej. 30s o 2m)",
-        max_time="Tiempo máximo (ej. 60s o 5m)"
-    )
-    @is_staff()
-    async def golpear_editar(self, interaction: discord.Interaction,
-                              canal: discord.TextChannel,
-                              min_time: str,
-                              max_time: str):
-        await interaction.response.defer(ephemeral=False)
-
-        def parse_time(value: str) -> int:
-            text = value.strip().lower()
-            total = 0
-            current = 0
-            for ch in text:
-                if ch.isdigit():
-                    current = current * 10 + int(ch)
-                elif ch in ('m', 's'):
-                    if current <= 0:
-                        raise ValueError("Valor inválido")
-                    total += current * (60 if ch == 'm' else 1)
-                    current = 0
-                else:
-                    raise ValueError("Formato inválido")
-            if current != 0:
-                total += current
-            if total <= 0:
-                raise ValueError("El tiempo debe ser mayor a 0")
-            return total
-
-        try:
-            min_seconds = parse_time(min_time)
-            max_seconds = parse_time(max_time)
-        except ValueError:
-            return await interaction.followup.send(
-                "❌ Usa formatos válidos como `30s`, `2m` o `1m30s`.", ephemeral=True
-            )
-
-        if min_seconds >= max_seconds:
-            return await interaction.followup.send("❌ El tiempo mínimo debe ser menor al máximo.", ephemeral=True)
-
-        _golpear_config["canal_id"] = canal.id
-        _golpear_config["min_time"] = min_seconds
-        _golpear_config["max_time"] = max_seconds
-
-        await interaction.followup.send(
-            f"✅ Sistema de Cofres configurado:\n"
-            f"📌 Canal: {canal.mention}\n"
-            f"⏱️ Intervalo: **{min_seconds}s** — **{max_seconds}s**",
-            ephemeral=False
-        )
-
-    @app_commands.command(name="golpear_test", description="Spawna un cofre en un canal")
-    @app_commands.describe(canal="Canal donde aparecerá el cofre de prueba")
-    @is_staff()
-    async def golpear_test(self, interaction: discord.Interaction, canal: discord.TextChannel):
-        await interaction.response.defer(ephemeral=True)
-        await spawn_cofre(canal)
-        await interaction.followup.send(
-            f"✅ Cofre enviado a {canal.mention}.", ephemeral=True
-        )
 
 
 async def setup(bot):

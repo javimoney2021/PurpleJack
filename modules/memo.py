@@ -2,7 +2,6 @@ import discord
 import asyncio
 import random
 from discord.ext import commands
-from discord import app_commands
 from core.database import get_user, update_balance
 from core.config import COIN
 
@@ -10,23 +9,12 @@ from core.config import COIN
 MAX_INTENTOS  = 7
 AUTO_DELETE   = 20
 MAX_APUESTA   = 300
-STAFF_ROLE    = "Equipo de Eventos"
 HIDDEN_EMOJI  = "🟦"
 EMOJIS_PARES  = ["🎲", "🍪", "🍇", "🔪", "💎", "🍼", "👑", "🚀"]
 
 # ── ESTADO GLOBAL ──────────────────────────────────────
 _active_memo: set[int] = set()   # {user_id}
 _memo_config = {"activa": True}
-
-
-def is_staff():
-    async def predicate(interaction: discord.Interaction):
-        role = discord.utils.get(interaction.user.roles, name=STAFF_ROLE)
-        if not role:
-            await interaction.response.send_message("❌ No tienes permisos para usar este comando.", ephemeral=True)
-            return False
-        return True
-    return app_commands.check(predicate)
 
 
 # ── VIEW ───────────────────────────────────────────────
@@ -225,18 +213,6 @@ class MemoView(discord.ui.View):
 class Memo(commands.Cog):
     def __init__(self, bot):
         self.bot = bot
-
-    @app_commands.command(name="memo_alternar", description="Activa o desactiva el sistema de memoria")
-    @is_staff()
-    async def memo_alternar(self, interaction: discord.Interaction):
-        await interaction.response.defer(ephemeral=False)
-        _memo_config["activa"] = not _memo_config["activa"]
-        estado = "✅ Activado" if _memo_config["activa"] else "🔴 Desactivado"
-        await interaction.followup.send(
-            f"🧠 Sistema de Memoria: **{estado}**\n"
-            f"📌 Apuesta máxima: **{MAX_APUESTA}** {COIN}",
-            ephemeral=False,
-        )
 
     @commands.command(name="memo")
     @commands.cooldown(1, 300, commands.BucketType.user)

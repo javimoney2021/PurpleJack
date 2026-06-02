@@ -18,6 +18,8 @@ from core.database import (
 )
 from core import cache
 from core.config import ruleta_config, rr_config, game_config, dados_config, COIN
+from modules.memo import _memo_config
+from modules.golpear import _golpear_config, spawn_cofre
 
 STAFF_ROLE = "Equipo de Eventos"
 COORDINADOR_ROLE = "Coordinador-ES"
@@ -317,6 +319,19 @@ class Staff(commands.Cog):
             return int(value[:-1])
         raise ValueError("Formato inválido")
 
+    def parse_cooldown_str(self, seconds: int) -> str:
+        if seconds >= 3600:
+            h = seconds // 3600
+            rest = seconds % 3600
+            if rest == 0:
+                return f"{h}h"
+            return f"{h}h{rest // 60}m" if rest % 60 == 0 else f"{h}h{rest // 60}m{rest % 60}s"
+        if seconds >= 60:
+            m = seconds // 60
+            rest = seconds % 60
+            return f"{m}m" if rest == 0 else f"{m}m{rest}s"
+        return f"{seconds}s"
+
     @app_commands.command(name="balance", description="Ver balance y banco de un miembro")
     @app_commands.describe(usuario="Miembro a consultar")
     @is_staff()
@@ -489,6 +504,86 @@ class Staff(commands.Cog):
         await save_rr_config()
         estado = "✅ activada" if rr_config["activa"] else "🔧 desactivada"
         await interaction.response.send_message(f"La Ruleta Rusa ha sido **{estado}**.", ephemeral=False)
+
+    @app_commands.command(name="dados_alternar", description="Activa o desactiva el sistema de dados")
+    @is_staff()
+    async def dados_alternar(self, interaction):
+        await interaction.response.defer(ephemeral=False)
+        dados_config["activa"] = not dados_config["activa"]
+        await save_dados_config()
+        estado = "✅ Activado" if dados_config["activa"] else "🔴 Desactivado"
+        await interaction.followup.send(
+            f"🎲 Sistema de Dados: **{estado}**\n"
+            f"📌 Apuesta máxima: **{dados_config['max_apuesta']}** {COIN}\n"
+            f"⏱️ Cooldown: **{self.parse_cooldown_str(dados_config['cooldown'])}**",
+            ephemeral=False,
+        )
+
+    @app_commands.command(name="memo_alternar", description="Activa o desactiva el sistema de memoria")
+    @is_staff()
+    async def memo_alternar(self, interaction):
+        await interaction.response.defer(ephemeral=False)
+        _memo_config["activa"] = not _memo_config["activa"]
+        estado = "✅ Activado" if _memo_config["activa"] else "🔴 Desactivado"
+        await interaction.followup.send(
+            f"🧠 Sistema de Memoria: **{estado}**",
+            ephemeral=False,
+        )
+
+    @app_commands.command(name="golpear_alternar", description="Activa o desactiva el sistema de cofres")
+    @is_staff()
+    async def golpear_alternar(self, interaction):
+        await interaction.response.defer(ephemeral=False)
+        if not _golpear_config["canal_id"]:
+            return await interaction.followup.send(
+                "❌ Primero configura el canal con **/golpear_editar**.", ephemeral=True
+            )
+        _golpear_config["activo"] = not _golpear_config["activo"]
+        estado = "✅ Activado" if _golpear_config["activo"] else "🔴 Desactivado"
+        canal = self.bot.get_channel(_golpear_config["canal_id"])
+        canal_txt = canal.mention if canal else f"<#{_golpear_config['canal_id']}>"
+        await interaction.followup.send(
+            f"💥 Sistema de Cofres: **{estado}**\n"
+            f"📌 Canal: {canal_txt}\n"
+            f"⏱️ Intervalo: **{self.parse_cooldown_str(_golpear_config['min_time'])}** — **{self.parse_cooldown_str(_golpear_config['max_time'])}**",
+            ephemeral=False,
+        )
+
+    @app_commands.command(name="golpear_editar", description="Configura canal y tiempos del sistema de cofres")
+    @app_commands.describe(
+        canal="Canal donde aparecerán los cofres",
+        min_time="Tiempo mínimo (ej. 30s, 2m, 1h)",
+        max_time="Tiempo máximo (ej. 60s, 5m, 2h)"
+    )
+    @is_staff()
+    async def golpear_editar(self, interaction, canal: discord.TextChannel, min_time: str, max_time: str):
+        await interaction.response.defer(ephemeral=False)
+        try:
+            min_seconds = self.parse_cooldown(min_time)
+            max_seconds = self.parse_cooldown(max_time)
+        except ValueError:
+            return await interaction.followup.send(
+                "❌ Usa formatos válidos como `30s`, `2m` o `1h`.", ephemeral=True
+            )
+        if min_seconds >= max_seconds:
+            return await interaction.followup.send("❌ El tiempo mínimo debe ser menor al máximo.", ephemeral=True)
+        _golpear_config["canal_id"] = canal.id
+        _golpear_config["min_time"] = min_seconds
+        _golpear_config["max_time"] = max_seconds
+        await interaction.followup.send(
+            f"✅ Sistema de Cofres configurado:\n"
+            f"📌 Canal: {canal.mention}\n"
+            f"⏱️ Intervalo: **{self.parse_cooldown_str(min_seconds)}** — **{self.parse_cooldown_str(max_seconds)}**",
+            ephemeral=False,
+        )
+
+    @app_commands.command(name="golpear_test", description="Spawna un cofre en un canal")
+    @app_commands.describe(canal="Canal donde aparecerá el cofre de prueba")
+    @is_staff()
+    async def golpear_test(self, interaction, canal: discord.TextChannel):
+        await interaction.response.defer(ephemeral=True)
+        await spawn_cofre(canal)
+        await interaction.followup.send(f"✅ Cofre enviado a {canal.mention}.", ephemeral=True)
 
     # ── ADD ITEM (nuevo flujo: campos de texto directos) ───
     @app_commands.command(name="add_item", description="Agrega un nuevo item a la tienda")

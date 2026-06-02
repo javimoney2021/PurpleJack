@@ -3,13 +3,11 @@ import random
 import time
 import asyncio
 from discord.ext import commands
-from discord import app_commands
-from core.database import get_user, update_balance, get_game_cooldown, set_game_cooldown, save_dados_config
+from core.database import get_user, update_balance, get_game_cooldown, set_game_cooldown
 from core.config import COIN, dados_config
 from core import cache
 
 DICE_GIF = "https://pub-a09b3609b6b34dfab5c7aa7742cd1a8a.r2.dev/Purple%20jack%20Harcode/dice.gif"
-STAFF_ROLE = "Equipo de Eventos"
 _ACTIVE_DADOS: set[int] = set()
 DICE_FACES = {
     1: "1️⃣",
@@ -23,16 +21,6 @@ DICE_FACES = {
 
 def format_roll(value):
     return DICE_FACES.get(value, str(value))
-
-
-def is_staff():
-    async def predicate(interaction: discord.Interaction):
-        role = discord.utils.get(interaction.user.roles, name=STAFF_ROLE)
-        if not role:
-            await interaction.response.send_message("❌ No tienes permisos para usar este comando.", ephemeral=True)
-            return False
-        return True
-    return app_commands.check(predicate)
 
 
 def format_cooldown(seconds):
@@ -155,20 +143,6 @@ class DadosRollView(discord.ui.View):
 class Dados(commands.Cog):
     def __init__(self, bot):
         self.bot = bot
-
-    @app_commands.command(name="dados_alternar", description="Activa o desactiva el sistema de dados")
-    @is_staff()
-    async def dados_alternar(self, interaction: discord.Interaction):
-        await interaction.response.defer(ephemeral=False)
-        dados_config["activa"] = not dados_config["activa"]
-        await save_dados_config()
-        estado = "✅ Activado" if dados_config["activa"] else "🔴 Desactivado"
-        await interaction.followup.send(
-            f"🎲 Sistema de Dados: **{estado}**\n"
-            f"📌 Apuesta máxima: **{dados_config['max_apuesta']}** {COIN}\n"
-            f"⏱️ Cooldown: **{format_cooldown(dados_config['cooldown'])}**",
-            ephemeral=False,
-        )
 
     @commands.command(name="dados")
     async def dados(self, ctx, monto: int = None):
