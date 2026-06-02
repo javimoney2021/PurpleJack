@@ -655,10 +655,9 @@ class Shop(commands.Cog):
             color=discord.Color.green()
         )
         for role, segundos, rol_id in roles_activos:
-            role_name = role.name if role else f"Rol {rol_id}"
             role_mention = role.mention if role else f"<@&{rol_id}>"
             embed.add_field(
-                name=role_name,
+                name="Rol",
                 value=f"{role_mention}\n⏳ {format_tiempo_restante(segundos)}",
                 inline=False
             )
