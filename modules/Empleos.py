@@ -209,12 +209,12 @@ async def limpiar_progreso(user_id):
 
 
 class ConfirmarEmpleoView(ui.View):
-    def __init__(self, bot, user_id, empleo, salario, ganancia_prob, perdida_prob):
+    def __init__(self, bot, user_id, empleo, salario_rango, ganancia_prob, perdida_prob):
         super().__init__(timeout=60)
         self.bot = bot
         self.user_id = user_id
         self.empleo = empleo
-        self.salario = salario
+        self.salario_rango = salario_rango
         self.ganancia_prob = ganancia_prob
         self.perdida_prob = perdida_prob
 
@@ -262,15 +262,23 @@ class ConfirmarEmpleoView(ui.View):
         })
         await save_empleo_user(data)
         await interaction.response.send_message(
-            f"🎉 Felicidades {interaction.user.mention}. Ahora eres **{self.empleo.title()}**. Usa `!trabajar` cada 6 horas para recibir tu paga.",
+            f"🎉 Felicidades {interaction.user.mention}. Ahora eres **{self.empleo.title()}**. Usa `!trabajar` cada 6 horas para recibir tu paga según el rango de tu empleo.",
             ephemeral=False
         )
+        try:
+            await interaction.message.delete(delay=1)
+        except Exception:
+            pass
 
     @ui.button(label="Rechazar empleo", style=ButtonStyle.red)
     async def rechazar(self, interaction: Interaction, button: ui.Button):
         if interaction.user.id != self.user_id:
             return await interaction.response.send_message("❌ No es tu confirmación.", ephemeral=True)
         await interaction.response.send_message("❌ Has rechazado aplicar a este empleo.", ephemeral=True)
+        try:
+            await interaction.message.delete(delay=1)
+        except Exception:
+            pass
 
 
 class Empleos(commands.Cog):
@@ -328,16 +336,18 @@ class Empleos(commands.Cog):
             return await ctx.send("❌ Debes esperar 1 hora antes de aplicar a un nuevo empleo.")
 
         info = EMPLEOS[empleo]
-        salario = random.randint(info['salario_min'], info['salario_max'])
+        salario_min = info['salario_min']
+        salario_max = info['salario_max']
         embed = discord.Embed(
-            title=f"¿Deseas aplicar como {empleo.title()} por {salario} cada 6 horas?",
+            title=f"¿Deseas aplicar como {empleo.title()}?",
             description=(
-                f"Este trabajo posee un porcentaje de ganancias de {int(info['ganancia_prob'] * 100)}% contra un "
-                f"{int(info['perdida_prob'] * 100)}% de pérdidas."
+                f"Este empleo paga entre **{salario_min} y {salario_max} {COIN}** por jornada de 6 horas.\n"
+                f"Probabilidad de ganancia: **{int(info['ganancia_prob'] * 100)}%**\n"
+                f"Probabilidad de pérdida: **{int(info['perdida_prob'] * 100)}%**"
             ),
             color=discord.Color.blurple()
         )
-        await ctx.send(embed=embed, view=ConfirmarEmpleoView(self.bot, ctx.author.id, empleo, salario, info['ganancia_prob'], info['perdida_prob']))
+        await ctx.send(embed=embed, view=ConfirmarEmpleoView(self.bot, ctx.author.id, empleo, (salario_min, salario_max), info['ganancia_prob'], info['perdida_prob']))
 
     @commands.command(name="renunciar")
     async def renunciar(self, ctx):
