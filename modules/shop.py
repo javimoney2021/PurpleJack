@@ -639,8 +639,8 @@ class Shop(commands.Cog):
 
             guild = self.bot.get_guild(cargo.get("guild_id", ctx.guild.id)) if self.bot else ctx.guild
             role = guild.get_role(int(cargo["rol_id"])) if guild else None
-            if role:
-                roles_activos.append((role, int(expira_en - ahora)))
+            if role or cargo.get("rol_id"):
+                roles_activos.append((role, int(expira_en - ahora), cargo.get("rol_id")))
 
         if not roles_activos:
             embed = discord.Embed(
@@ -654,10 +654,12 @@ class Shop(commands.Cog):
             title="🟢 ROLES - TIEMPO RESTANTE",
             color=discord.Color.green()
         )
-        for role, segundos in roles_activos:
+        for role, segundos, rol_id in roles_activos:
+            role_name = role.name if role else f"Rol {rol_id}"
+            role_mention = role.mention if role else f"<@&{rol_id}>"
             embed.add_field(
-                name=role.mention,
-                value=format_tiempo_restante(segundos),
+                name=role_name,
+                value=f"{role_mention}\n⏳ {format_tiempo_restante(segundos)}",
                 inline=False
             )
 
