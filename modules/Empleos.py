@@ -571,6 +571,7 @@ class IngenieroView(ui.View):
         self.seleccion = []
         self.pares = 0
         self.bloqueado = False
+        self.erroneas = set()
         self._generar_tablero()
         self._build_buttons()
 
@@ -584,7 +585,13 @@ class IngenieroView(ui.View):
         for i, emoji in enumerate(self.tablero):
             row = i // 4
             if i in self.seleccion or self.revelados[i]:
-                btn = ui.Button(label=emoji, style=ButtonStyle.primary if i in self.seleccion else ButtonStyle.success, row=row, custom_id=f"ing_{i}")
+                if i in self.erroneas:
+                    style = ButtonStyle.danger
+                elif i in self.seleccion:
+                    style = ButtonStyle.primary
+                else:
+                    style = ButtonStyle.success
+                btn = ui.Button(label=emoji, style=style, row=row, custom_id=f"ing_{i}")
             else:
                 btn = ui.Button(label="⬜", style=ButtonStyle.secondary, row=row, custom_id=f"ing_{i}")
             btn.callback = self._make_callback(i)
@@ -602,16 +609,23 @@ class IngenieroView(ui.View):
             if len(self.seleccion) == 2:
                 self.bloqueado = True
                 i1, i2 = self.seleccion
-                await asyncio.sleep(1)
                 if self.tablero[i1] == self.tablero[i2]:
                     self.revelados[i1] = True
                     self.revelados[i2] = True
                     self.pares += 1
+                    self.seleccion = []
+                    self.bloqueado = False
+                    self._build_buttons()
+                    await interaction.edit_original_response(embed=self.build_embed(), view=self)
                     if self.pares == 4:
                         await self._terminar(interaction, exito=True)
-                        return
-                else:
-                    pass
+                    return
+
+                self.erroneas = {i1, i2}
+                self._build_buttons()
+                await interaction.edit_original_response(embed=self.build_embed(), view=self)
+                await asyncio.sleep(2)
+                self.erroneas.clear()
                 self.seleccion = []
                 self.bloqueado = False
                 self._build_buttons()
@@ -659,11 +673,12 @@ class PlomeroView(ui.View):
         self.revelados = [False] * 9
         self.intentos = 0
         self.hallazgos = 0
+        self.max_intentos = 6
         self._generar_tablero()
         self._build_buttons()
 
     def _generar_tablero(self):
-        emojis = ["⚠️"] * 3 + ["🪨"] * 6
+        emojis = ["🚨"] * 3 + ["🪨"] * 6
         random.shuffle(emojis)
         self.tablero = emojis
 
@@ -672,7 +687,7 @@ class PlomeroView(ui.View):
         for i, emoji in enumerate(self.tablero):
             row = i // 3
             if self.revelados[i]:
-                btn = ui.Button(label=emoji, style=ButtonStyle.success if emoji == "⚠️" else ButtonStyle.danger, row=row, custom_id=f"plo_{i}")
+                btn = ui.Button(label=emoji, style=ButtonStyle.success if emoji == "🚨" else ButtonStyle.danger, row=row, custom_id=f"plo_{i}")
             else:
                 btn = ui.Button(label="⬜", style=ButtonStyle.secondary, row=row, custom_id=f"plo_{i}")
             btn.callback = self._make_callback(i)
@@ -688,11 +703,11 @@ class PlomeroView(ui.View):
             self.revelados[idx] = True
             self._build_buttons()
             await interaction.response.edit_message(embed=self.build_embed(), view=self)
-            if self.tablero[idx] == "⚠️":
+            if self.tablero[idx] == "🚨":
                 self.hallazgos += 1
             if self.hallazgos >= 3:
                 await self._terminar(interaction, exito=True)
-            elif self.intentos >= 5:
+            elif self.intentos >= self.max_intentos:
                 await self._terminar(interaction, exito=False)
         return callback
 
@@ -700,7 +715,7 @@ class PlomeroView(ui.View):
         embed = discord.Embed(title="🛠️ Revisión técnica", color=discord.Color.orange())
         embed.add_field(
             name="Objetivo",
-            value="Encuentra 3 señales de riesgo en 5 intentos. Si agotas los 5 intentos sin completarlo, perderás la misión.",
+            value="Encuentra los 3 elementos ideales para sellar ductos. Si agotas los 6 intentos sin completarlo, perderás la misión.",
             inline=False,
         )
         embed.add_field(name="Intentos usados", value=str(self.intentos), inline=True)
