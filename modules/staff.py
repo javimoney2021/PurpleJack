@@ -20,7 +20,7 @@ from core import cache
 from core.config import ruleta_config, rr_config, game_config, dados_config, COIN
 from modules.memo import _memo_config
 from modules.golpear import _golpear_config, spawn_cofre
-from modules.Empleos import _EMPLEOS_CACHE, get_empleo_user, save_empleo_user
+from modules.Empleos import _EMPLEOS_CACHE, get_empleo_user, save_empleo_user, alternar_empleos_mantenimiento, esta_en_mantenimiento
 
 STAFF_ROLE = "Equipo de Eventos"
 COORDINADOR_ROLE = "Coordinador-ES"
@@ -522,6 +522,17 @@ class Staff(commands.Cog):
         await interaction.response.send_message(
             f"✅ Ruleta configurada:\n• Apuesta máxima: **{monto}** {COIN}\n• Cooldown: **{cooldown}**",
             ephemeral=False
+        )
+
+    @app_commands.command(name="empleos_alternar", description="Activa o desactiva el sistema de empleos")
+    @is_staff()
+    async def empleos_alternar(self, interaction):
+        activo = alternar_empleos_mantenimiento()
+        estado = "✅ activado" if activo else "🔧 desactivado"
+        mensaje = "El sistema de Empleos está en mantenimiento." if not activo else "El sistema de Empleos ha sido reactivado."
+        await interaction.response.send_message(
+            f"El sistema de Empleos ha sido **{estado}**. {mensaje}",
+            ephemeral=False,
         )
 
     @app_commands.command(name="ruleta_alternar", description="Activa o desactiva la ruleta")
