@@ -426,7 +426,7 @@ class Empleos(commands.Cog):
         if data.get("ultimo_trabajo", 0) and (now - data["ultimo_trabajo"]) < info["duracion_horas"] * 3600:
             tiempo_restante = int(data["ultimo_trabajo"] + info["duracion_horas"] * 3600)
             return await ctx.send(
-                f"⏳ {ctx.author.mention}, debes esperar <t:{tiempo_restante}:R> para volver a trabajar.",
+                f"⏳ {ctx.author.mention}, tu próxima jornada laboral es <t:{tiempo_restante}:R>. Regresa después.",
                 delete_after=30,
             )
 
