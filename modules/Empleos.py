@@ -125,10 +125,11 @@ async def init_empleos_tables():
         """)
 
 
-async def get_empleo_user(user_id):
-    cached = _EMPLEOS_CACHE.get(user_id)
-    if cached is not None:
-        return cached
+async def get_empleo_user(user_id, force_refresh=False):
+    if not force_refresh:
+        cached = _EMPLEOS_CACHE.get(user_id)
+        if cached is not None:
+            return cached
     if not pool:
         return None
     async with pool.acquire() as conn:
@@ -438,7 +439,7 @@ class Empleos(commands.Cog):
 
     @commands.command(name="exp")
     async def exp(self, ctx):
-        data = await get_empleo_user(ctx.author.id)
+        data = await get_empleo_user(ctx.author.id, force_refresh=True)
         empleo = data.get("empleo_actual") or "Sin empleo"
         embed = discord.Embed(title="📊 Experiencia Laboral", color=discord.Color.gold())
         embed.add_field(name="Empleo actual", value=empleo.title() if empleo != "Sin empleo" else empleo, inline=False)

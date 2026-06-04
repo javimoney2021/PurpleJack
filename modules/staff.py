@@ -427,6 +427,8 @@ class Staff(commands.Cog):
 
         data["exp_laboral"] = data.get("exp_laboral", 0) + xp
         await save_empleo_user(data)
+        _EMPLEOS_CACHE.pop(usuario.id, None)
+        data = await get_empleo_user(usuario.id, force_refresh=True) or data
         _EMPLEOS_CACHE[usuario.id] = data
 
         await interaction.followup.send(
