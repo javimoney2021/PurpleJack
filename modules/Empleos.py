@@ -424,7 +424,11 @@ class Empleos(commands.Cog):
         info = EMPLEOS[empleo]
         now = time.time()
         if data.get("ultimo_trabajo", 0) and (now - data["ultimo_trabajo"]) < info["duracion_horas"] * 3600:
-            return await ctx.send("⏳ Debes esperar 3 horas para volver a trabajar.")
+            tiempo_restante = int(data["ultimo_trabajo"] + info["duracion_horas"] * 3600)
+            return await ctx.send(
+                f"⏳ {ctx.author.mention}, debes esperar <t:{tiempo_restante}:R> para volver a trabajar.",
+                delete_after=30,
+            )
 
         if empleo == "limpiador":
             view = LimpiadorView(self.bot, ctx.author, info)
