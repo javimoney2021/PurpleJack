@@ -73,6 +73,15 @@ EMPLEOS = {
 _EMPLEOS_CACHE = {}
 
 
+def calcular_pago(info, tiempo_segundos: int) -> int:
+    """Calcula el pago de una jornada dentro del rango visible en !empleos."""
+    base = random.randint(info['salario_min'], info['salario_max'])
+    tiempo_ajustado = min(max(int(tiempo_segundos), 0), 45)
+    ratio = 1.0 + max(0.0, 45 - tiempo_ajustado) / 45.0 * 0.35
+    pago = int(base * ratio)
+    return max(info['salario_min'], min(info['salario_max'], pago))
+
+
 def normalizar_empleo(nombre: str) -> str:
     texto = nombre.lower().strip()
     texto = texto.replace("í", "i").replace("á", "a").replace("é", "e").replace("ó", "o").replace("ú", "u")
@@ -486,10 +495,8 @@ class LimpiadorView(ui.View):
         return embed
 
     async def _terminar(self, interaction, exito):
-        tiempo = int(time.time() - self.start_time)
-        base = random.randint(self.info['salario_min'], self.info['salario_max'])
-        ratio = 1.0 + max(0.0, 45 - tiempo) / 45.0 * 0.35
-        pago = int(base * ratio)
+        tiempo = max(1, int(time.time() - self.start_time))
+        pago = calcular_pago(self.info, tiempo)
         exito_real = True
         if random.random() < self.info['prob_fallo']:
             exito_real = False
@@ -582,10 +589,8 @@ class IngenieroView(ui.View):
         return embed
 
     async def _terminar(self, interaction, exito):
-        tiempo = int(time.time() - self.start_time)
-        base = random.randint(self.info['salario_min'], self.info['salario_max'])
-        ratio = 1.0 + max(0.0, 45 - tiempo) / 45.0 * 0.35
-        pago = int(base * ratio)
+        tiempo = max(1, int(time.time() - self.start_time))
+        pago = calcular_pago(self.info, tiempo)
         if random.random() < self.info['prob_fallo']:
             await update_bank(self.author.id, self.info['penalizacion'])
             mensaje = random.choice(self.info['mensajes_fallo']).format(monto=abs(self.info['penalizacion']), COIN=COIN)
@@ -661,10 +666,8 @@ class PlomeroView(ui.View):
         return embed
 
     async def _terminar(self, interaction, exito):
-        tiempo = int(time.time() - self.start_time)
-        base = random.randint(self.info['salario_min'], self.info['salario_max'])
-        ratio = 1.0 + max(0.0, 45 - tiempo) / 45.0 * 0.35
-        pago = int(base * ratio)
+        tiempo = max(1, int(time.time() - self.start_time))
+        pago = calcular_pago(self.info, tiempo)
         if not exito or random.random() < self.info['prob_fallo']:
             await update_bank(self.author.id, self.info['penalizacion'])
             mensaje = random.choice(self.info['mensajes_fallo']).format(monto=abs(self.info['penalizacion']), COIN=COIN)
