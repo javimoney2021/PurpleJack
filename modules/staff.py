@@ -20,6 +20,7 @@ from core import cache
 from core.config import ruleta_config, rr_config, game_config, dados_config, COIN
 from modules.memo import _memo_config
 from modules.golpear import _golpear_config, spawn_cofre
+from modules.Empleos import _EMPLEOS_CACHE
 
 STAFF_ROLE = "Equipo de Eventos"
 COORDINADOR_ROLE = "Coordinador-ES"
@@ -395,6 +396,32 @@ class Staff(commands.Cog):
         await interaction.followup.send(
             f"✅ Se removieron **{cantidad}** {COIN} del **{destino.name}** de {usuario.mention}.", ephemeral=False
         )
+
+    @app_commands.command(name="despedir_todos", description="Limpia temporalmente todos los empleos registrados en DB y RAM")
+    @is_staff()
+    async def despedir_todos(self, interaction: discord.Interaction):
+        await interaction.response.defer(ephemeral=True)
+        try:
+            async with pool.acquire() as conn:
+                users_deleted = await conn.fetchval("SELECT COUNT(*) FROM empleos_users")
+                historial_deleted = await conn.fetchval("SELECT COUNT(*) FROM empleos_historial")
+                await conn.execute("DELETE FROM empleos_users")
+                await conn.execute("DELETE FROM empleos_historial")
+
+            _EMPLEOS_CACHE.clear()
+
+            await interaction.followup.send(
+                "✅ Limpieza temporal de empleos completada.\n"
+                f"• Usuarios con empleo limpiados: **{users_deleted or 0}**\n"
+                f"• Registros de historial eliminados: **{historial_deleted or 0}**\n"
+                "• Caché RAM de empleos reiniciada.",
+                ephemeral=True,
+            )
+        except Exception as error:
+            await interaction.followup.send(
+                f"❌ No se pudo completar la limpieza temporal: {error}",
+                ephemeral=True,
+            )
 
     @app_commands.command(name="resetallcoins", description="Resetea las PurpleCoins de TODOS")
     @is_staff()
