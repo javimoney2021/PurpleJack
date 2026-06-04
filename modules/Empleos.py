@@ -628,7 +628,7 @@ class PlomeroView(ui.View):
         self._build_buttons()
 
     def _generar_tablero(self):
-        emojis = ["⚠️"] * 3 + ["🪨"] * 6
+        emojis = ["🧱"] * 3 + ["🪨"] * 6
         random.shuffle(emojis)
         self.tablero = emojis
 
@@ -637,7 +637,7 @@ class PlomeroView(ui.View):
         for i, emoji in enumerate(self.tablero):
             row = i // 3
             if self.revelados[i]:
-                btn = ui.Button(label=emoji, style=ButtonStyle.success if emoji == "⚠️" else ButtonStyle.danger, row=row, custom_id=f"plo_{i}")
+                btn = ui.Button(label=emoji, style=ButtonStyle.success if emoji == "🧱" else ButtonStyle.danger, row=row, custom_id=f"plo_{i}")
             else:
                 btn = ui.Button(label="⬜", style=ButtonStyle.secondary, row=row, custom_id=f"plo_{i}")
             btn.callback = self._make_callback(i)
@@ -649,12 +649,16 @@ class PlomeroView(ui.View):
                 return await interaction.response.send_message("❌ Este tablero no es tuyo.", ephemeral=True)
             if self.revelados[idx]:
                 return await interaction.response.send_message("✅ Esa casilla ya está abierta.", ephemeral=True)
-            self.intentos += 1
+
             self.revelados[idx] = True
+            if self.tablero[idx] == "🧱":
+                self.hallazgos += 1
+            else:
+                self.intentos += 1
+
             self._build_buttons()
             await interaction.response.edit_message(embed=self.build_embed(), view=self)
-            if self.tablero[idx] == "⚠️":
-                self.hallazgos += 1
+
             if self.hallazgos >= 3:
                 await self._terminar(interaction, exito=True)
             elif self.intentos >= 5:
@@ -663,9 +667,9 @@ class PlomeroView(ui.View):
 
     def build_embed(self):
         embed = discord.Embed(title="🛠️ Revisión técnica", color=discord.Color.orange())
-        embed.add_field(name="Objetivo", value="Encuentra 3 señales de riesgo en 5 intentos.", inline=False)
-        embed.add_field(name="Intentos usados", value=str(self.intentos), inline=True)
-        embed.add_field(name="Señales encontradas", value=str(self.hallazgos), inline=True)
+        embed.add_field(name="Objetivo", value="Encuentra el item correcto para sellar ductos.", inline=False)
+        embed.add_field(name="Intentos fallidos", value=str(self.intentos), inline=True)
+        embed.add_field(name="Items correctos encontrados", value=str(self.hallazgos), inline=True)
         embed.set_footer(text=f"Tablero de {self.author.display_name} • Se elimina en 180 segundos")
         return embed
 
