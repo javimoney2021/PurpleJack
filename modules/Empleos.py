@@ -12,10 +12,11 @@ from core.database import pool, update_bank
 
 EMPLEOS = {
     "limpiador": {
-        "salario_min": 250,
-        "salario_max": 450,
+        "salario_min": 500,
+        "salario_max": 700,
         "dificultad": "Fácil",
         "xp_requisito": 0,
+        "xp_ganada": 2,
         "duracion_horas": 3,
         "penalizacion": -500,
         "prob_fallo": 0.15,
@@ -31,10 +32,11 @@ EMPLEOS = {
         ]
     },
     "ingeniero": {
-        "salario_min": 450,
-        "salario_max": 750,
+        "salario_min": 800,
+        "salario_max": 1200,
         "dificultad": "Media",
         "xp_requisito": 20,
+        "xp_ganada": 4,
         "duracion_horas": 3,
         "penalizacion": -700,
         "prob_fallo": 0.20,
@@ -50,10 +52,11 @@ EMPLEOS = {
         ]
     },
     "plomero": {
-        "salario_min": 700,
-        "salario_max": 1100,
+        "salario_min": 1300,
+        "salario_max": 1800,
         "dificultad": "Difícil",
         "xp_requisito": 30,
+        "xp_ganada": 8,
         "duracion_horas": 3,
         "penalizacion": -900,
         "prob_fallo": 0.00,
@@ -272,7 +275,7 @@ async def reset_empleo_user(user_id):
     return data
 
 
-async def registrar_resultado(user_id, empleo, exito, pago, motivo):
+async def registrar_resultado(user_id, empleo, exito, pago, motivo, xp_ganada=0):
     data = await get_empleo_user(user_id)
     if not data:
         return
@@ -282,7 +285,7 @@ async def registrar_resultado(user_id, empleo, exito, pago, motivo):
     data["historial_reciente_de_jornadas"] = (data.get("historial_reciente_de_jornadas", []) + [ahora])[-10:]
     if exito:
         data["trabajos_exitosos"] = data.get("trabajos_exitosos", 0) + 1
-        data["exp_laboral"] = data.get("exp_laboral", 0) + 2
+        data["exp_laboral"] = data.get("exp_laboral", 0) + max(0, xp_ganada)
         data["racha_exitos"] = data.get("racha_exitos", 0) + 1
         if data["racha_exitos"] % 5 == 0:
             data["exp_laboral"] += 5
@@ -384,7 +387,7 @@ class Empleos(commands.Cog):
             embed.add_field(
                 name=f"{nombre.title()}",
                 value=(
-                    f"• Salario: {info['salario_min']} - {info['salario_max']} {COIN}\n"
+                    f"• Recompensa: {info['salario_min']} - {info['salario_max']} {COIN} + {info.get('xp_ganada', 0)} XP\n"
                     f"• Dificultad: {info['dificultad']}\n"
                     f"• XP requerida: {info['xp_requisito']}\n"
                     f"• Jornada: {info['duracion_horas']} horas"
@@ -441,7 +444,7 @@ class Empleos(commands.Cog):
     async def exp(self, ctx):
         data = await get_empleo_user(ctx.author.id, force_refresh=True)
         empleo = data.get("empleo_actual") or "Sin empleo"
-        embed = discord.Embed(title="📊 Experiencia Laboral", color=discord.Color.gold())
+        embed = discord.Embed(title=f"📊 Experiencia Laboral - {ctx.author.display_name}", color=discord.Color.gold())
         embed.add_field(name="Empleo actual", value=empleo.title() if empleo != "Sin empleo" else empleo, inline=False)
         embed.add_field(name="XP Laboral", value=str(data.get("exp_laboral", 0)), inline=True)
         embed.add_field(name="Trabajos exitosos", value=str(data.get("trabajos_exitosos", 0)), inline=True)
@@ -546,6 +549,7 @@ class LimpiadorView(ui.View):
         base = random.randint(self.info['salario_min'], self.info['salario_max'])
         ratio = 1.0 + max(0.0, 45 - tiempo) / 45.0 * 0.35
         pago = int(base * ratio)
+        xp_ganada = self.info.get('xp_ganada', 0)
         exito_real = True
         if random.random() < self.info['prob_fallo']:
             exito_real = False
@@ -557,8 +561,9 @@ class LimpiadorView(ui.View):
             await self._cleanup()
             return
         mensaje = random.choice(self.info['mensajes_exito']).format(monto=pago, COIN=COIN)
+        mensaje = f"{mensaje} (+{xp_ganada} XP Laboral)"
         await update_bank(self.author.id, pago)
-        await registrar_resultado(self.author.id, 'Limpiador', True, pago, mensaje)
+        await registrar_resultado(self.author.id, 'Limpiador', True, pago, mensaje, xp_ganada=xp_ganada)
         await interaction.edit_original_response(embed=discord.Embed(title="🧹 Resultado", description=f"{self.author.mention} {mensaje}", color=discord.Color.green()), view=None)
         await self._cleanup()
 
@@ -656,6 +661,7 @@ class IngenieroView(ui.View):
         base = random.randint(self.info['salario_min'], self.info['salario_max'])
         ratio = 1.0 + max(0.0, 45 - tiempo) / 45.0 * 0.35
         pago = int(base * ratio)
+        xp_ganada = self.info.get('xp_ganada', 0)
         if random.random() < self.info['prob_fallo']:
             await update_bank(self.author.id, self.info['penalizacion'])
             mensaje = random.choice(self.info['mensajes_fallo']).format(monto=abs(self.info['penalizacion']), COIN=COIN)
@@ -664,7 +670,8 @@ class IngenieroView(ui.View):
         else:
             await update_bank(self.author.id, pago)
             mensaje = random.choice(self.info['mensajes_exito']).format(monto=pago, COIN=COIN)
-            await registrar_resultado(self.author.id, 'ingeniero', True, pago, mensaje)
+            mensaje = f"{mensaje} (+{xp_ganada} XP Laboral)"
+            await registrar_resultado(self.author.id, 'ingeniero', True, pago, mensaje, xp_ganada=xp_ganada)
             await interaction.edit_original_response(embed=discord.Embed(title="🔧 Resultado", description=f"{self.author.mention} {mensaje}", color=discord.Color.green()), view=None)
         await asyncio.sleep(180)
         try:
@@ -741,6 +748,7 @@ class PlomeroView(ui.View):
         base = random.randint(self.info['salario_min'], self.info['salario_max'])
         ratio = 1.0 + max(0.0, 45 - tiempo) / 45.0 * 0.35
         pago = int(base * ratio)
+        xp_ganada = self.info.get('xp_ganada', 0)
         if not exito:
             await update_bank(self.author.id, self.info['penalizacion'])
             mensaje = random.choice(self.info['mensajes_fallo']).format(monto=abs(self.info['penalizacion']), COIN=COIN)
@@ -749,7 +757,8 @@ class PlomeroView(ui.View):
         else:
             await update_bank(self.author.id, pago)
             mensaje = random.choice(self.info['mensajes_exito']).format(monto=pago, COIN=COIN)
-            await registrar_resultado(self.author.id, 'plomero', True, pago, mensaje)
+            mensaje = f"{mensaje} (+{xp_ganada} XP Laboral)"
+            await registrar_resultado(self.author.id, 'plomero', True, pago, mensaje, xp_ganada=xp_ganada)
             await interaction.edit_original_response(embed=discord.Embed(title="🛠️ Resultado", description=f"{self.author.mention} {mensaje}", color=discord.Color.green()), view=None)
         await asyncio.sleep(180)
         try:
