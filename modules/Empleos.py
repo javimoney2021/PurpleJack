@@ -492,12 +492,10 @@ class LimpiadorView(ui.View):
         self._build_buttons()
 
     def _generar_tablero(self):
-        # Tablero fijo y hardcodeado para garantizar exactamente 3 celdas de reciclaje.
-        self.tablero = [
-            "🗑️", "🧹", "🧺", "🧼", "🪴",
-            "🗑️", "📚", "🪟", "📦", "🧻",
-            "🗑️", "🧽", "🫧", "🪣", "🖥️", "🪙"
-        ]
+        # Mantiene exactamente 3 celdas de reciclaje, pero las mezcla al azar en cada invocación.
+        emojis = ["🗑️"] * 3 + ["🧹", "🧺", "🧼", "🪴", "📚", "🪟", "📦", "🧻", "🧽", "🫧", "🪣", "🖥️", "🪙"]
+        random.shuffle(emojis)
+        self.tablero = emojis
 
     def _build_buttons(self):
         self.clear_items()
@@ -534,7 +532,7 @@ class LimpiadorView(ui.View):
         tiempo = int(time.time() - self.start_time)
         base = random.randint(self.info['salario_min'], self.info['salario_max'])
         ratio = 1.0 + max(0.0, 45 - tiempo) / 45.0 * 0.35
-        pago_actual = int(base * ratio)
+        pago_actual = min(int(base * ratio), self.info['salario_max'])
 
         embed = discord.Embed(title="🧹 Limpieza en progreso", color=discord.Color.green())
         embed.add_field(name="Objetivo", value="Descubre los 3 símbolos de reciclaje para completar la tarea.", inline=False)
@@ -548,7 +546,7 @@ class LimpiadorView(ui.View):
         tiempo = int(time.time() - self.start_time)
         base = random.randint(self.info['salario_min'], self.info['salario_max'])
         ratio = 1.0 + max(0.0, 45 - tiempo) / 45.0 * 0.35
-        pago = int(base * ratio)
+        pago = min(int(base * ratio), self.info['salario_max'])
         xp_ganada = self.info.get('xp_ganada', 0)
         exito_real = True
         if random.random() < self.info['prob_fallo']:
@@ -660,7 +658,7 @@ class IngenieroView(ui.View):
         tiempo = int(time.time() - self.start_time)
         base = random.randint(self.info['salario_min'], self.info['salario_max'])
         ratio = 1.0 + max(0.0, 45 - tiempo) / 45.0 * 0.35
-        pago = int(base * ratio)
+        pago = min(int(base * ratio), self.info['salario_max'])
         xp_ganada = self.info.get('xp_ganada', 0)
         if random.random() < self.info['prob_fallo']:
             await update_bank(self.author.id, self.info['penalizacion'])
@@ -747,7 +745,7 @@ class PlomeroView(ui.View):
         tiempo = int(time.time() - self.start_time)
         base = random.randint(self.info['salario_min'], self.info['salario_max'])
         ratio = 1.0 + max(0.0, 45 - tiempo) / 45.0 * 0.35
-        pago = int(base * ratio)
+        pago = min(int(base * ratio), self.info['salario_max'])
         xp_ganada = self.info.get('xp_ganada', 0)
         if not exito:
             await update_bank(self.author.id, self.info['penalizacion'])
