@@ -481,6 +481,7 @@ class LimpiadorView(ui.View):
         self.start_time = time.time()
         self.revelados = [False] * 16
         self.basura = 3
+        self.celdas_erroneas = set()
         self.message = None
         self.puntos = 0
         self._generar_tablero()
@@ -498,7 +499,8 @@ class LimpiadorView(ui.View):
         for i, emoji in enumerate(self.tablero):
             row = i // 4
             if self.revelados[i]:
-                btn = ui.Button(label=emoji, style=ButtonStyle.success, row=row, custom_id=f"limp_{i}")
+                style = ButtonStyle.success if emoji == "🗑️" else ButtonStyle.danger
+                btn = ui.Button(label=emoji, style=style, row=row, custom_id=f"limp_{i}")
             else:
                 btn = ui.Button(label="⬜", style=ButtonStyle.secondary, row=row, custom_id=f"limp_{i}")
             btn.callback = self._make_callback(i)
@@ -512,6 +514,8 @@ class LimpiadorView(ui.View):
                 return await interaction.response.send_message("✅ Esa casilla ya está descubierta.", ephemeral=True)
             self.revelados[idx] = True
             self.puntos += 1
+            if self.tablero[idx] != "🗑️":
+                self.celdas_erroneas.add(idx)
             self._build_buttons()
             await interaction.response.edit_message(embed=self.build_embed(), view=self)
             if self.tablero[idx] == "🗑️":
@@ -522,10 +526,16 @@ class LimpiadorView(ui.View):
 
     def build_embed(self):
         descubiertos = sum(self.revelados)
+        tiempo = int(time.time() - self.start_time)
+        base = random.randint(self.info['salario_min'], self.info['salario_max'])
+        ratio = 1.0 + max(0.0, 45 - tiempo) / 45.0 * 0.35
+        pago_actual = int(base * ratio)
+
         embed = discord.Embed(title="🧹 Limpieza en progreso", color=discord.Color.green())
         embed.add_field(name="Objetivo", value="Descubre los 3 símbolos de reciclaje para completar la tarea.", inline=False)
         embed.add_field(name="Celdas abiertas", value=str(descubiertos), inline=True)
         embed.add_field(name="Símbolos de reciclaje restantes", value=str(self.basura), inline=True)
+        embed.add_field(name="Pago estimado actual", value=f"{pago_actual} {COIN}", inline=False)
         embed.set_footer(text=f"Tablero de {self.author.display_name} • Se elimina en 180 segundos")
         return embed
 
