@@ -20,7 +20,13 @@ from core import cache
 from core.config import ruleta_config, rr_config, game_config, dados_config, COIN
 from modules.memo import _memo_config
 from modules.golpear import _golpear_config, spawn_cofre
-from modules.Empleos import _EMPLEOS_CACHE, get_empleo_user, save_empleo_user, alternar_empleos_mantenimiento, esta_en_mantenimiento
+from modules.Empleos import _EMPLEOS_CACHE, get_empleo_user, save_empleo_user
+
+try:
+    from modules.Empleos import alternar_empleos_mantenimiento
+except ImportError:
+    def alternar_empleos_mantenimiento():
+        return False
 
 STAFF_ROLE = "Equipo de Eventos"
 COORDINADOR_ROLE = "Coordinador-ES"
