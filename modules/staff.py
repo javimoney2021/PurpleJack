@@ -408,6 +408,24 @@ class Staff(commands.Cog):
                 await conn.execute("DELETE FROM empleos_users")
                 await conn.execute("DELETE FROM empleos_historial")
 
+            for user_id, data in list(_EMPLEOS_CACHE.items()):
+                if isinstance(data, dict):
+                    data["empleo_actual"] = None
+                    data["dificultad"] = None
+                    data["fecha_contratacion"] = 0
+                    data["ultimo_trabajo"] = 0
+                    data["historial_reciente_de_jornadas"] = []
+                    data["cooldown_renuncia"] = 0
+                    data["progreso_permanencia"] = 0
+                    data["ultimo_empleo"] = None
+                    data["progreso_requisito"] = 0
+                    data["despedido_inactividad"] = False
+                    if data.get("empleo_actual") == "limpador" or data.get("ultimo_empleo") == "limpador":
+                        data["empleo_actual"] = None
+                        data["ultimo_empleo"] = None
+                else:
+                    _EMPLEOS_CACHE.pop(user_id, None)
+
             _EMPLEOS_CACHE.clear()
 
             await interaction.followup.send(
