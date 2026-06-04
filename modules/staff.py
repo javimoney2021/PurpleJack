@@ -20,7 +20,7 @@ from core import cache
 from core.config import ruleta_config, rr_config, game_config, dados_config, COIN
 from modules.memo import _memo_config
 from modules.golpear import _golpear_config, spawn_cofre
-from modules.Empleos import _EMPLEOS_CACHE, reset_empleo_user, get_empleo_user, save_empleo_user
+from modules.Empleos import _EMPLEOS_CACHE, get_empleo_user, save_empleo_user
 
 STAFF_ROLE = "Equipo de Eventos"
 COORDINADOR_ROLE = "Coordinador-ES"
@@ -444,9 +444,6 @@ class Staff(commands.Cog):
                 historial_deleted = await conn.fetchval("SELECT COUNT(*) FROM empleos_historial")
                 await conn.execute("DELETE FROM empleos_users")
                 await conn.execute("DELETE FROM empleos_historial")
-
-            for user_id in list(_EMPLEOS_CACHE.keys()):
-                await reset_empleo_user(user_id)
 
             _EMPLEOS_CACHE.clear()
 
