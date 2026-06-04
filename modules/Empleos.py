@@ -11,7 +11,7 @@ from core.config import COIN
 from core.database import pool, update_bank
 
 EMPLEOS = {
-    "limpador": {
+    "Limpiador": {
         "salario_min": 250,
         "salario_max": 450,
         "dificultad": "Fácil",
@@ -416,8 +416,8 @@ class Empleos(commands.Cog):
         if data.get("ultimo_trabajo", 0) and (now - data["ultimo_trabajo"]) < info["duracion_horas"] * 3600:
             return await ctx.send("⏳ Debes esperar 3 horas para volver a trabajar.")
 
-        if empleo == "limpador":
-            view = LimpadorView(self.bot, ctx.author, info)
+        if empleo == "Limpiador":
+            view = LimpiadorView(self.bot, ctx.author, info)
         elif empleo == "ingeniero":
             view = IngenieroView(self.bot, ctx.author, info)
         else:
@@ -427,7 +427,7 @@ class Empleos(commands.Cog):
         view.message = msg
 
 
-class LimpadorView(ui.View):
+class LimpiadorView(ui.View):
     def __init__(self, bot, author, info):
         super().__init__(timeout=180)
         self.bot = bot
@@ -494,13 +494,13 @@ class LimpadorView(ui.View):
             pago = self.info['penalizacion']
             mensaje = random.choice(self.info['mensajes_fallo']).format(monto=abs(self.info['penalizacion']), COIN=COIN)
             await update_bank(self.author.id, self.info['penalizacion'])
-            await registrar_resultado(self.author.id, 'limpador', False, self.info['penalizacion'], mensaje)
+            await registrar_resultado(self.author.id, 'Limpiador', False, self.info['penalizacion'], mensaje)
             await interaction.edit_original_response(embed=discord.Embed(title="🧹 Resultado", description=f"{self.author.mention} {mensaje}", color=discord.Color.red()), view=None)
             await self._cleanup()
             return
         mensaje = random.choice(self.info['mensajes_exito']).format(monto=pago, COIN=COIN)
         await update_bank(self.author.id, pago)
-        await registrar_resultado(self.author.id, 'limpador', True, pago, mensaje)
+        await registrar_resultado(self.author.id, 'Limpiador', True, pago, mensaje)
         await interaction.edit_original_response(embed=discord.Embed(title="🧹 Resultado", description=f"{self.author.mention} {mensaje}", color=discord.Color.green()), view=None)
         await self._cleanup()
 
