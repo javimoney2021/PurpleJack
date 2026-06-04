@@ -11,7 +11,7 @@ from core.config import COIN
 from core.database import pool, update_bank
 
 EMPLEOS = {
-    "Limpiador": {
+    "limpiador": {
         "salario_min": 250,
         "salario_max": 450,
         "dificultad": "Fácil",
@@ -76,6 +76,7 @@ _EMPLEOS_CACHE = {}
 def normalizar_empleo(nombre: str) -> str:
     texto = nombre.lower().strip()
     texto = texto.replace("í", "i").replace("á", "a").replace("é", "e").replace("ó", "o").replace("ú", "u")
+    texto = texto.replace("limpador", "limpiador")
     return texto
 
 
@@ -416,7 +417,7 @@ class Empleos(commands.Cog):
         if data.get("ultimo_trabajo", 0) and (now - data["ultimo_trabajo"]) < info["duracion_horas"] * 3600:
             return await ctx.send("⏳ Debes esperar 3 horas para volver a trabajar.")
 
-        if empleo == "Limpiador":
+        if empleo == "limpiador":
             view = LimpiadorView(self.bot, ctx.author, info)
         elif empleo == "ingeniero":
             view = IngenieroView(self.bot, ctx.author, info)
