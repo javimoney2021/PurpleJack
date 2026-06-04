@@ -20,7 +20,7 @@ from core import cache
 from core.config import ruleta_config, rr_config, game_config, dados_config, COIN
 from modules.memo import _memo_config
 from modules.golpear import _golpear_config, spawn_cofre
-from modules.Empleos import _EMPLEOS_CACHE
+from modules.Empleos import _EMPLEOS_CACHE, get_empleo_user, save_empleo_user
 
 STAFF_ROLE = "Equipo de Eventos"
 COORDINADOR_ROLE = "Coordinador-ES"
@@ -369,6 +369,42 @@ class Staff(commands.Cog):
                 )
         await interaction.followup.send(
             f"✅ Se añadieron **{cantidad}** {COIN} al **{destino.name}** de {usuario.mention}.", ephemeral=False
+        )
+
+    @app_commands.command(name="add_xp_laboral", description="Otorga XP Laboral a un miembro")
+    @app_commands.describe(usuario="Miembro", xp="Cantidad de XP a otorgar")
+    @is_staff()
+    async def add_xp_laboral(self, interaction, usuario: discord.Member, xp: int):
+        if xp <= 0:
+            return await interaction.response.send_message("❌ La cantidad de XP debe ser mayor a 0.", ephemeral=True)
+
+        await interaction.response.defer(ephemeral=False)
+
+        data = await get_empleo_user(usuario.id) or {
+            "user_id": usuario.id,
+            "empleo_actual": None,
+            "dificultad": None,
+            "fecha_contratacion": 0,
+            "ultimo_trabajo": 0,
+            "historial_reciente_de_jornadas": [],
+            "cooldown_renuncia": 0,
+            "progreso_permanencia": 0,
+            "ultimo_empleo": None,
+            "progreso_requisito": 0,
+            "despedido_inactividad": False,
+            "exp_laboral": 0,
+            "trabajos_exitosos": 0,
+            "trabajos_fallidos": 0,
+            "total_generado": 0,
+            "racha_exitos": 0,
+        }
+
+        data["exp_laboral"] = data.get("exp_laboral", 0) + xp
+        await save_empleo_user(data)
+
+        await interaction.followup.send(
+            f"✅ Se otorgaron **{xp}** puntos de XP Laboral a {usuario.mention}.",
+            ephemeral=False,
         )
 
     @app_commands.command(name="removecoins", description="Remueve PurpleCoins a un miembro")

@@ -20,9 +20,9 @@ EMPLEOS = {
         "penalizacion": -500,
         "prob_fallo": 0.20,
         "mensajes_exito": [
-            "Has dejado reluciente el área de trabajo y recibes {monto} {COIN}.",
-            "Tu limpieza fue impecable y el equipo te premia con {monto} {COIN}.",
-            "La jornada quedó perfecta: ganas {monto} {COIN} por tu rendimiento."
+            "Has dejado reluciente el área de trabajo y recibes {monto} {COIN}. Además, ganas 2 XP Laboral.",
+            "Tu limpieza fue impecable y el equipo te premia con {monto} {COIN}. Además, ganas 2 XP Laboral.",
+            "La jornada quedó perfecta: ganas {monto} {COIN} por tu rendimiento. Además, ganas 2 XP Laboral."
         ],
         "mensajes_fallo": [
             "Un pequeño incidente de limpieza te hace perder {monto} {COIN}.",
@@ -39,9 +39,9 @@ EMPLEOS = {
         "penalizacion": -700,
         "prob_fallo": 0.20,
         "mensajes_exito": [
-            "Has reparado con éxito los ajustes del sistema y ganas {monto} {COIN}.",
-            "La revisión terminó bien: recibes {monto} {COIN} por tu trabajo.",
-            "Tu análisis resolvió el problema y obtienes {monto} {COIN}."
+            "Has reparado con éxito los ajustes del sistema y ganas {monto} {COIN}. Además, ganas 2 XP Laboral.",
+            "La revisión terminó bien: recibes {monto} {COIN} por tu trabajo. Además, ganas 2 XP Laboral.",
+            "Tu análisis resolvió el problema y obtienes {monto} {COIN}. Además, ganas 2 XP Laboral."
         ],
         "mensajes_fallo": [
             "Un fallo técnico hizo colapsar la revisión y pierdes {monto} {COIN}.",
@@ -58,9 +58,9 @@ EMPLEOS = {
         "penalizacion": -900,
         "prob_fallo": 0.20,
         "mensajes_exito": [
-            "Tu revisión técnica dio resultado y ganas {monto} {COIN}.",
-            "El mantenimiento quedó en orden: recibes {monto} {COIN}.",
-            "Tu trabajo resolvió el problema y obtienes {monto} {COIN}."
+            "Tu revisión técnica dio resultado y ganas {monto} {COIN}. Además, ganas 2 XP Laboral.",
+            "El mantenimiento quedó en orden: recibes {monto} {COIN}. Además, ganas 2 XP Laboral.",
+            "Tu trabajo resolvió el problema y obtienes {monto} {COIN}. Además, ganas 2 XP Laboral."
         ],
         "mensajes_fallo": [
             "Un desajuste del sistema generó una pérdida de {monto} {COIN}.",
