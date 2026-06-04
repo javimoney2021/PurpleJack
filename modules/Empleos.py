@@ -711,12 +711,12 @@ class PlomeroView(ui.View):
             if self.revelados[idx]:
                 return await interaction.response.send_message("✅ Esa casilla ya está abierta.", ephemeral=True)
             self.revelados[idx] = True
-            self._build_buttons()
-            await interaction.response.edit_message(embed=self.build_embed(), view=self)
             if self.tablero[idx] == "🚨":
                 self.hallazgos += 1
             else:
                 self.intentos += 1
+            self._build_buttons()
+            await interaction.response.edit_message(embed=self.build_embed(), view=self)
             if self.hallazgos >= 3:
                 await self._terminar(interaction, exito=True)
             elif self.intentos >= self.max_intentos:
