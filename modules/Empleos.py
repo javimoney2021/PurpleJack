@@ -7,7 +7,7 @@ import discord
 from discord import ButtonStyle, Interaction, ui
 from discord.ext import commands
 
-from core.config import COIN
+from core.config import COIN, empleos_config
 from core.database import pool, update_bank
 
 EMPLEOS = {
@@ -71,6 +71,15 @@ EMPLEOS = {
 }
 
 _EMPLEOS_CACHE = {}
+
+
+def alternar_empleos_mantenimiento():
+    empleos_config["activa"] = not empleos_config.get("activa", True)
+    return empleos_config["activa"]
+
+
+def esta_en_mantenimiento():
+    return not empleos_config.get("activa", True)
 
 
 def calcular_pago(info, tiempo_segundos: int) -> int:
@@ -268,6 +277,8 @@ class ConfirmarEmpleoView(ui.View):
 
     @ui.button(label="Aceptar empleo", style=ButtonStyle.green)
     async def aceptar(self, interaction: Interaction, button: ui.Button):
+        if esta_en_mantenimiento():
+            return await interaction.response.send_message("🔧 El sistema de Empleos está en mantenimiento. Inténtalo más tarde.", ephemeral=True)
         if interaction.user.id != self.user_id:
             return await interaction.response.send_message("❌ No es tu confirmación.", ephemeral=True)
 
@@ -343,6 +354,8 @@ class Empleos(commands.Cog):
 
     @commands.command(name="empleos")
     async def empleos(self, ctx):
+        if esta_en_mantenimiento():
+            return await ctx.send("🔧 El sistema de Empleos está en mantenimiento. Inténtalo más tarde.")
         embed = discord.Embed(title="💼 Empleos Disponibles", color=discord.Color.blue())
         for nombre, info in EMPLEOS.items():
             embed.add_field(
@@ -360,6 +373,8 @@ class Empleos(commands.Cog):
 
     @commands.command(name="aplicar")
     async def aplicar(self, ctx, empleo: str = None):
+        if esta_en_mantenimiento():
+            return await ctx.send("🔧 El sistema de Empleos está en mantenimiento. Inténtalo más tarde.")
         if not empleo:
             return await ctx.send("❌ Usa: `!aplicar <empleo>`")
         empleo = normalizar_empleo(empleo)
@@ -386,6 +401,8 @@ class Empleos(commands.Cog):
 
     @commands.command(name="renunciar")
     async def renunciar(self, ctx):
+        if esta_en_mantenimiento():
+            return await ctx.send("🔧 El sistema de Empleos está en mantenimiento. Inténtalo más tarde.")
         data = await get_empleo_user(ctx.author.id)
         if not data or not data.get("empleo_actual"):
             return await ctx.send("❌ No posees un empleo activo.")
@@ -403,6 +420,8 @@ class Empleos(commands.Cog):
 
     @commands.command(name="exp")
     async def exp(self, ctx):
+        if esta_en_mantenimiento():
+            return await ctx.send("🔧 El sistema de Empleos está en mantenimiento. Inténtalo más tarde.")
         data = await get_empleo_user(ctx.author.id)
         empleo = data.get("empleo_actual") or "Sin empleo"
         embed = discord.Embed(title="📊 Experiencia Laboral", color=discord.Color.gold())
@@ -416,6 +435,8 @@ class Empleos(commands.Cog):
 
     @commands.command(name="trabajar")
     async def trabajar(self, ctx):
+        if esta_en_mantenimiento():
+            return await ctx.send("🔧 El sistema de Empleos está en mantenimiento. Inténtalo más tarde.")
         data = await get_empleo_user(ctx.author.id)
         if not data or not data.get("empleo_actual"):
             return await ctx.send(f"❌ {ctx.author.mention} No tienes un empleo activo.")

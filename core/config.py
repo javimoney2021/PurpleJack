@@ -1,5 +1,9 @@
 COIN = "<:PurpleCoin:1501855737842892941>"
 
+empleos_config = {
+    "activa": True
+}
+
 ruleta_config = {
     "max_apuesta": 100,
     "cooldown": 120,

@@ -17,16 +17,10 @@ from core.database import (
     save_rob_config, save_dados_config, clear_game_cooldowns
 )
 from core import cache
-from core.config import ruleta_config, rr_config, game_config, dados_config, COIN
+from core.config import ruleta_config, rr_config, game_config, dados_config, COIN, empleos_config
 from modules.memo import _memo_config
 from modules.golpear import _golpear_config, spawn_cofre
 from modules.Empleos import _EMPLEOS_CACHE, get_empleo_user, save_empleo_user
-
-try:
-    from modules.Empleos import alternar_empleos_mantenimiento
-except ImportError:
-    def alternar_empleos_mantenimiento():
-        return False
 
 STAFF_ROLE = "Equipo de Eventos"
 COORDINADOR_ROLE = "Coordinador-ES"
@@ -533,7 +527,8 @@ class Staff(commands.Cog):
     @app_commands.command(name="empleos_alternar", description="Activa o desactiva el sistema de empleos")
     @is_staff()
     async def empleos_alternar(self, interaction):
-        activo = alternar_empleos_mantenimiento()
+        empleos_config["activa"] = not empleos_config.get("activa", True)
+        activo = empleos_config["activa"]
         estado = "✅ activado" if activo else "🔧 desactivado"
         mensaje = "El sistema de Empleos está en mantenimiento." if not activo else "El sistema de Empleos ha sido reactivado."
         await interaction.response.send_message(
