@@ -7,7 +7,7 @@ import discord
 from discord import ButtonStyle, Interaction, ui
 from discord.ext import commands
 
-from core.config import COIN, empleos_config
+from core.config import COIN
 from core.database import pool, update_bank
 
 EMPLEOS = {
@@ -18,11 +18,11 @@ EMPLEOS = {
         "xp_requisito": 0,
         "duracion_horas": 3,
         "penalizacion": -500,
-        "prob_fallo": 0.20,
+        "prob_fallo": 0.15,
         "mensajes_exito": [
-            "Has dejado reluciente el área de trabajo y recibes {monto} {COIN}. Además, ganas 2 XP Laboral.",
-            "Tu limpieza fue impecable y el equipo te premia con {monto} {COIN}. Además, ganas 2 XP Laboral.",
-            "La jornada quedó perfecta: ganas {monto} {COIN} por tu rendimiento. Además, ganas 2 XP Laboral."
+            "Has dejado reluciente el área de trabajo y recibes {monto} {COIN}.",
+            "Tu limpieza fue impecable y el equipo te premia con {monto} {COIN}.",
+            "La jornada quedó perfecta: ganas {monto} {COIN} por tu rendimiento."
         ],
         "mensajes_fallo": [
             "Un pequeño incidente de limpieza te hace perder {monto} {COIN}.",
@@ -39,9 +39,9 @@ EMPLEOS = {
         "penalizacion": -700,
         "prob_fallo": 0.20,
         "mensajes_exito": [
-            "Has reparado con éxito los ajustes del sistema y ganas {monto} {COIN}. Además, ganas 2 XP Laboral.",
-            "La revisión terminó bien: recibes {monto} {COIN} por tu trabajo. Además, ganas 2 XP Laboral.",
-            "Tu análisis resolvió el problema y obtienes {monto} {COIN}. Además, ganas 2 XP Laboral."
+            "Has reparado con éxito los ajustes del sistema y ganas {monto} {COIN}.",
+            "La revisión terminó bien: recibes {monto} {COIN} por tu trabajo.",
+            "Tu análisis resolvió el problema y obtienes {monto} {COIN}."
         ],
         "mensajes_fallo": [
             "Un fallo técnico hizo colapsar la revisión y pierdes {monto} {COIN}.",
@@ -56,11 +56,11 @@ EMPLEOS = {
         "xp_requisito": 30,
         "duracion_horas": 3,
         "penalizacion": -900,
-        "prob_fallo": 0.20,
+        "prob_fallo": 0.00,
         "mensajes_exito": [
-            "Tu revisión técnica dio resultado y ganas {monto} {COIN}. Además, ganas 2 XP Laboral.",
-            "El mantenimiento quedó en orden: recibes {monto} {COIN}. Además, ganas 2 XP Laboral.",
-            "Tu trabajo resolvió el problema y obtienes {monto} {COIN}. Además, ganas 2 XP Laboral."
+            "Tu revisión técnica dio resultado y ganas {monto} {COIN}.",
+            "El mantenimiento quedó en orden: recibes {monto} {COIN}.",
+            "Tu trabajo resolvió el problema y obtienes {monto} {COIN}."
         ],
         "mensajes_fallo": [
             "Un desajuste del sistema generó una pérdida de {monto} {COIN}.",
@@ -71,24 +71,6 @@ EMPLEOS = {
 }
 
 _EMPLEOS_CACHE = {}
-
-
-def alternar_empleos_mantenimiento():
-    empleos_config["activa"] = not empleos_config.get("activa", True)
-    return empleos_config["activa"]
-
-
-def esta_en_mantenimiento():
-    return not empleos_config.get("activa", True)
-
-
-def calcular_pago(info, tiempo_segundos: int) -> int:
-    """Calcula el pago de una jornada dentro del rango visible en !empleos."""
-    base = random.randint(info['salario_min'], info['salario_max'])
-    tiempo_ajustado = min(max(int(tiempo_segundos), 0), 45)
-    ratio = 1.0 + max(0.0, 45 - tiempo_ajustado) / 45.0 * 0.35
-    pago = int(base * ratio)
-    return max(info['salario_min'], min(info['salario_max'], pago))
 
 
 def normalizar_empleo(nombre: str) -> str:
@@ -245,6 +227,50 @@ async def limpiar_progreso(user_id):
     await save_empleo_user(data)
 
 
+async def reset_empleo_user(user_id):
+    """Reinicia completamente el estado de empleo del usuario en DB y RAM."""
+    data = await get_empleo_user(user_id) or {
+        "user_id": user_id,
+        "empleo_actual": None,
+        "dificultad": None,
+        "fecha_contratacion": 0,
+        "ultimo_trabajo": 0,
+        "historial_reciente_de_jornadas": [],
+        "cooldown_renuncia": 0,
+        "progreso_permanencia": 0,
+        "ultimo_empleo": None,
+        "progreso_requisito": 0,
+        "despedido_inactividad": False,
+        "exp_laboral": 0,
+        "trabajos_exitosos": 0,
+        "trabajos_fallidos": 0,
+        "total_generado": 0,
+        "racha_exitos": 0,
+    }
+
+    data.update({
+        "empleo_actual": None,
+        "dificultad": None,
+        "fecha_contratacion": 0,
+        "ultimo_trabajo": 0,
+        "historial_reciente_de_jornadas": [],
+        "cooldown_renuncia": 0,
+        "progreso_permanencia": 0,
+        "ultimo_empleo": None,
+        "progreso_requisito": 0,
+        "despedido_inactividad": False,
+        "exp_laboral": 0,
+        "trabajos_exitosos": 0,
+        "trabajos_fallidos": 0,
+        "total_generado": 0,
+        "racha_exitos": 0,
+    })
+
+    await save_empleo_user(data)
+    _EMPLEOS_CACHE[user_id] = data
+    return data
+
+
 async def registrar_resultado(user_id, empleo, exito, pago, motivo):
     data = await get_empleo_user(user_id)
     if not data:
@@ -277,8 +303,6 @@ class ConfirmarEmpleoView(ui.View):
 
     @ui.button(label="Aceptar empleo", style=ButtonStyle.green)
     async def aceptar(self, interaction: Interaction, button: ui.Button):
-        if esta_en_mantenimiento():
-            return await interaction.response.send_message("🔧 El sistema de Empleos está en mantenimiento. Inténtalo más tarde.", ephemeral=True)
         if interaction.user.id != self.user_id:
             return await interaction.response.send_message("❌ No es tu confirmación.", ephemeral=True)
 
@@ -354,8 +378,6 @@ class Empleos(commands.Cog):
 
     @commands.command(name="empleos")
     async def empleos(self, ctx):
-        if esta_en_mantenimiento():
-            return await ctx.send("🔧 El sistema de Empleos está en mantenimiento. Inténtalo más tarde.")
         embed = discord.Embed(title="💼 Empleos Disponibles", color=discord.Color.blue())
         for nombre, info in EMPLEOS.items():
             embed.add_field(
@@ -373,8 +395,6 @@ class Empleos(commands.Cog):
 
     @commands.command(name="aplicar")
     async def aplicar(self, ctx, empleo: str = None):
-        if esta_en_mantenimiento():
-            return await ctx.send("🔧 El sistema de Empleos está en mantenimiento. Inténtalo más tarde.")
         if not empleo:
             return await ctx.send("❌ Usa: `!aplicar <empleo>`")
         empleo = normalizar_empleo(empleo)
@@ -401,8 +421,6 @@ class Empleos(commands.Cog):
 
     @commands.command(name="renunciar")
     async def renunciar(self, ctx):
-        if esta_en_mantenimiento():
-            return await ctx.send("🔧 El sistema de Empleos está en mantenimiento. Inténtalo más tarde.")
         data = await get_empleo_user(ctx.author.id)
         if not data or not data.get("empleo_actual"):
             return await ctx.send("❌ No posees un empleo activo.")
@@ -420,8 +438,6 @@ class Empleos(commands.Cog):
 
     @commands.command(name="exp")
     async def exp(self, ctx):
-        if esta_en_mantenimiento():
-            return await ctx.send("🔧 El sistema de Empleos está en mantenimiento. Inténtalo más tarde.")
         data = await get_empleo_user(ctx.author.id)
         empleo = data.get("empleo_actual") or "Sin empleo"
         embed = discord.Embed(title="📊 Experiencia Laboral", color=discord.Color.gold())
@@ -435,8 +451,6 @@ class Empleos(commands.Cog):
 
     @commands.command(name="trabajar")
     async def trabajar(self, ctx):
-        if esta_en_mantenimiento():
-            return await ctx.send("🔧 El sistema de Empleos está en mantenimiento. Inténtalo más tarde.")
         data = await get_empleo_user(ctx.author.id)
         if not data or not data.get("empleo_actual"):
             return await ctx.send(f"❌ {ctx.author.mention} No tienes un empleo activo.")
@@ -445,11 +459,7 @@ class Empleos(commands.Cog):
         info = EMPLEOS[empleo]
         now = time.time()
         if data.get("ultimo_trabajo", 0) and (now - data["ultimo_trabajo"]) < info["duracion_horas"] * 3600:
-            tiempo_restante = int(data["ultimo_trabajo"] + info["duracion_horas"] * 3600)
-            return await ctx.send(
-                f"⏳ {ctx.author.mention}, tu próxima jornada laboral es <t:{tiempo_restante}:R>. Regresa después.",
-                delete_after=30,
-            )
+            return await ctx.send("⏳ Debes esperar 3 horas para volver a trabajar.")
 
         if empleo == "limpiador":
             view = LimpiadorView(self.bot, ctx.author, info)
@@ -520,8 +530,10 @@ class LimpiadorView(ui.View):
         return embed
 
     async def _terminar(self, interaction, exito):
-        tiempo = max(1, int(time.time() - self.start_time))
-        pago = calcular_pago(self.info, tiempo)
+        tiempo = int(time.time() - self.start_time)
+        base = random.randint(self.info['salario_min'], self.info['salario_max'])
+        ratio = 1.0 + max(0.0, 45 - tiempo) / 45.0 * 0.35
+        pago = int(base * ratio)
         exito_real = True
         if random.random() < self.info['prob_fallo']:
             exito_real = False
@@ -614,8 +626,10 @@ class IngenieroView(ui.View):
         return embed
 
     async def _terminar(self, interaction, exito):
-        tiempo = max(1, int(time.time() - self.start_time))
-        pago = calcular_pago(self.info, tiempo)
+        tiempo = int(time.time() - self.start_time)
+        base = random.randint(self.info['salario_min'], self.info['salario_max'])
+        ratio = 1.0 + max(0.0, 45 - tiempo) / 45.0 * 0.35
+        pago = int(base * ratio)
         if random.random() < self.info['prob_fallo']:
             await update_bank(self.author.id, self.info['penalizacion'])
             mensaje = random.choice(self.info['mensajes_fallo']).format(monto=abs(self.info['penalizacion']), COIN=COIN)
@@ -649,7 +663,7 @@ class PlomeroView(ui.View):
         self._build_buttons()
 
     def _generar_tablero(self):
-        emojis = ["🧱"] * 3 + ["🪨"] * 6
+        emojis = ["⚠️"] * 3 + ["🪨"] * 6
         random.shuffle(emojis)
         self.tablero = emojis
 
@@ -658,7 +672,7 @@ class PlomeroView(ui.View):
         for i, emoji in enumerate(self.tablero):
             row = i // 3
             if self.revelados[i]:
-                btn = ui.Button(label=emoji, style=ButtonStyle.success if emoji == "🧱" else ButtonStyle.danger, row=row, custom_id=f"plo_{i}")
+                btn = ui.Button(label=emoji, style=ButtonStyle.success if emoji == "⚠️" else ButtonStyle.danger, row=row, custom_id=f"plo_{i}")
             else:
                 btn = ui.Button(label="⬜", style=ButtonStyle.secondary, row=row, custom_id=f"plo_{i}")
             btn.callback = self._make_callback(i)
@@ -670,16 +684,12 @@ class PlomeroView(ui.View):
                 return await interaction.response.send_message("❌ Este tablero no es tuyo.", ephemeral=True)
             if self.revelados[idx]:
                 return await interaction.response.send_message("✅ Esa casilla ya está abierta.", ephemeral=True)
-
+            self.intentos += 1
             self.revelados[idx] = True
-            if self.tablero[idx] == "🧱":
-                self.hallazgos += 1
-            else:
-                self.intentos += 1
-
             self._build_buttons()
             await interaction.response.edit_message(embed=self.build_embed(), view=self)
-
+            if self.tablero[idx] == "⚠️":
+                self.hallazgos += 1
             if self.hallazgos >= 3:
                 await self._terminar(interaction, exito=True)
             elif self.intentos >= 5:
@@ -688,16 +698,22 @@ class PlomeroView(ui.View):
 
     def build_embed(self):
         embed = discord.Embed(title="🛠️ Revisión técnica", color=discord.Color.orange())
-        embed.add_field(name="Objetivo", value="Encuentra el item correcto para sellar ductos.", inline=False)
-        embed.add_field(name="Intentos fallidos", value=str(self.intentos), inline=True)
-        embed.add_field(name="Items correctos encontrados", value=str(self.hallazgos), inline=True)
+        embed.add_field(
+            name="Objetivo",
+            value="Encuentra 3 señales de riesgo en 5 intentos. Si agotas los 5 intentos sin completarlo, perderás la misión.",
+            inline=False,
+        )
+        embed.add_field(name="Intentos usados", value=str(self.intentos), inline=True)
+        embed.add_field(name="Señales encontradas", value=str(self.hallazgos), inline=True)
         embed.set_footer(text=f"Tablero de {self.author.display_name} • Se elimina en 180 segundos")
         return embed
 
     async def _terminar(self, interaction, exito):
-        tiempo = max(1, int(time.time() - self.start_time))
-        pago = calcular_pago(self.info, tiempo)
-        if not exito or random.random() < self.info['prob_fallo']:
+        tiempo = int(time.time() - self.start_time)
+        base = random.randint(self.info['salario_min'], self.info['salario_max'])
+        ratio = 1.0 + max(0.0, 45 - tiempo) / 45.0 * 0.35
+        pago = int(base * ratio)
+        if not exito:
             await update_bank(self.author.id, self.info['penalizacion'])
             mensaje = random.choice(self.info['mensajes_fallo']).format(monto=abs(self.info['penalizacion']), COIN=COIN)
             await registrar_resultado(self.author.id, 'plomero', False, self.info['penalizacion'], mensaje)

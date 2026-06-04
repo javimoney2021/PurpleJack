@@ -17,10 +17,10 @@ from core.database import (
     save_rob_config, save_dados_config, clear_game_cooldowns
 )
 from core import cache
-from core.config import ruleta_config, rr_config, game_config, dados_config, COIN, empleos_config
+from core.config import ruleta_config, rr_config, game_config, dados_config, COIN
 from modules.memo import _memo_config
 from modules.golpear import _golpear_config, spawn_cofre
-from modules.Empleos import _EMPLEOS_CACHE, get_empleo_user, save_empleo_user
+from modules.Empleos import _EMPLEOS_CACHE, reset_empleo_user
 
 STAFF_ROLE = "Equipo de Eventos"
 COORDINADOR_ROLE = "Coordinador-ES"
@@ -371,62 +371,6 @@ class Staff(commands.Cog):
             f"✅ Se añadieron **{cantidad}** {COIN} al **{destino.name}** de {usuario.mention}.", ephemeral=False
         )
 
-    async def _otorgar_xp_laboral(self, interaction, usuario: discord.Member, xp: int):
-        if xp <= 0:
-            return await interaction.response.send_message("❌ La cantidad de XP debe ser mayor a 0.", ephemeral=True)
-
-        if not pool:
-            return await interaction.response.send_message("❌ No hay conexión disponible a la base de datos para aplicar XP Laboral.", ephemeral=True)
-
-        await interaction.response.defer(ephemeral=False)
-
-        data_actual = await get_empleo_user(usuario.id) or {
-            "user_id": usuario.id,
-            "empleo_actual": None,
-            "dificultad": None,
-            "fecha_contratacion": 0,
-            "ultimo_trabajo": 0,
-            "historial_reciente_de_jornadas": [],
-            "cooldown_renuncia": 0,
-            "progreso_permanencia": 0,
-            "ultimo_empleo": None,
-            "progreso_requisito": 0,
-            "despedido_inactividad": False,
-            "exp_laboral": 0,
-            "trabajos_exitosos": 0,
-            "trabajos_fallidos": 0,
-            "total_generado": 0,
-            "racha_exitos": 0,
-        }
-
-        nuevo_total = data_actual.get("exp_laboral", 0) + xp
-        data_actual["exp_laboral"] = nuevo_total
-        await save_empleo_user(data_actual)
-
-        verificacion = await get_empleo_user(usuario.id)
-        if not verificacion or verificacion.get("exp_laboral", 0) != nuevo_total:
-            return await interaction.followup.send(
-                f"❌ No se pudo confirmar que la XP Laboral se aplicara a {usuario.mention}.",
-                ephemeral=True,
-            )
-
-        await interaction.followup.send(
-            f"✅ Se otorgaron **{xp}** puntos de XP Laboral a {usuario.mention}. Ahora tiene **{verificacion['exp_laboral']}** XP Laboral.",
-            ephemeral=False,
-        )
-
-    @app_commands.command(name="add_xp_laboral", description="Otorga XP Laboral a un miembro")
-    @app_commands.describe(usuario="Miembro", xp="Cantidad de XP a otorgar")
-    @is_staff()
-    async def add_xp_laboral(self, interaction, usuario: discord.Member, xp: int):
-        await self._otorgar_xp_laboral(interaction, usuario, xp)
-
-    @app_commands.command(name="add_exp_laboral", description="Otorga XP Laboral a un miembro")
-    @app_commands.describe(usuario="Miembro", xp="Cantidad de XP a otorgar")
-    @is_staff()
-    async def add_exp_laboral(self, interaction, usuario: discord.Member, xp: int):
-        await self._otorgar_xp_laboral(interaction, usuario, xp)
-
     @app_commands.command(name="removecoins", description="Remueve PurpleCoins a un miembro")
     @app_commands.describe(usuario="Miembro", cantidad="Cantidad a remover", destino="Balance o Banco")
     @app_commands.choices(destino=[
@@ -464,23 +408,8 @@ class Staff(commands.Cog):
                 await conn.execute("DELETE FROM empleos_users")
                 await conn.execute("DELETE FROM empleos_historial")
 
-            for user_id, data in list(_EMPLEOS_CACHE.items()):
-                if isinstance(data, dict):
-                    data["empleo_actual"] = None
-                    data["dificultad"] = None
-                    data["fecha_contratacion"] = 0
-                    data["ultimo_trabajo"] = 0
-                    data["historial_reciente_de_jornadas"] = []
-                    data["cooldown_renuncia"] = 0
-                    data["progreso_permanencia"] = 0
-                    data["ultimo_empleo"] = None
-                    data["progreso_requisito"] = 0
-                    data["despedido_inactividad"] = False
-                    if data.get("empleo_actual") == "limpador" or data.get("ultimo_empleo") == "limpador":
-                        data["empleo_actual"] = None
-                        data["ultimo_empleo"] = None
-                else:
-                    _EMPLEOS_CACHE.pop(user_id, None)
+            for user_id in list(_EMPLEOS_CACHE.keys()):
+                await reset_empleo_user(user_id)
 
             _EMPLEOS_CACHE.clear()
 
@@ -522,18 +451,6 @@ class Staff(commands.Cog):
         await interaction.response.send_message(
             f"✅ Ruleta configurada:\n• Apuesta máxima: **{monto}** {COIN}\n• Cooldown: **{cooldown}**",
             ephemeral=False
-        )
-
-    @app_commands.command(name="empleos_alternar", description="Activa o desactiva el sistema de empleos")
-    @is_staff()
-    async def empleos_alternar(self, interaction):
-        empleos_config["activa"] = not empleos_config.get("activa", True)
-        activo = empleos_config["activa"]
-        estado = "✅ activado" if activo else "🔧 desactivado"
-        mensaje = "El sistema de Empleos está en mantenimiento." if not activo else "El sistema de Empleos ha sido reactivado."
-        await interaction.response.send_message(
-            f"El sistema de Empleos ha sido **{estado}**. {mensaje}",
-            ephemeral=False,
         )
 
     @app_commands.command(name="ruleta_alternar", description="Activa o desactiva la ruleta")
