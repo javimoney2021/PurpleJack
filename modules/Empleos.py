@@ -488,11 +488,12 @@ class LimpiadorView(ui.View):
         self._build_buttons()
 
     def _generar_tablero(self):
-        emojis = ["🗑️", "🧹", "🧺", "🧼", "🪴", "📚", "🪟", "📦", "🧻", "🧽", "🫧", "🪣", "🖥️", "🪙", "🧲", "🧼"]
-        tablero = emojis[:]
-        random.shuffle(tablero)
-        self.tablero = ["🗑️"] * 3 + tablero[3:16]
-        random.shuffle(self.tablero)
+        # Tablero fijo y hardcodeado para garantizar exactamente 3 celdas de reciclaje.
+        self.tablero = [
+            "🗑️", "🧹", "🧺", "🧼", "🪴",
+            "🗑️", "📚", "🪟", "📦", "🧻",
+            "🗑️", "🧽", "🫧", "🪣", "🖥️", "🪙"
+        ]
 
     def _build_buttons(self):
         self.clear_items()
