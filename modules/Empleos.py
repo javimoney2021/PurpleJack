@@ -439,18 +439,24 @@ class LimpiadorView(ui.View):
         self.basura = 3
         self.message = None
         self.puntos = 0
-        self._build()
+        self._generar_tablero()
+        self._build_buttons()
 
-    def _build(self):
-        self.clear_items()
+    def _generar_tablero(self):
         emojis = ["🗑️", "🧹", "🧺", "🧼", "🪴", "📚", "🪟", "📦", "🧻", "🧽", "🫧", "🪣", "🖥️", "🪙", "🧲", "🧼"]
         tablero = emojis[:]
         random.shuffle(tablero)
         self.tablero = ["🗑️"] * 3 + tablero[3:16]
         random.shuffle(self.tablero)
+
+    def _build_buttons(self):
+        self.clear_items()
         for i, emoji in enumerate(self.tablero):
             row = i // 4
-            btn = ui.Button(label="⬜", style=ButtonStyle.secondary, row=row, custom_id=f"limp_{i}")
+            if self.revelados[i]:
+                btn = ui.Button(label=emoji, style=ButtonStyle.success, row=row, custom_id=f"limp_{i}")
+            else:
+                btn = ui.Button(label="⬜", style=ButtonStyle.secondary, row=row, custom_id=f"limp_{i}")
             btn.callback = self._make_callback(i)
             self.add_item(btn)
 
@@ -462,12 +468,7 @@ class LimpiadorView(ui.View):
                 return await interaction.response.send_message("✅ Esa casilla ya está descubierta.", ephemeral=True)
             self.revelados[idx] = True
             self.puntos += 1
-            self._build()
-            for item in self.children:
-                cid = int(item.custom_id.split("_")[1])
-                if self.revelados[cid]:
-                    item.label = self.tablero[cid]
-                    item.style = ButtonStyle.success
+            self._build_buttons()
             await interaction.response.edit_message(embed=self.build_embed(), view=self)
             if self.tablero[idx] == "🗑️":
                 self.basura -= 1
@@ -526,16 +527,22 @@ class IngenieroView(ui.View):
         self.seleccion = []
         self.pares = 0
         self.bloqueado = False
-        self._build()
+        self._generar_tablero()
+        self._build_buttons()
 
-    def _build(self):
-        self.clear_items()
+    def _generar_tablero(self):
         emojis = ["📡", "💡", "🔌", "🔧"] * 2
         random.shuffle(emojis)
         self.tablero = emojis
+
+    def _build_buttons(self):
+        self.clear_items()
         for i, emoji in enumerate(self.tablero):
             row = i // 4
-            btn = ui.Button(label="⬜", style=ButtonStyle.secondary, row=row, custom_id=f"ing_{i}")
+            if i in self.seleccion or self.revelados[i]:
+                btn = ui.Button(label=emoji, style=ButtonStyle.primary if i in self.seleccion else ButtonStyle.success, row=row, custom_id=f"ing_{i}")
+            else:
+                btn = ui.Button(label="⬜", style=ButtonStyle.secondary, row=row, custom_id=f"ing_{i}")
             btn.callback = self._make_callback(i)
             self.add_item(btn)
 
@@ -546,12 +553,7 @@ class IngenieroView(ui.View):
             if self.bloqueado or self.revelados[idx] or idx in self.seleccion:
                 return
             self.seleccion.append(idx)
-            self._build()
-            for item in self.children:
-                cid = int(item.custom_id.split("_")[1])
-                if cid in self.seleccion:
-                    item.label = self.tablero[cid]
-                    item.style = ButtonStyle.primary
+            self._build_buttons()
             await interaction.response.edit_message(embed=self.build_embed(), view=self)
             if len(self.seleccion) == 2:
                 self.bloqueado = True
@@ -565,9 +567,10 @@ class IngenieroView(ui.View):
                         await self._terminar(interaction, exito=True)
                         return
                 else:
-                    self._build()
+                    pass
                 self.seleccion = []
                 self.bloqueado = False
+                self._build_buttons()
                 await interaction.edit_original_response(embed=self.build_embed(), view=self)
         return callback
 
@@ -612,16 +615,22 @@ class PlomeroView(ui.View):
         self.revelados = [False] * 9
         self.intentos = 0
         self.hallazgos = 0
-        self._build()
+        self._generar_tablero()
+        self._build_buttons()
 
-    def _build(self):
-        self.clear_items()
+    def _generar_tablero(self):
         emojis = ["⚠️"] * 3 + ["🪨"] * 6
         random.shuffle(emojis)
         self.tablero = emojis
+
+    def _build_buttons(self):
+        self.clear_items()
         for i, emoji in enumerate(self.tablero):
             row = i // 3
-            btn = ui.Button(label="⬜", style=ButtonStyle.secondary, row=row, custom_id=f"plo_{i}")
+            if self.revelados[i]:
+                btn = ui.Button(label=emoji, style=ButtonStyle.success if emoji == "⚠️" else ButtonStyle.danger, row=row, custom_id=f"plo_{i}")
+            else:
+                btn = ui.Button(label="⬜", style=ButtonStyle.secondary, row=row, custom_id=f"plo_{i}")
             btn.callback = self._make_callback(i)
             self.add_item(btn)
 
@@ -633,12 +642,7 @@ class PlomeroView(ui.View):
                 return await interaction.response.send_message("✅ Esa casilla ya está abierta.", ephemeral=True)
             self.intentos += 1
             self.revelados[idx] = True
-            self._build()
-            for item in self.children:
-                cid = int(item.custom_id.split("_")[1])
-                if self.revelados[cid]:
-                    item.label = self.tablero[cid]
-                    item.style = ButtonStyle.success if self.tablero[cid] == "⚠️" else ButtonStyle.danger
+            self._build_buttons()
             await interaction.response.edit_message(embed=self.build_embed(), view=self)
             if self.tablero[idx] == "⚠️":
                 self.hallazgos += 1
