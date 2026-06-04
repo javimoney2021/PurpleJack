@@ -647,7 +647,7 @@ class IngenieroView(ui.View):
         embed = discord.Embed(title="🔧 Modo ingeniería", color=discord.Color.blurple())
         embed.add_field(name="Objetivo", value="Encuentra los 4 pares de símbolos para completar la revisión.", inline=False)
         embed.add_field(name="Pares encontrados", value=str(self.pares), inline=True)
-        embed.set_footer(text=f"Tablero de {self.author.display_name} • Se elimina en 180 segundos")
+        embed.set_footer(text=f"Tablero de {self.author.display_name}")
         return embed
 
     async def _terminar(self, interaction, exito):
@@ -710,12 +710,13 @@ class PlomeroView(ui.View):
                 return await interaction.response.send_message("❌ Este tablero no es tuyo.", ephemeral=True)
             if self.revelados[idx]:
                 return await interaction.response.send_message("✅ Esa casilla ya está abierta.", ephemeral=True)
-            self.intentos += 1
             self.revelados[idx] = True
             self._build_buttons()
             await interaction.response.edit_message(embed=self.build_embed(), view=self)
             if self.tablero[idx] == "🚨":
                 self.hallazgos += 1
+            else:
+                self.intentos += 1
             if self.hallazgos >= 3:
                 await self._terminar(interaction, exito=True)
             elif self.intentos >= self.max_intentos:
@@ -726,10 +727,10 @@ class PlomeroView(ui.View):
         embed = discord.Embed(title="🛠️ Revisión técnica", color=discord.Color.orange())
         embed.add_field(
             name="Objetivo",
-            value="Encuentra los 3 elementos ideales para sellar ductos. Si agotas los 6 intentos sin completarlo, perderás la misión.",
+            value="Encuentra los 3 elementos ideales para sellar ductos. Tienes 6 oportunidades para fallar antes de perder la misión.",
             inline=False,
         )
-        embed.add_field(name="Intentos usados", value=str(self.intentos), inline=True)
+        embed.add_field(name="Intentos fallidos", value=str(self.intentos), inline=True)
         embed.add_field(name="Señales encontradas", value=str(self.hallazgos), inline=True)
         embed.set_footer(text=f"Tablero de {self.author.display_name} • Se elimina en 180 segundos")
         return embed
