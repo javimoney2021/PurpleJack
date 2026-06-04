@@ -1,72 +1,74 @@
 import ast
+import asyncio
 import random
 import time
+
 import discord
+from discord import ButtonStyle, Interaction, ui
 from discord.ext import commands
-from discord import ui, ButtonStyle, Interaction
 
-from core.database import pool
-from core.database import update_bank
 from core.config import COIN
-
+from core.database import pool, update_bank
 
 EMPLEOS = {
     "limpador": {
-        "salario_min": 300,
-        "salario_max": 500,
+        "salario_min": 250,
+        "salario_max": 450,
         "dificultad": "Fácil",
-        "ganancia_prob": 0.80,
-        "perdida_prob": 0.20,
-        "pago_perdida": 300,
+        "xp_requisito": 0,
+        "duracion_horas": 3,
+        "penalizacion": -500,
+        "prob_fallo": 0.20,
         "mensajes_exito": [
-            "Has limpiado una oficina impecablemente.",
-            "Has dejado reluciente un edificio completo.",
-            "Tu excelente trabajo impresionó a tus supervisores."
+            "Has dejado reluciente el área de trabajo y recibes {monto} {COIN}.",
+            "Tu limpieza fue impecable y el equipo te premia con {monto} {COIN}.",
+            "La jornada quedó perfecta: ganas {monto} {COIN} por tu rendimiento."
         ],
-        "mensajes_fracaso": [
-            "Rompiste una ventana durante la limpieza.",
-            "Dañaste equipo de mantenimiento.",
-            "Generaste gastos inesperados en la empresa."
+        "mensajes_fallo": [
+            "Un pequeño incidente de limpieza te hace perder {monto} {COIN}.",
+            "La tarea terminó con un desajuste y pierdes {monto} {COIN}.",
+            "Hubo un fallo en la rutina: recibes una penalización de {monto} {COIN}."
         ]
     },
     "ingeniero": {
-        "salario_min": 500,
-        "salario_max": 800,
+        "salario_min": 450,
+        "salario_max": 750,
         "dificultad": "Media",
-        "ganancia_prob": 0.70,
-        "perdida_prob": 0.30,
-        "pago_perdida": 500,
+        "xp_requisito": 20,
+        "duracion_horas": 3,
+        "penalizacion": -700,
+        "prob_fallo": 0.20,
         "mensajes_exito": [
-            "Has reparado una máquina industrial.",
-            "Tu proyecto fue aprobado exitosamente.",
-            "Optimizaste un sistema crítico."
+            "Has reparado con éxito los ajustes del sistema y ganas {monto} {COIN}.",
+            "La revisión terminó bien: recibes {monto} {COIN} por tu trabajo.",
+            "Tu análisis resolvió el problema y obtienes {monto} {COIN}."
         ],
-        "mensajes_fracaso": [
-            "Tu diseño presentó errores costosos.",
-            "Una reparación salió mal.",
-            "El proyecto fue rechazado."
+        "mensajes_fallo": [
+            "Un fallo técnico hizo colapsar la revisión y pierdes {monto} {COIN}.",
+            "El sistema devolvió un error y tu pago se reduce en {monto} {COIN}.",
+            "El ajuste salió mal: recibes una penalización de {monto} {COIN}."
         ]
     },
     "plomero": {
-        "salario_min": 1000,
-        "salario_max": 1200,
+        "salario_min": 700,
+        "salario_max": 1100,
         "dificultad": "Difícil",
-        "ganancia_prob": 0.60,
-        "perdida_prob": 0.40,
-        "pago_perdida": 800,
+        "xp_requisito": 30,
+        "duracion_horas": 3,
+        "penalizacion": -900,
+        "prob_fallo": 0.20,
         "mensajes_exito": [
-            "Solucionaste una avería crítica.",
-            "Completaste una instalación compleja.",
-            "Tu trabajo evitó una gran emergencia."
+            "Tu revisión técnica dio resultado y ganas {monto} {COIN}.",
+            "El mantenimiento quedó en orden: recibes {monto} {COIN}.",
+            "Tu trabajo resolvió el problema y obtienes {monto} {COIN}."
         ],
-        "mensajes_fracaso": [
-            "Una tubería colapsó durante la reparación.",
-            "Se produjo una inundación accidental.",
-            "Los daños generaron costos importantes."
+        "mensajes_fallo": [
+            "Un desajuste del sistema generó una pérdida de {monto} {COIN}.",
+            "El plan falló en el último paso y pierdes {monto} {COIN}.",
+            "La revisión terminó con un error y recibes {monto} {COIN} de penalización."
         ]
     }
 }
-
 
 _EMPLEOS_CACHE = {}
 
@@ -74,7 +76,6 @@ _EMPLEOS_CACHE = {}
 def normalizar_empleo(nombre: str) -> str:
     texto = nombre.lower().strip()
     texto = texto.replace("í", "i").replace("á", "a").replace("é", "e").replace("ó", "o").replace("ú", "u")
-    texto = texto.replace("limpiador", "limpador")
     return texto
 
 
@@ -94,11 +95,22 @@ async def init_empleos_tables():
             progreso_permanencia DOUBLE PRECISION DEFAULT 0,
             ultimo_empleo TEXT DEFAULT NULL,
             progreso_requisito DOUBLE PRECISION DEFAULT 0,
-            despedido_inactividad BOOLEAN DEFAULT FALSE
+            despedido_inactividad BOOLEAN DEFAULT FALSE,
+            exp_laboral INTEGER DEFAULT 0,
+            trabajos_exitosos INTEGER DEFAULT 0,
+            trabajos_fallidos INTEGER DEFAULT 0,
+            total_generado INTEGER DEFAULT 0,
+            racha_exitos INTEGER DEFAULT 0
         )
         """)
-        await conn.execute("ALTER TABLE empleos_users ADD COLUMN IF NOT EXISTS ultimo_empleo TEXT DEFAULT NULL")
-        await conn.execute("ALTER TABLE empleos_users ADD COLUMN IF NOT EXISTS progreso_requisito DOUBLE PRECISION DEFAULT 0")
+        for column, definition in [
+            ("exp_laboral", "INTEGER DEFAULT 0"),
+            ("trabajos_exitosos", "INTEGER DEFAULT 0"),
+            ("trabajos_fallidos", "INTEGER DEFAULT 0"),
+            ("total_generado", "INTEGER DEFAULT 0"),
+            ("racha_exitos", "INTEGER DEFAULT 0"),
+        ]:
+            await conn.execute(f"ALTER TABLE empleos_users ADD COLUMN IF NOT EXISTS {column} {definition}")
         await conn.execute("""
         CREATE TABLE IF NOT EXISTS empleos_historial (
             id SERIAL PRIMARY KEY,
@@ -133,6 +145,11 @@ async def get_empleo_user(user_id):
             "ultimo_empleo": None,
             "progreso_requisito": 0,
             "despedido_inactividad": False,
+            "exp_laboral": 0,
+            "trabajos_exitosos": 0,
+            "trabajos_fallidos": 0,
+            "total_generado": 0,
+            "racha_exitos": 0,
         }
     else:
         data = dict(row)
@@ -155,9 +172,11 @@ async def save_empleo_user(data):
                 user_id, empleo_actual, dificultad, fecha_contratacion,
                 ultimo_trabajo, historial_reciente_de_jornadas,
                 cooldown_renuncia, progreso_permanencia,
-                ultimo_empleo, progreso_requisito, despedido_inactividad
+                ultimo_empleo, progreso_requisito, despedido_inactividad,
+                exp_laboral, trabajos_exitosos, trabajos_fallidos,
+                total_generado, racha_exitos
             )
-            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
+            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16)
             ON CONFLICT (user_id) DO UPDATE SET
                 empleo_actual=EXCLUDED.empleo_actual,
                 dificultad=EXCLUDED.dificultad,
@@ -168,20 +187,19 @@ async def save_empleo_user(data):
                 progreso_permanencia=EXCLUDED.progreso_permanencia,
                 ultimo_empleo=EXCLUDED.ultimo_empleo,
                 progreso_requisito=EXCLUDED.progreso_requisito,
-                despedido_inactividad=EXCLUDED.despedido_inactividad
+                despedido_inactividad=EXCLUDED.despedido_inactividad,
+                exp_laboral=EXCLUDED.exp_laboral,
+                trabajos_exitosos=EXCLUDED.trabajos_exitosos,
+                trabajos_fallidos=EXCLUDED.trabajos_fallidos,
+                total_generado=EXCLUDED.total_generado,
+                racha_exitos=EXCLUDED.racha_exitos
         """, data["user_id"], data.get("empleo_actual"), data.get("dificultad"), data.get("fecha_contratacion", 0),
              data.get("ultimo_trabajo", 0), hist_json, data.get("cooldown_renuncia", 0),
              data.get("progreso_permanencia", 0), data.get("ultimo_empleo"),
-             data.get("progreso_requisito", 0), data.get("despedido_inactividad", False))
+             data.get("progreso_requisito", 0), data.get("despedido_inactividad", False),
+             data.get("exp_laboral", 0), data.get("trabajos_exitosos", 0), data.get("trabajos_fallidos", 0),
+             data.get("total_generado", 0), data.get("racha_exitos", 0))
     _EMPLEOS_CACHE[data["user_id"]] = data
-
-
-async def delete_empleo_user(user_id):
-    if not pool:
-        return
-    async with pool.acquire() as conn:
-        await conn.execute("DELETE FROM empleos_users WHERE user_id=$1", user_id)
-    _EMPLEOS_CACHE.pop(user_id, None)
 
 
 async def append_historial(user_id, empleo, exito, pago, motivo):
@@ -208,34 +226,40 @@ async def limpiar_progreso(user_id):
     await save_empleo_user(data)
 
 
+async def registrar_resultado(user_id, empleo, exito, pago, motivo):
+    data = await get_empleo_user(user_id)
+    if not data:
+        return
+    ahora = time.time()
+    data["ultimo_trabajo"] = ahora
+    data["progreso_permanencia"] = max(data.get("progreso_permanencia", 0), ahora - data.get("fecha_contratacion", ahora))
+    data["historial_reciente_de_jornadas"] = (data.get("historial_reciente_de_jornadas", []) + [ahora])[-10:]
+    if exito:
+        data["trabajos_exitosos"] = data.get("trabajos_exitosos", 0) + 1
+        data["exp_laboral"] = data.get("exp_laboral", 0) + 2
+        data["racha_exitos"] = data.get("racha_exitos", 0) + 1
+        if data["racha_exitos"] % 5 == 0:
+            data["exp_laboral"] += 5
+            data["racha_exitos"] += 0
+        data["total_generado"] = data.get("total_generado", 0) + max(0, pago)
+    else:
+        data["trabajos_fallidos"] = data.get("trabajos_fallidos", 0) + 1
+        data["racha_exitos"] = 0
+    await save_empleo_user(data)
+    await append_historial(user_id, empleo, exito, pago, motivo)
+
+
 class ConfirmarEmpleoView(ui.View):
-    def __init__(self, bot, user_id, empleo, salario_rango, ganancia_prob, perdida_prob):
+    def __init__(self, bot, user_id, empleo):
         super().__init__(timeout=60)
         self.bot = bot
         self.user_id = user_id
         self.empleo = empleo
-        self.salario_rango = salario_rango
-        self.ganancia_prob = ganancia_prob
-        self.perdida_prob = perdida_prob
 
     @ui.button(label="Aceptar empleo", style=ButtonStyle.green)
     async def aceptar(self, interaction: Interaction, button: ui.Button):
         if interaction.user.id != self.user_id:
             return await interaction.response.send_message("❌ No es tu confirmación.", ephemeral=True)
-
-        data = await get_empleo_user(self.user_id)
-        if data and data.get("empleo_actual"):
-            return await interaction.response.send_message(
-                f"❌ Ya posees un empleo como **{data['empleo_actual']}**. Usa `!renunciar` antes de aplicar a otro trabajo.",
-                ephemeral=True
-            )
-
-        now = time.time()
-        if data and data.get("cooldown_renuncia", 0) > now:
-            return await interaction.response.send_message(
-                f"❌ Debes esperar antes de aplicar a un nuevo empleo.",
-                ephemeral=True
-            )
 
         data = await get_empleo_user(self.user_id) or {
             "user_id": self.user_id,
@@ -249,10 +273,29 @@ class ConfirmarEmpleoView(ui.View):
             "ultimo_empleo": None,
             "progreso_requisito": 0,
             "despedido_inactividad": False,
+            "exp_laboral": 0,
+            "trabajos_exitosos": 0,
+            "trabajos_fallidos": 0,
+            "total_generado": 0,
+            "racha_exitos": 0,
         }
+        if data.get("empleo_actual"):
+            return await interaction.response.send_message(
+                f"❌ Ya posees un empleo como **{data['empleo_actual']}**. Usa `!renunciar` antes de aplicar a otro trabajo.",
+                ephemeral=True
+            )
+
+        info = EMPLEOS[self.empleo]
+        if data.get("exp_laboral", 0) < info["xp_requisito"]:
+            return await interaction.response.send_message(
+                f"❌ {interaction.user.mention} necesitas **{info['xp_requisito']}** puntos de Experiencia Laboral para aplicar a **{self.empleo.title()}**.",
+                ephemeral=True
+            )
+
+        now = time.time()
         data.update({
             "empleo_actual": self.empleo,
-            "dificultad": EMPLEOS[self.empleo]['dificultad'],
+            "dificultad": info['dificultad'],
             "fecha_contratacion": now,
             "ultimo_trabajo": 0,
             "historial_reciente_de_jornadas": [],
@@ -262,7 +305,7 @@ class ConfirmarEmpleoView(ui.View):
         })
         await save_empleo_user(data)
         await interaction.response.send_message(
-            f"🎉 Felicidades {interaction.user.mention}. Ahora eres **{self.empleo.title()}**. Usa `!trabajar` cada 6 horas para recibir tu paga según el rango de tu empleo.",
+            f"🎉 {interaction.user.mention} ahora eres **{self.empleo.title()}**. Usa `!trabajar` para iniciar tu jornada de 3 horas.",
             ephemeral=False
         )
         try:
@@ -288,36 +331,27 @@ class Empleos(commands.Cog):
     async def cog_load(self):
         await init_empleos_tables()
 
-    async def cog_command_error(self, ctx, error):
-        if isinstance(error, commands.CommandOnCooldown):
-            retry = int(error.retry_after)
-            await ctx.send(f"⏳ Podrás volver a usar este comando en **{retry}** segundos.", delete_after=10)
-        else:
-            raise error
-
     @commands.command(name="empleos")
     async def empleos(self, ctx):
-        embed = discord.Embed(
-            title="💼 Empleos Disponibles - Jornadas de 6h",
-            color=discord.Color.blue()
-        )
+        embed = discord.Embed(title="💼 Empleos Disponibles", color=discord.Color.blue())
         for nombre, info in EMPLEOS.items():
             embed.add_field(
-                name=nombre.title(),
+                name=f"{nombre.title()}",
                 value=(
                     f"• Salario: {info['salario_min']} - {info['salario_max']} {COIN}\n"
-                    f"• Dificultad: {info['dificultad']}"
+                    f"• Dificultad: {info['dificultad']}\n"
+                    f"• XP requerida: {info['xp_requisito']}\n"
+                    f"• Jornada: {info['duracion_horas']} horas"
                 ),
-                inline=False
+                inline=False,
             )
-        embed.set_footer(text="Aplica a un trabajo con: !aplicar {empleo}")
+        embed.set_footer(text="Aplica con: !aplicar <empleo>")
         await ctx.send(embed=embed)
 
     @commands.command(name="aplicar")
     async def aplicar(self, ctx, empleo: str = None):
         if not empleo:
-            return await ctx.send("❌ Usa: `!aplicar {empleo}`")
-
+            return await ctx.send("❌ Usa: `!aplicar <empleo>`")
         empleo = normalizar_empleo(empleo)
         if empleo not in EMPLEOS:
             return await ctx.send("❌ Empleo no disponible.")
@@ -326,35 +360,25 @@ class Empleos(commands.Cog):
         if data and data.get("empleo_actual"):
             return await ctx.send(f"❌ Ya posees un empleo como **{data['empleo_actual'].title()}**. Usa `!renunciar` antes de aplicar a otro trabajo.")
 
-        if empleo == "ingeniero" and not (data and data.get("ultimo_empleo") == "limpador" and data.get("progreso_requisito", 0) >= 72 * 3600):
-            return await ctx.send("❌ Debes haber trabajado como **Limpador** durante al menos 72 horas consecutivas para aplicar a este empleo.")
-
-        if empleo == "plomero" and not (data and data.get("ultimo_empleo") == "ingeniero" and data.get("progreso_requisito", 0) >= 72 * 3600):
-            return await ctx.send("❌ Debes haber trabajado como **Ingeniero** durante al menos 72 horas consecutivas para aplicar a este empleo.")
-
-        if data and data.get("cooldown_renuncia", 0) > time.time():
-            return await ctx.send("❌ Debes esperar 1 hora antes de aplicar a un nuevo empleo.")
-
         info = EMPLEOS[empleo]
-        salario_min = info['salario_min']
-        salario_max = info['salario_max']
+        if data and data.get("exp_laboral", 0) < info["xp_requisito"]:
+            return await ctx.send(f"❌ {ctx.author.mention} necesitas **{info['xp_requisito']}** puntos de Experiencia Laboral para aplicar a **{empleo.title()}**.")
+
         embed = discord.Embed(
             title=f"¿Deseas aplicar como {empleo.title()}?",
             description=(
-                f"Este empleo paga entre **{salario_min} y {salario_max} {COIN}** por jornada de 6 horas.\n"
-                f"Probabilidad de ganancia: **{int(info['ganancia_prob'] * 100)}%**\n"
-                f"Probabilidad de pérdida: **{int(info['perdida_prob'] * 100)}%**"
+                f"Requiere **{info['xp_requisito']} XP Laboral**\n"
+                f"Pago estimado: **{info['salario_min']} - {info['salario_max']} {COIN}** por jornada de 3 horas"
             ),
-            color=discord.Color.blurple()
+            color=discord.Color.blurple(),
         )
-        await ctx.send(embed=embed, view=ConfirmarEmpleoView(self.bot, ctx.author.id, empleo, (salario_min, salario_max), info['ganancia_prob'], info['perdida_prob']))
+        await ctx.send(embed=embed, view=ConfirmarEmpleoView(self.bot, ctx.author.id, empleo))
 
     @commands.command(name="renunciar")
     async def renunciar(self, ctx):
         data = await get_empleo_user(ctx.author.id)
         if not data or not data.get("empleo_actual"):
             return await ctx.send("❌ No posees un empleo activo.")
-
         data["ultimo_empleo"] = data.get("empleo_actual")
         data["progreso_requisito"] = data.get("progreso_permanencia", 0)
         data["cooldown_renuncia"] = time.time() + 3600
@@ -367,69 +391,291 @@ class Empleos(commands.Cog):
         await save_empleo_user(data)
         await ctx.send("🛑 Has renunciado a tu empleo. Podrás aplicar a un nuevo trabajo dentro de 1 hora.")
 
+    @commands.command(name="exp")
+    async def exp(self, ctx):
+        data = await get_empleo_user(ctx.author.id)
+        empleo = data.get("empleo_actual") or "Sin empleo"
+        embed = discord.Embed(title="📊 Experiencia Laboral", color=discord.Color.gold())
+        embed.add_field(name="Empleo actual", value=empleo.title() if empleo != "Sin empleo" else empleo, inline=False)
+        embed.add_field(name="XP Laboral", value=str(data.get("exp_laboral", 0)), inline=True)
+        embed.add_field(name="Trabajos exitosos", value=str(data.get("trabajos_exitosos", 0)), inline=True)
+        embed.add_field(name="Trabajos fallidos", value=str(data.get("trabajos_fallidos", 0)), inline=True)
+        embed.add_field(name="Total generado", value=f"{data.get('total_generado', 0)} {COIN}", inline=False)
+        embed.set_footer(text="Tu progreso laboral se actualiza al terminar cada jornada.")
+        await ctx.send(embed=embed)
+
     @commands.command(name="trabajar")
     async def trabajar(self, ctx):
         data = await get_empleo_user(ctx.author.id)
         if not data or not data.get("empleo_actual"):
-            return await ctx.send(f"❌ {ctx.author.mention} No posees ningún trabajo.")
+            return await ctx.send(f"❌ {ctx.author.mention} No tienes un empleo activo.")
 
-        now = time.time()
-        if data.get("ultimo_trabajo", 0) and (now - data['ultimo_trabajo']) < 6 * 3600:
-            return await ctx.send("⏳ Debes esperar 6 horas para volver a trabajar.")
-
-        # Despido por inactividad
-        if data.get("ultimo_trabajo", 0) and (now - data['ultimo_trabajo']) > 24 * 3600:
-            data["despedido_inactividad"] = True
-            data["ultimo_empleo"] = data.get("empleo_actual")
-            data["progreso_requisito"] = 0
-            data["progreso_permanencia"] = 0
-            data["empleo_actual"] = None
-            data["dificultad"] = None
-            data["fecha_contratacion"] = 0
-            data["ultimo_trabajo"] = 0
-            data["historial_reciente_de_jornadas"] = []
-            await save_empleo_user(data)
-            await ctx.send("❌ Has perdido tu empleo debido a inactividad laboral.")
-            return
-
-        # Penalización por ausencia
-        if data.get("ultimo_trabajo", 0) and (now - data['ultimo_trabajo']) > 15 * 3600:
-            await update_bank(ctx.author.id, -500)
-            await ctx.send("⚠️ Has faltado al trabajo y tu jefe se ha molestado. Recibes una penalización de -500 PurpleCoins.")
-
-        empleo = data['empleo_actual'].lower()
+        empleo = data["empleo_actual"].lower()
         info = EMPLEOS[empleo]
-        exito = random.random() < info['ganancia_prob']
-        if exito:
-            pago = random.randint(info['salario_min'], info['salario_max'])
-            bonus = 0
-            historial = data.get('historial_reciente_de_jornadas', [])
-            historial.append(now)
-            if len(historial) >= 3:
-                recientes = [t for t in historial if now - t <= 13 * 3600]
-                if len(recientes) >= 3 and (max(recientes) - min(recientes)) <= 13 * 3600:
-                    bonus = int(pago * 0.20)
-                    pago += bonus
-            await update_bank(ctx.author.id, pago)
-            data['ultimo_trabajo'] = now
-            data['progreso_permanencia'] = max(data.get('progreso_permanencia', 0), now - data.get('fecha_contratacion', now))
-            data['historial_reciente_de_jornadas'] = historial[-10:]
-            await save_empleo_user(data)
-            await append_historial(ctx.author.id, empleo, True, pago, random.choice(info['mensajes_exito']))
-            await ctx.send(
-                f"✅ {ctx.author.mention} {random.choice(info['mensajes_exito'])}\n"
-                f"💰 Ganaste **{pago}** {COIN}."
-                + ("\n✨ Por tu gran rendimiento ... 20% adicional." if bonus else "")
-            )
+        now = time.time()
+        if data.get("ultimo_trabajo", 0) and (now - data["ultimo_trabajo"]) < info["duracion_horas"] * 3600:
+            return await ctx.send("⏳ Debes esperar 3 horas para volver a trabajar.")
+
+        if empleo == "limpador":
+            view = LimpadorView(self.bot, ctx.author, info)
+        elif empleo == "ingeniero":
+            view = IngenieroView(self.bot, ctx.author, info)
         else:
-            pago = -info['pago_perdida']
-            await update_bank(ctx.author.id, pago)
-            data['ultimo_trabajo'] = now
-            data['progreso_permanencia'] = max(data.get('progreso_permanencia', 0), now - data.get('fecha_contratacion', now))
-            data['historial_reciente_de_jornadas'] = (data.get('historial_reciente_de_jornadas', []) + [now])[-10:]
-            await save_empleo_user(data)
-            await append_historial(ctx.author.id, empleo, False, pago, random.choice(info['mensajes_fracaso']))
-            await ctx.send(f"❌ {ctx.author.mention} {random.choice(info['mensajes_fracaso'])}\n💸 Perdiste **{abs(pago)}** {COIN}.")
+            view = PlomeroView(self.bot, ctx.author, info)
+
+        msg = await ctx.send(embed=view.build_embed(), view=view)
+        view.message = msg
+
+
+class LimpadorView(ui.View):
+    def __init__(self, bot, author, info):
+        super().__init__(timeout=180)
+        self.bot = bot
+        self.author = author
+        self.info = info
+        self.start_time = time.time()
+        self.revelados = [False] * 16
+        self.basura = 3
+        self.message = None
+        self.puntos = 0
+        self._build()
+
+    def _build(self):
+        self.clear_items()
+        emojis = ["🗑️", "🧹", "🧺", "🧼", "🪴", "📚", "🪟", "📦", "🧻", "🧽", "🫧", "🪣", "🖥️", "🪙", "🧲", "🧼"]
+        tablero = emojis[:]
+        random.shuffle(tablero)
+        self.tablero = ["🗑️"] * 3 + tablero[3:16]
+        random.shuffle(self.tablero)
+        for i, emoji in enumerate(self.tablero):
+            row = i // 4
+            btn = ui.Button(label="⬜", style=ButtonStyle.secondary, row=row, custom_id=f"limp_{i}")
+            btn.callback = self._make_callback(i)
+            self.add_item(btn)
+
+    def _make_callback(self, idx):
+        async def callback(interaction: Interaction):
+            if interaction.user.id != self.author.id:
+                return await interaction.response.send_message("❌ Este tablero no es tuyo.", ephemeral=True)
+            if self.revelados[idx]:
+                return await interaction.response.send_message("✅ Esa casilla ya está descubierta.", ephemeral=True)
+            self.revelados[idx] = True
+            self.puntos += 1
+            self._build()
+            for item in self.children:
+                cid = int(item.custom_id.split("_")[1])
+                if self.revelados[cid]:
+                    item.label = self.tablero[cid]
+                    item.style = ButtonStyle.success
+            await interaction.response.edit_message(embed=self.build_embed(), view=self)
+            if self.tablero[idx] == "🗑️":
+                self.basura -= 1
+            if self.basura == 0:
+                await self._terminar(interaction, exito=True)
+        return callback
+
+    def build_embed(self):
+        descubiertos = sum(self.revelados)
+        embed = discord.Embed(title="🧹 Limpieza en progreso", color=discord.Color.green())
+        embed.add_field(name="Objetivo", value="Descubre los 3 símbolos de reciclaje para completar la tarea.", inline=False)
+        embed.add_field(name="Celdas abiertas", value=str(descubiertos), inline=True)
+        embed.add_field(name="Símbolos de reciclaje restantes", value=str(self.basura), inline=True)
+        embed.set_footer(text=f"Tablero de {self.author.display_name} • Se elimina en 180 segundos")
+        return embed
+
+    async def _terminar(self, interaction, exito):
+        tiempo = int(time.time() - self.start_time)
+        base = random.randint(self.info['salario_min'], self.info['salario_max'])
+        ratio = 1.0 + max(0.0, 45 - tiempo) / 45.0 * 0.35
+        pago = int(base * ratio)
+        exito_real = True
+        if random.random() < self.info['prob_fallo']:
+            exito_real = False
+            pago = self.info['penalizacion']
+            mensaje = random.choice(self.info['mensajes_fallo']).format(monto=abs(self.info['penalizacion']), COIN=COIN)
+            await update_bank(self.author.id, self.info['penalizacion'])
+            await registrar_resultado(self.author.id, 'limpador', False, self.info['penalizacion'], mensaje)
+            await interaction.edit_original_response(embed=discord.Embed(title="🧹 Resultado", description=f"{self.author.mention} {mensaje}", color=discord.Color.red()), view=None)
+            await self._cleanup()
+            return
+        mensaje = random.choice(self.info['mensajes_exito']).format(monto=pago, COIN=COIN)
+        await update_bank(self.author.id, pago)
+        await registrar_resultado(self.author.id, 'limpador', True, pago, mensaje)
+        await interaction.edit_original_response(embed=discord.Embed(title="🧹 Resultado", description=f"{self.author.mention} {mensaje}", color=discord.Color.green()), view=None)
+        await self._cleanup()
+
+    async def _cleanup(self):
+        await asyncio.sleep(180)
+        try:
+            if self.message:
+                await self.message.delete()
+        except Exception:
+            pass
+
+
+class IngenieroView(ui.View):
+    def __init__(self, bot, author, info):
+        super().__init__(timeout=180)
+        self.bot = bot
+        self.author = author
+        self.info = info
+        self.start_time = time.time()
+        self.message = None
+        self.revelados = [False] * 8
+        self.seleccion = []
+        self.pares = 0
+        self.bloqueado = False
+        self._build()
+
+    def _build(self):
+        self.clear_items()
+        emojis = ["📡", "💡", "🔌", "🔧"] * 2
+        random.shuffle(emojis)
+        self.tablero = emojis
+        for i, emoji in enumerate(self.tablero):
+            row = i // 4
+            btn = ui.Button(label="⬜", style=ButtonStyle.secondary, row=row, custom_id=f"ing_{i}")
+            btn.callback = self._make_callback(i)
+            self.add_item(btn)
+
+    def _make_callback(self, idx):
+        async def callback(interaction: Interaction):
+            if interaction.user.id != self.author.id:
+                return await interaction.response.send_message("❌ Este tablero no es tuyo.", ephemeral=True)
+            if self.bloqueado or self.revelados[idx] or idx in self.seleccion:
+                return
+            self.seleccion.append(idx)
+            self._build()
+            for item in self.children:
+                cid = int(item.custom_id.split("_")[1])
+                if cid in self.seleccion:
+                    item.label = self.tablero[cid]
+                    item.style = ButtonStyle.primary
+            await interaction.response.edit_message(embed=self.build_embed(), view=self)
+            if len(self.seleccion) == 2:
+                self.bloqueado = True
+                i1, i2 = self.seleccion
+                await asyncio.sleep(1)
+                if self.tablero[i1] == self.tablero[i2]:
+                    self.revelados[i1] = True
+                    self.revelados[i2] = True
+                    self.pares += 1
+                    if self.pares == 4:
+                        await self._terminar(interaction, exito=True)
+                        return
+                else:
+                    self._build()
+                self.seleccion = []
+                self.bloqueado = False
+                await interaction.edit_original_response(embed=self.build_embed(), view=self)
+        return callback
+
+    def build_embed(self):
+        embed = discord.Embed(title="🔧 Modo ingeniería", color=discord.Color.blurple())
+        embed.add_field(name="Objetivo", value="Encuentra los 4 pares de símbolos para completar la revisión.", inline=False)
+        embed.add_field(name="Pares encontrados", value=str(self.pares), inline=True)
+        embed.set_footer(text=f"Tablero de {self.author.display_name} • Se elimina en 180 segundos")
+        return embed
+
+    async def _terminar(self, interaction, exito):
+        tiempo = int(time.time() - self.start_time)
+        base = random.randint(self.info['salario_min'], self.info['salario_max'])
+        ratio = 1.0 + max(0.0, 45 - tiempo) / 45.0 * 0.35
+        pago = int(base * ratio)
+        if random.random() < self.info['prob_fallo']:
+            await update_bank(self.author.id, self.info['penalizacion'])
+            mensaje = random.choice(self.info['mensajes_fallo']).format(monto=abs(self.info['penalizacion']), COIN=COIN)
+            await registrar_resultado(self.author.id, 'ingeniero', False, self.info['penalizacion'], mensaje)
+            await interaction.edit_original_response(embed=discord.Embed(title="🔧 Resultado", description=f"{self.author.mention} {mensaje}", color=discord.Color.red()), view=None)
+        else:
+            await update_bank(self.author.id, pago)
+            mensaje = random.choice(self.info['mensajes_exito']).format(monto=pago, COIN=COIN)
+            await registrar_resultado(self.author.id, 'ingeniero', True, pago, mensaje)
+            await interaction.edit_original_response(embed=discord.Embed(title="🔧 Resultado", description=f"{self.author.mention} {mensaje}", color=discord.Color.green()), view=None)
+        await asyncio.sleep(180)
+        try:
+            if self.message:
+                await self.message.delete()
+        except Exception:
+            pass
+
+
+class PlomeroView(ui.View):
+    def __init__(self, bot, author, info):
+        super().__init__(timeout=180)
+        self.bot = bot
+        self.author = author
+        self.info = info
+        self.start_time = time.time()
+        self.message = None
+        self.revelados = [False] * 9
+        self.intentos = 0
+        self.hallazgos = 0
+        self._build()
+
+    def _build(self):
+        self.clear_items()
+        emojis = ["⚠️"] * 3 + ["🪨"] * 6
+        random.shuffle(emojis)
+        self.tablero = emojis
+        for i, emoji in enumerate(self.tablero):
+            row = i // 3
+            btn = ui.Button(label="⬜", style=ButtonStyle.secondary, row=row, custom_id=f"plo_{i}")
+            btn.callback = self._make_callback(i)
+            self.add_item(btn)
+
+    def _make_callback(self, idx):
+        async def callback(interaction: Interaction):
+            if interaction.user.id != self.author.id:
+                return await interaction.response.send_message("❌ Este tablero no es tuyo.", ephemeral=True)
+            if self.revelados[idx]:
+                return await interaction.response.send_message("✅ Esa casilla ya está abierta.", ephemeral=True)
+            self.intentos += 1
+            self.revelados[idx] = True
+            self._build()
+            for item in self.children:
+                cid = int(item.custom_id.split("_")[1])
+                if self.revelados[cid]:
+                    item.label = self.tablero[cid]
+                    item.style = ButtonStyle.success if self.tablero[cid] == "⚠️" else ButtonStyle.danger
+            await interaction.response.edit_message(embed=self.build_embed(), view=self)
+            if self.tablero[idx] == "⚠️":
+                self.hallazgos += 1
+            if self.hallazgos >= 3:
+                await self._terminar(interaction, exito=True)
+            elif self.intentos >= 5:
+                await self._terminar(interaction, exito=False)
+        return callback
+
+    def build_embed(self):
+        embed = discord.Embed(title="🛠️ Revisión técnica", color=discord.Color.orange())
+        embed.add_field(name="Objetivo", value="Encuentra 3 señales de riesgo en 5 intentos.", inline=False)
+        embed.add_field(name="Intentos usados", value=str(self.intentos), inline=True)
+        embed.add_field(name="Señales encontradas", value=str(self.hallazgos), inline=True)
+        embed.set_footer(text=f"Tablero de {self.author.display_name} • Se elimina en 180 segundos")
+        return embed
+
+    async def _terminar(self, interaction, exito):
+        tiempo = int(time.time() - self.start_time)
+        base = random.randint(self.info['salario_min'], self.info['salario_max'])
+        ratio = 1.0 + max(0.0, 45 - tiempo) / 45.0 * 0.35
+        pago = int(base * ratio)
+        if not exito or random.random() < self.info['prob_fallo']:
+            await update_bank(self.author.id, self.info['penalizacion'])
+            mensaje = random.choice(self.info['mensajes_fallo']).format(monto=abs(self.info['penalizacion']), COIN=COIN)
+            await registrar_resultado(self.author.id, 'plomero', False, self.info['penalizacion'], mensaje)
+            await interaction.edit_original_response(embed=discord.Embed(title="🛠️ Resultado", description=f"{self.author.mention} {mensaje}", color=discord.Color.red()), view=None)
+        else:
+            await update_bank(self.author.id, pago)
+            mensaje = random.choice(self.info['mensajes_exito']).format(monto=pago, COIN=COIN)
+            await registrar_resultado(self.author.id, 'plomero', True, pago, mensaje)
+            await interaction.edit_original_response(embed=discord.Embed(title="🛠️ Resultado", description=f"{self.author.mention} {mensaje}", color=discord.Color.green()), view=None)
+        await asyncio.sleep(180)
+        try:
+            if self.message:
+                await self.message.delete()
+        except Exception:
+            pass
 
 
 async def setup(bot):
