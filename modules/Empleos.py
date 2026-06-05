@@ -76,6 +76,10 @@ EMPLEOS = {
 _EMPLEOS_CACHE = {}
 
 
+def format_relative_time(unix_ts: float) -> str:
+    return f"<t:{int(unix_ts)}:R>"
+
+
 def normalizar_empleo(nombre: str) -> str:
     texto = nombre.lower().strip()
     texto = texto.replace("í", "i").replace("á", "a").replace("é", "e").replace("ó", "o").replace("ú", "u")
@@ -328,6 +332,13 @@ class ConfirmarEmpleoView(ui.View):
             "total_generado": 0,
             "racha_exitos": 0,
         }
+        cooldown_until = data.get("cooldown_renuncia", 0)
+        if cooldown_until and time.time() < cooldown_until:
+            return await interaction.response.send_message(
+                f"⏳ Debes esperar {format_relative_time(cooldown_until)} para aplicar a un nuevo empleo.",
+                ephemeral=True,
+            )
+
         if data.get("empleo_actual"):
             return await interaction.response.send_message(
                 f"❌ Ya posees un empleo como **{data['empleo_actual']}**. Usa `!renunciar` antes de aplicar a otro trabajo.",
@@ -345,10 +356,10 @@ class ConfirmarEmpleoView(ui.View):
         data.update({
             "empleo_actual": self.empleo,
             "dificultad": info['dificultad'],
+            "cooldown_renuncia": 0,
             "fecha_contratacion": now,
             "ultimo_trabajo": 0,
             "historial_reciente_de_jornadas": [],
-            "cooldown_renuncia": 0,
             "progreso_permanencia": 0,
             "despedido_inactividad": False,
         })
@@ -406,6 +417,10 @@ class Empleos(commands.Cog):
             return await ctx.send("❌ Empleo no disponible.")
 
         data = await get_empleo_user(ctx.author.id)
+        cooldown_until = data.get("cooldown_renuncia", 0) if data else 0
+        if cooldown_until and time.time() < cooldown_until:
+            return await ctx.send(f"⏳ Debes esperar {format_relative_time(cooldown_until)} para aplicar a un nuevo empleo.")
+
         if data and data.get("empleo_actual"):
             return await ctx.send(f"❌ Ya posees un empleo como **{data['empleo_actual'].title()}**. Usa `!renunciar` antes de aplicar a otro trabajo.")
 
