@@ -21,14 +21,14 @@ EMPLEOS = {
         "penalizacion": -500,
         "prob_fallo": 0.15,
         "mensajes_exito": [
-            "Has dejado reluciente el área de trabajo y recibes {monto} {COIN}.",
-            "Tu limpieza fue impecable y el equipo te premia con {monto} {COIN}.",
-            "La jornada quedó perfecta: ganas {monto} {COIN} por tu rendimiento."
+            "Has dejado la nave limpia y sin rastros, recibes {monto} {COIN}.",
+            "Todo limpio nadie sospecha de ti, ganas {monto} {COIN}.",
+            "Ganas la partida con 3 limpiezas exitosas, ganas {monto} {COIN} ."
         ],
         "mensajes_fallo": [
-            "Un pequeño incidente de limpieza te hace perder {monto} {COIN}.",
-            "La tarea terminó con un desajuste y pierdes {monto} {COIN}.",
-            "Hubo un fallo en la rutina: recibes una penalización de {monto} {COIN}."
+            "Te pillaron limpiando en cafeteria, eso te hace perder {monto} {COIN}.",
+            "Revivieron el jugador antes de limpiarlo, pierdes {monto} {COIN}.",
+            "Como vas a limpiar delante de varios tripulantes ? pierdes {monto} {COIN}."
         ]
     },
     "ingeniero": {
@@ -41,14 +41,14 @@ EMPLEOS = {
         "penalizacion": -700,
         "prob_fallo": 0.20,
         "mensajes_exito": [
-            "Has reparado con éxito los ajustes del sistema y ganas {monto} {COIN}.",
-            "La revisión terminó bien: recibes {monto} {COIN} por tu trabajo.",
-            "Tu análisis resolvió el problema y obtienes {monto} {COIN}."
+            "Has reparado con éxito los cables de la nave... {monto} {COIN}.",
+            "Las comunicaciones fueron reactivadas {monto} {COIN} .",
+            "Corriges problema en el sistema electrico... {monto} {COIN}."
         ],
         "mensajes_fallo": [
-            "Un fallo técnico hizo colapsar la revisión y pierdes {monto} {COIN}.",
-            "El sistema devolvió un error y tu pago se reduce en {monto} {COIN}.",
-            "El ajuste salió mal: recibes una penalización de {monto} {COIN}."
+            "No lograste reparar el reactor pierdes {monto} {COIN}.",
+            "El sistema electrico no fue reparado pierdes {monto} {COIN}.",
+            "Ningun tripulantes puede ver por las camaras! pierdes {monto} {COIN}."
         ]
     },
     "plomero": {
@@ -61,14 +61,14 @@ EMPLEOS = {
         "penalizacion": -900,
         "prob_fallo": 0.00,
         "mensajes_exito": [
-            "Tu revisión técnica dio resultado y ganas {monto} {COIN}.",
-            "El mantenimiento quedó en orden: recibes {monto} {COIN}.",
-            "Tu trabajo resolvió el problema y obtienes {monto} {COIN}."
+            "Habia un gloton en los ductos, ganas {monto} {COIN}.",
+            "Descubres a un sus saliendo de la alcantarilla, ganas {monto} {COIN}.",
+            "Ganas la partida al sellar varios ductos, ganas {monto} {COIN}."
         ],
         "mensajes_fallo": [
-            "Un desajuste del sistema generó una pérdida de {monto} {COIN}.",
-            "El plan falló en el último paso y pierdes {monto} {COIN}.",
-            "La revisión terminó con un error y recibes {monto} {COIN} de penalización."
+            "Ductos sin sellar generó una pérdida de {monto} {COIN}.",
+            "No se encontró a nadie en las alcantarillas, pierdes {monto} {COIN}.",
+            "No usaste tu habilidad como se debe y recibes {monto} {COIN} de penalización."
         ]
     }
 }
@@ -335,7 +335,7 @@ class ConfirmarEmpleoView(ui.View):
         cooldown_until = data.get("cooldown_renuncia", 0)
         if cooldown_until and time.time() < cooldown_until:
             return await interaction.response.send_message(
-                f"⏳ Debes esperar {format_relative_time(cooldown_until)} para aplicar a un nuevo empleo.",
+                f"⏳ Podras Aplicar a otro empleo {format_relative_time(cooldown_until)} Regresa luego.",
                 ephemeral=True,
             )
 
@@ -472,7 +472,7 @@ class Empleos(commands.Cog):
     async def trabajar(self, ctx):
         data = await get_empleo_user(ctx.author.id)
         if not data or not data.get("empleo_actual"):
-            return await ctx.send(f"❌ {ctx.author.mention} No tienes un empleo activo.")
+            return await ctx.send(f"❌ {ctx.author.mention} No tienes un empleo activo. Consulta **!empleos.**")
 
         empleo = data["empleo_actual"].lower()
         info = EMPLEOS[empleo]
@@ -710,7 +710,7 @@ class PlomeroView(ui.View):
         self._build_buttons()
 
     def _generar_tablero(self):
-        emojis = ["🚨"] * 3 + ["🪨"] * 6
+        emojis = ["💣"] * 3 + ["🪨"] * 6
         random.shuffle(emojis)
         self.tablero = emojis
 
@@ -719,7 +719,7 @@ class PlomeroView(ui.View):
         for i, emoji in enumerate(self.tablero):
             row = i // 3
             if self.revelados[i]:
-                btn = ui.Button(label=emoji, style=ButtonStyle.success if emoji == "🚨" else ButtonStyle.danger, row=row, custom_id=f"plo_{i}")
+                btn = ui.Button(label=emoji, style=ButtonStyle.success if emoji == "💣" else ButtonStyle.danger, row=row, custom_id=f"plo_{i}")
             else:
                 btn = ui.Button(label="⬜", style=ButtonStyle.secondary, row=row, custom_id=f"plo_{i}")
             btn.callback = self._make_callback(i)
@@ -732,7 +732,7 @@ class PlomeroView(ui.View):
             if self.revelados[idx]:
                 return await interaction.response.send_message("✅ Esa casilla ya está abierta.", ephemeral=True)
             self.revelados[idx] = True
-            if self.tablero[idx] == "🚨":
+            if self.tablero[idx] == "💣":
                 self.hallazgos += 1
             else:
                 self.intentos += 1
@@ -745,15 +745,15 @@ class PlomeroView(ui.View):
         return callback
 
     def build_embed(self):
-        embed = discord.Embed(title="🛠️ Revisión técnica", color=discord.Color.orange())
+        embed = discord.Embed(title="🛠️ Busqueda de Impostores", color=discord.Color.orange())
         embed.add_field(
             name="Objetivo",
-            value="Encuentra los 3 elementos ideales para sellar ductos. Tienes 6 oportunidades para fallar antes de perder la misión.",
+            value="Encuentra los 3 elementos ideales para sellar ductos. Tienes 6 oportunidades para fallar antes de fracasar.",
             inline=False,
         )
         embed.add_field(name="Intentos fallidos", value=str(self.intentos), inline=True)
-        embed.add_field(name="Señales encontradas", value=str(self.hallazgos), inline=True)
-        embed.set_footer(text=f"Tablero de {self.author.display_name} • Se elimina en 180 segundos")
+        embed.add_field(name="Elementos encontrados", value=str(self.hallazgos), inline=True)
+        embed.set_footer(text=f"Jornada de {self.author.display_name} En proceso")
         return embed
 
     async def _terminar(self, interaction, exito):
