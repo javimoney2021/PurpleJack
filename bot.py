@@ -6,11 +6,42 @@ import signal
 import logging
 
 # ── LOGGING ────────────────────────────────────────────
-logging.basicConfig(
-    level=logging.INFO,
-    format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
+
+class _PurpleFormatter(logging.Formatter):
+    ICONS = {
+        logging.DEBUG:    "🔍",
+        logging.INFO:     "✔️ ",
+        logging.WARNING:  "❌",
+        logging.ERROR:    "❌",
+        logging.CRITICAL: "❌",
+    }
+
+    def format(self, record: logging.LogRecord) -> str:
+        icon = self.ICONS.get(record.levelno, "  ")
+        base = super().format(record)
+        return f"{icon} {base}"
+
+
+class _VoiceWarningFilter(logging.Filter):
+    """Suprime los warnings de PyNaCl / davey (voz no usada)."""
+    _BLOCKED = {"PyNaCl is not installed", "davey is not installed"}
+
+    def filter(self, record: logging.LogRecord) -> bool:
+        return not any(msg in record.getMessage() for msg in self._BLOCKED)
+
+
+_handler = logging.StreamHandler()
+_handler.setFormatter(_PurpleFormatter(
+    fmt="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
     datefmt="%Y-%m-%d %H:%M:%S"
-)
+))
+_handler.addFilter(_VoiceWarningFilter())
+
+logging.basicConfig(level=logging.INFO, handlers=[_handler])
+
+# Aplicar filtro también al logger raíz de discord
+logging.getLogger("discord").addFilter(_VoiceWarningFilter())
+
 logger = logging.getLogger("purplejack")
 
 logger.info(f"discord.py version: {discord.__version__}")
