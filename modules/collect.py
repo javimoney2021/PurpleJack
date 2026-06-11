@@ -91,7 +91,7 @@ class Collect(commands.Cog):
                         await update_bank(user_id, 0)          # flush con dato ya en cache
                         await save_collect_cooldowns(user_id, cobros)
                     except Exception as e:
-                logger.warning(f"collect persist error [{user_id}]: {e}")
+                        logger.warning(f"collect persist error [{user_id}]: {e}")
 
                 asyncio.create_task(_persist())
 
