@@ -87,7 +87,7 @@ async def load_modules():
 async def check_cargos_loop():
     await bot.wait_until_ready()
     while not bot.is_closed():
-        await asyncio.sleep(60)
+        await asyncio.sleep(300)
         now = time.time()
         cargos = cache.get_cargos_cache()
         vencidos = []
@@ -154,7 +154,7 @@ async def on_ready():
 
     asyncio.create_task(cache.flush_loop())
     asyncio.create_task(check_cargos_loop())
-    logger.info("Task de cargos temporales iniciada | Revisión cada 60 segundos")
+    logger.info("Task de cargos temporales iniciada | Revisión cada 5 minutos")
     logger.info("\n⫷ 𝙋𝙐𝙍𝙋𝙇𝙀𝙅𝘼𝘾𝙆 𝙀𝙉 𝙇𝙄𝙉𝙀𝘼 ⫸\n")
 
 
