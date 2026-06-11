@@ -139,7 +139,10 @@ async def init_empleos_tables():
             trabajos_exitosos INTEGER DEFAULT 0,
             trabajos_fallidos INTEGER DEFAULT 0,
             total_generado INTEGER DEFAULT 0,
-            racha_exitos INTEGER DEFAULT 0
+            racha_exitos INTEGER DEFAULT 0,
+            ingresos_empleo_actual INTEGER DEFAULT 0,
+            exitosos_empleo_actual INTEGER DEFAULT 0,
+            fallidos_empleo_actual INTEGER DEFAULT 0
         )
         """)
         for column, definition in [
@@ -148,6 +151,9 @@ async def init_empleos_tables():
             ("trabajos_fallidos", "INTEGER DEFAULT 0"),
             ("total_generado", "INTEGER DEFAULT 0"),
             ("racha_exitos", "INTEGER DEFAULT 0"),
+            ("ingresos_empleo_actual", "INTEGER DEFAULT 0"),
+            ("exitosos_empleo_actual", "INTEGER DEFAULT 0"),
+            ("fallidos_empleo_actual", "INTEGER DEFAULT 0"),
         ]:
             await conn.execute(f"ALTER TABLE empleos_users ADD COLUMN IF NOT EXISTS {column} {definition}")
         await conn.execute("""
@@ -190,6 +196,9 @@ async def get_empleo_user(user_id, force_refresh=False):
             "trabajos_fallidos": 0,
             "total_generado": 0,
             "racha_exitos": 0,
+            "ingresos_empleo_actual": 0,
+            "exitosos_empleo_actual": 0,
+            "fallidos_empleo_actual": 0,
         }
     else:
         data = dict(row)
@@ -214,9 +223,10 @@ async def save_empleo_user(data):
                 cooldown_renuncia, progreso_permanencia,
                 ultimo_empleo, progreso_requisito, despedido_inactividad,
                 exp_laboral, trabajos_exitosos, trabajos_fallidos,
-                total_generado, racha_exitos
+                total_generado, racha_exitos,
+                ingresos_empleo_actual, exitosos_empleo_actual, fallidos_empleo_actual
             )
-            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16)
+            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19)
             ON CONFLICT (user_id) DO UPDATE SET
                 empleo_actual=EXCLUDED.empleo_actual,
                 dificultad=EXCLUDED.dificultad,
@@ -232,13 +242,17 @@ async def save_empleo_user(data):
                 trabajos_exitosos=EXCLUDED.trabajos_exitosos,
                 trabajos_fallidos=EXCLUDED.trabajos_fallidos,
                 total_generado=EXCLUDED.total_generado,
-                racha_exitos=EXCLUDED.racha_exitos
+                racha_exitos=EXCLUDED.racha_exitos,
+                ingresos_empleo_actual=EXCLUDED.ingresos_empleo_actual,
+                exitosos_empleo_actual=EXCLUDED.exitosos_empleo_actual,
+                fallidos_empleo_actual=EXCLUDED.fallidos_empleo_actual
         """, data["user_id"], data.get("empleo_actual"), data.get("dificultad"), data.get("fecha_contratacion", 0),
              data.get("ultimo_trabajo", 0), hist_json, data.get("cooldown_renuncia", 0),
              data.get("progreso_permanencia", 0), data.get("ultimo_empleo"),
              data.get("progreso_requisito", 0), data.get("despedido_inactividad", False),
              data.get("exp_laboral", 0), data.get("trabajos_exitosos", 0), data.get("trabajos_fallidos", 0),
-             data.get("total_generado", 0), data.get("racha_exitos", 0))
+             data.get("total_generado", 0), data.get("racha_exitos", 0),
+             data.get("ingresos_empleo_actual", 0), data.get("exitosos_empleo_actual", 0), data.get("fallidos_empleo_actual", 0))
     _EMPLEOS_CACHE[data["user_id"]] = data
 
 
@@ -250,6 +264,25 @@ async def append_historial(user_id, empleo, exito, pago, motivo):
             INSERT INTO empleos_historial (user_id, empleo, timestamp, exito, pago, motivo)
             VALUES ($1, $2, $3, $4, $5, $6)
         """, user_id, empleo, time.time(), exito, pago, motivo)
+
+
+async def get_all_empleos_activos():
+    """Devuelve todos los registros de empleos_users con empleo_actual activo."""
+    if not pool:
+        return []
+    async with pool.acquire() as conn:
+        rows = await conn.fetch(
+            "SELECT * FROM empleos_users WHERE empleo_actual IS NOT NULL"
+        )
+    result = []
+    for row in rows:
+        data = dict(row)
+        try:
+            data["historial_reciente_de_jornadas"] = ast.literal_eval(data["historial_reciente_de_jornadas"])
+        except Exception:
+            data["historial_reciente_de_jornadas"] = []
+        result.append(data)
+    return result
 
 
 async def limpiar_progreso(user_id):
@@ -285,6 +318,9 @@ async def reset_empleo_user(user_id):
         "trabajos_fallidos": 0,
         "total_generado": 0,
         "racha_exitos": 0,
+        "ingresos_empleo_actual": 0,
+        "exitosos_empleo_actual": 0,
+        "fallidos_empleo_actual": 0,
     }
 
     data.update({
@@ -303,6 +339,9 @@ async def reset_empleo_user(user_id):
         "trabajos_fallidos": 0,
         "total_generado": 0,
         "racha_exitos": 0,
+        "ingresos_empleo_actual": 0,
+        "exitosos_empleo_actual": 0,
+        "fallidos_empleo_actual": 0,
     })
 
     await save_empleo_user(data)
@@ -322,18 +361,21 @@ async def registrar_resultado(user_id, empleo, exito, pago, motivo, xp_ganada=0)
     bonus = {"coins": 0, "xp": 0}
 
     if exito:
-        data["trabajos_exitosos"] = data.get("trabajos_exitosos", 0) + 1
-        data["exp_laboral"]       = data.get("exp_laboral", 0) + max(0, xp_ganada)
-        data["racha_exitos"]      = data.get("racha_exitos", 0) + 1
+        data["trabajos_exitosos"]       = data.get("trabajos_exitosos", 0) + 1
+        data["exitosos_empleo_actual"]  = data.get("exitosos_empleo_actual", 0) + 1
+        data["exp_laboral"]             = data.get("exp_laboral", 0) + max(0, xp_ganada)
+        data["racha_exitos"]            = data.get("racha_exitos", 0) + 1
         # ── Bono cada 5 éxitos consecutivos ───────────────
         if data["racha_exitos"] % 5 == 0:
             bono_coins = int(pago * RACHA_BONUS_COINS) if pago > 0 else 0
             data["exp_laboral"] += RACHA_BONUS_XP
             data["racha_exitos"] = 0   # reset tras el bono
             bonus = {"coins": bono_coins, "xp": RACHA_BONUS_XP}
-        data["total_generado"] = data.get("total_generado", 0) + max(0, pago)
+        data["total_generado"]          = data.get("total_generado", 0) + max(0, pago)
+        data["ingresos_empleo_actual"]  = data.get("ingresos_empleo_actual", 0) + max(0, pago)
     else:
-        data["trabajos_fallidos"] = data.get("trabajos_fallidos", 0) + 1
+        data["trabajos_fallidos"]       = data.get("trabajos_fallidos", 0) + 1
+        data["fallidos_empleo_actual"]  = data.get("fallidos_empleo_actual", 0) + 1
         data["racha_exitos"] = 0
 
     await save_empleo_user(data)
@@ -415,6 +457,9 @@ class ConfirmarEmpleoView(ui.View):
             "historial_reciente_de_jornadas": [],
             "progreso_permanencia": 0,
             "despedido_inactividad": False,
+            "ingresos_empleo_actual": 0,
+            "exitosos_empleo_actual": 0,
+            "fallidos_empleo_actual": 0,
         })
         await save_empleo_user(data)
         await interaction.response.send_message(
@@ -623,7 +668,7 @@ class LimpiadorView(ui.View):
         ratio = 1.0 + max(0.0, 45 - tiempo) / 45.0 * 0.35
         pago_actual = min(int(base * ratio), self.info['salario_max'])
 
-        embed = discord.Embed(title=f"🧹 Jornada Limpiador - {self.author.mention}", color=discord.Color.yellow())
+        embed = discord.Embed(title=f"🧹 Jornada Limpiador - {self.author.nick or self.author.display_name}", color=discord.Color.yellow())
         embed.add_field(name="Objetivo", value="Descubre los 3 símbolos de reciclaje para completar la tarea.", inline=False)
         embed.add_field(name="Símbolos de 🗑️ restantes", value=str(self.basura), inline=True)
         embed.add_field(name="Pago estimado actual", value=f"{pago_actual} {COIN}", inline=False)
@@ -756,7 +801,7 @@ class IngenieroView(ui.View):
         base = random.randint(self.info['salario_min'], self.info['salario_max'])
         ratio = 1.0 + max(0.0, 45 - tiempo) / 45.0 * 0.35
         pago_actual = min(int(base * ratio), self.info['salario_max'])
-        embed = discord.Embed(title=f"🛠️ Jornada Ingeniero - {self.author.mention}", color=discord.Color.blurple())
+        embed = discord.Embed(title=f"🛠️ Jornada Ingeniero - {self.author.nick or self.author.display_name}", color=discord.Color.blurple())
         embed.add_field(name="Objetivo", value="Encuentra los 4 pares para reparar la Nave", inline=False)
         embed.add_field(name="Pares encontrados", value=str(self.pares), inline=True)
         embed.add_field(name="Pago estimado actual", value=f"{pago_actual} {COIN}", inline=True)
@@ -861,7 +906,7 @@ class PlomeroView(ui.View):
         return callback
 
     def build_embed(self):
-        embed = discord.Embed(title=f"💣 Busqueda de Impostores - {self.author.mention}", color=discord.Color.orange())
+        embed = discord.Embed(title=f"💣 Busqueda de Impostores - {self.author.nick or self.author.display_name}", color=discord.Color.orange())
         intentos_restantes = self.max_intentos - self.intentos
         corazones = "❤️" * intentos_restantes + "🖤" * self.intentos
         embed.add_field(
