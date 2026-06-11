@@ -1,19 +1,94 @@
 <!DOCTYPE html>
 <html lang="es">
 <head>
-    <meta charset="UTF-8">
-    <title>PURPLE JACK</title>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+
+<title>PURPLE JACK</title>
+
+<style>
+*{
+    margin:0;
+    padding:0;
+    box-sizing:border-box;
+}
+
+body{
+    height:100vh;
+    display:flex;
+    justify-content:center;
+    align-items:center;
+    text-align:center;
+    font-family:Arial, Helvetica, sans-serif;
+
+    background-image:url("https://i.ibb.co/NnS1dsDW/FONDO-gh.jpg");
+    background-size:cover;
+    background-position:center;
+    background-repeat:no-repeat;
+    background-attachment:fixed;
+}
+
+.overlay{
+    background:rgba(0,0,0,0.72);
+    backdrop-filter:blur(6px);
+    padding:40px;
+    border-radius:20px;
+    max-width:800px;
+    margin:20px;
+    border:1px solid rgba(155,89,255,0.35);
+    box-shadow:0 0 30px rgba(155,89,255,0.25);
+}
+
+h1{
+    color:#b16cff;
+    font-size:56px;
+    margin-bottom:20px;
+    text-shadow:
+        0 0 10px rgba(177,108,255,0.8),
+        0 0 20px rgba(177,108,255,0.6);
+}
+
+p{
+    color:#ffffff;
+    font-size:20px;
+    line-height:1.7;
+}
+
+.highlight{
+    color:#d5b3ff;
+    font-weight:bold;
+}
+
+.footer{
+    margin-top:25px;
+    font-size:14px;
+    opacity:0.8;
+}
+</style>
+
 </head>
 <body>
+
+<div class="overlay">
+
     <h1>PURPLE JACK</h1>
 
     <p>
-        Este bot es privado y pertenece a la comunidad
-        Super Sus SA Oficial.
+        Bienvenido al portal oficial de
+        <span class="highlight">Purple Jack</span>.
     </p>
 
+    <br>
+
     <p>
-        No está disponible para instalación pública.
+        Esta aplicación está destinada exclusivamente a los servicios y comunidades autorizadas.
     </p>
+
+    <div class="footer">
+        © Purple Jack
+    </div>
+
+</div>
+
 </body>
 </html>
