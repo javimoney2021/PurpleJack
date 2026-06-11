@@ -1,0 +1,319 @@
+
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Terms & Conditions — PurpleJack Bot</title>
+  <style>
+    :root {
+      --bg:        #0f0f13;
+      --surface:   #17171e;
+      --border:    #2a2a38;
+      --accent:    #9b59b6;
+      --accent-2:  #7d3cae;
+      --text:      #e2e2ec;
+      --muted:     #8888a8;
+      --radius:    12px;
+    }
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      background: var(--bg);
+      color: var(--text);
+      font-family: 'Segoe UI', system-ui, -apple-system, sans-serif;
+      font-size: 16px;
+      line-height: 1.7;
+      min-height: 100vh;
+    }
+
+    /* ── HEADER ── */
+    header {
+      background: linear-gradient(135deg, #1a0a2e 0%, #2d1260 50%, #1a0a2e 100%);
+      border-bottom: 1px solid var(--border);
+      padding: 48px 24px 40px;
+      text-align: center;
+    }
+    header .logo {
+      display: inline-flex;
+      align-items: center;
+      gap: 12px;
+      margin-bottom: 16px;
+    }
+    header .logo svg {
+      width: 40px; height: 40px;
+      fill: var(--accent);
+    }
+    header h1 {
+      font-size: clamp(1.6rem, 4vw, 2.4rem);
+      font-weight: 700;
+      background: linear-gradient(90deg, #c77dff, #9b59b6);
+      -webkit-background-clip: text;
+      -webkit-text-fill-color: transparent;
+      background-clip: text;
+      letter-spacing: -0.5px;
+    }
+    header .subtitle {
+      color: var(--muted);
+      margin-top: 6px;
+      font-size: 0.95rem;
+    }
+    .badge {
+      display: inline-block;
+      background: rgba(155,89,182,0.18);
+      border: 1px solid rgba(155,89,182,0.35);
+      color: #c77dff;
+      border-radius: 999px;
+      font-size: 0.78rem;
+      padding: 4px 14px;
+      margin-top: 12px;
+      letter-spacing: 0.5px;
+    }
+
+    /* ── LAYOUT ── */
+    main {
+      max-width: 820px;
+      margin: 0 auto;
+      padding: 48px 24px 80px;
+    }
+    .notice {
+      background: rgba(155,89,182,0.1);
+      border-left: 4px solid var(--accent);
+      border-radius: 0 var(--radius) var(--radius) 0;
+      padding: 16px 20px;
+      margin-bottom: 40px;
+      font-size: 0.92rem;
+      color: #c9b8e8;
+    }
+
+    /* ── SECTIONS ── */
+    section {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      padding: 32px;
+      margin-bottom: 24px;
+      transition: border-color .2s;
+    }
+    section:hover { border-color: rgba(155,89,182,0.4); }
+
+    .section-num {
+      display: inline-block;
+      background: var(--accent);
+      color: #fff;
+      font-size: 0.72rem;
+      font-weight: 700;
+      letter-spacing: 1px;
+      text-transform: uppercase;
+      padding: 3px 10px;
+      border-radius: 999px;
+      margin-bottom: 12px;
+    }
+    section h2 {
+      font-size: 1.25rem;
+      font-weight: 700;
+      color: #d4aaff;
+      margin-bottom: 16px;
+    }
+    section p {
+      color: #c4c4de;
+      margin-bottom: 12px;
+      font-size: 0.96rem;
+    }
+    section p:last-child { margin-bottom: 0; }
+
+    ul, ol {
+      padding-left: 20px;
+      margin: 10px 0;
+    }
+    li {
+      color: #c4c4de;
+      margin-bottom: 6px;
+      font-size: 0.96rem;
+    }
+    strong { color: var(--text); }
+
+    /* ── HIGHLIGHT BOX ── */
+    .highlight {
+      background: rgba(155,89,182,0.08);
+      border: 1px solid rgba(155,89,182,0.25);
+      border-radius: 8px;
+      padding: 14px 18px;
+      margin: 14px 0;
+    }
+
+    /* ── FOOTER ── */
+    footer {
+      text-align: center;
+      padding: 32px 24px;
+      border-top: 1px solid var(--border);
+      color: var(--muted);
+      font-size: 0.85rem;
+    }
+    footer a {
+      color: var(--accent);
+      text-decoration: none;
+    }
+    footer a:hover { text-decoration: underline; }
+
+    /* ── NAV LINK ── */
+    .nav-link {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      color: var(--accent);
+      text-decoration: none;
+      font-size: 0.88rem;
+      margin-bottom: 40px;
+    }
+    .nav-link:hover { text-decoration: underline; }
+  </style>
+</head>
+<body>
+
+<header>
+  <div class="logo">
+    <svg viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
+      <path d="M12 2L2 7l10 5 10-5-10-5zM2 17l10 5 10-5M2 12l10 5 10-5"/>
+    </svg>
+  </div>
+  <h1>PurpleJack Bot</h1>
+  <p class="subtitle">Terms &amp; Conditions</p>
+  <span class="badge">Effective Date: June 11, 2026</span>
+</header>
+
+<main>
+
+  <div class="notice">
+    Please read these Terms &amp; Conditions carefully before using PurpleJack Bot. By interacting with the Bot in any Discord server, you confirm that you have read, understood, and agreed to be bound by these terms.
+  </div>
+
+  <!-- 1 -->
+  <section>
+    <span class="section-num">01</span>
+    <h2>Acceptance of Terms</h2>
+    <p>By using PurpleJack Bot ("the Bot", "we", "our"), you agree to these Terms &amp; Conditions. If you do not agree with any part of these terms, you must immediately cease using the Bot.</p>
+    <p>These Terms apply to all users who interact with the Bot through any Discord server where it operates. The Bot is an independent project and is not affiliated with or endorsed by Discord Inc.</p>
+  </section>
+
+  <!-- 2 -->
+  <section>
+    <span class="section-num">02</span>
+    <h2>Description of the Bot</h2>
+    <p>PurpleJack Bot is a Discord-based virtual economy bot designed exclusively for entertainment purposes. It provides the following features within authorized Discord servers:</p>
+    <ul>
+      <li>A virtual currency economy system with balance management</li>
+      <li>Games of chance: roulette, dice, memory games, Russian roulette, races, and duels</li>
+      <li>An employment simulation system with interactive minigames (Cleaner, Engineer, Plumber)</li>
+      <li>A virtual shop with purchasable items and effects</li>
+      <li>Leaderboards, collectibles, and server events</li>
+      <li>Administrative tools for server staff</li>
+    </ul>
+    <div class="highlight">
+      <strong>⚠️ Important:</strong> All currency, items, and rewards within PurpleJack are <strong>purely virtual and have no real-world monetary value</strong>. No real money is involved at any stage.
+    </div>
+  </section>
+
+  <!-- 3 -->
+  <section>
+    <span class="section-num">03</span>
+    <h2>Eligibility and Server Restriction</h2>
+    <p>The Bot is authorized to operate exclusively within the designated Discord server. Any server not explicitly authorized will result in the Bot automatically leaving the server upon detection.</p>
+    <p>To use the Bot you must:</p>
+    <ul>
+      <li>Be of legal age in your jurisdiction to use online platforms and Discord services</li>
+      <li>Comply with Discord's own <a href="https://discord.com/terms" style="color:#c77dff;" target="_blank" rel="noopener">Terms of Service</a> and Community Guidelines</li>
+      <li>Be a member of the authorized Discord server</li>
+    </ul>
+  </section>
+
+  <!-- 4 -->
+  <section>
+    <span class="section-num">04</span>
+    <h2>User Conduct</h2>
+    <p>Users agree not to:</p>
+    <ul>
+      <li>Exploit bugs, glitches, or vulnerabilities to gain unfair advantages in the economy system</li>
+      <li>Use automated scripts, bots, or macros to interact with the Bot</li>
+      <li>Attempt to manipulate, disrupt, or interfere with the Bot's functionality or database</li>
+      <li>Harass, threaten, or impersonate other users through Bot interactions</li>
+      <li>Attempt to access or modify data belonging to other users</li>
+      <li>Use the Bot for any illegal activity or in violation of applicable laws</li>
+    </ul>
+    <p>Violations may result in permanent restriction of access to Bot features at the discretion of the server administration.</p>
+  </section>
+
+  <!-- 5 -->
+  <section>
+    <span class="section-num">05</span>
+    <h2>Virtual Economy and Games of Chance</h2>
+    <p>The Bot includes games involving virtual currency that simulate probability and chance. By using these features, you acknowledge:</p>
+    <ul>
+      <li>All virtual currency is <strong>fictional</strong> and holds no real monetary value</li>
+      <li>There is no ability to exchange virtual currency for real money or goods</li>
+      <li>Games involving chance are for entertainment only and do not constitute gambling</li>
+      <li>The Bot makes no guarantee of fair outcomes beyond programmed probabilities</li>
+      <li>Virtual balance losses are permanent within the system and will not be refunded except at staff discretion</li>
+    </ul>
+  </section>
+
+  <!-- 6 -->
+  <section>
+    <span class="section-num">06</span>
+    <h2>Intellectual Property</h2>
+    <p>All code, logic, design, and content of PurpleJack Bot are the exclusive property of the Bot's developer. You are granted a limited, non-exclusive, non-transferable right to use the Bot solely within the authorized Discord server for personal, non-commercial entertainment purposes.</p>
+    <p>You may not copy, modify, distribute, sell, or create derivative works based on the Bot or its underlying code without explicit written permission from the developer.</p>
+  </section>
+
+  <!-- 7 -->
+  <section>
+    <span class="section-num">07</span>
+    <h2>Disclaimers and Limitation of Liability</h2>
+    <p>The Bot is provided <strong>"as is"</strong> without any warranty of any kind, express or implied. We do not guarantee:</p>
+    <ul>
+      <li>Uninterrupted or error-free operation of the Bot</li>
+      <li>Permanent availability of the service</li>
+      <li>Preservation of virtual economy data in all circumstances</li>
+    </ul>
+    <p>To the fullest extent permitted by applicable law, the developer shall not be liable for any indirect, incidental, special, or consequential damages arising from your use of or inability to use the Bot.</p>
+  </section>
+
+  <!-- 8 -->
+  <section>
+    <span class="section-num">08</span>
+    <h2>Service Modifications and Termination</h2>
+    <p>We reserve the right to:</p>
+    <ul>
+      <li>Modify, suspend, or discontinue the Bot or any of its features at any time without notice</li>
+      <li>Update these Terms &amp; Conditions at any time; continued use of the Bot constitutes acceptance of updated terms</li>
+      <li>Reset, adjust, or modify virtual economy data for maintenance, balancing, or other operational reasons</li>
+      <li>Restrict or terminate access for any user who violates these Terms</li>
+    </ul>
+  </section>
+
+  <!-- 9 -->
+  <section>
+    <span class="section-num">09</span>
+    <h2>Governing Law</h2>
+    <p>These Terms &amp; Conditions shall be governed by and construed in accordance with applicable laws. Any disputes arising in connection with these terms shall be resolved through good-faith negotiation between the parties involved.</p>
+  </section>
+
+  <!-- 10 -->
+  <section>
+    <span class="section-num">10</span>
+    <h2>Contact</h2>
+    <p>For questions, concerns, or reports regarding these Terms &amp; Conditions or the Bot's operation, please contact the server administration through the official authorized Discord server.</p>
+  </section>
+
+</main>
+
+<footer>
+  <p>PurpleJack Bot &mdash; Virtual Economy for Discord</p>
+  <p style="margin-top:8px;">
+    <a href="privacy.html">Privacy Policy</a>
+    &nbsp;&bull;&nbsp;
+    Last updated: June 11, 2026
+  </p>
+</footer>
+
+</body>
+</html>
