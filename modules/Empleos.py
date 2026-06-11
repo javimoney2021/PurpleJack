@@ -1,7 +1,9 @@
 import ast
 import asyncio
+import logging
 import random
 import time
+import traceback
 
 import discord
 from discord import ButtonStyle, Interaction, ui
@@ -9,6 +11,8 @@ from discord.ext import commands
 
 from core.config import COIN
 from core.database import pool, update_bank
+
+logger = logging.getLogger("purplejack.empleos")
 
 EMPLEOS = {
     "limpiador": {
@@ -83,6 +87,19 @@ STAFF_BYPASS_ROL  = "Coordinador-ES"   # Rol con cooldowns liberados en empleos
 def _es_coordinador(member: discord.Member) -> bool:
     """True si el miembro posee el rol de bypass de cooldowns."""
     return any(r.name == STAFF_BYPASS_ROL for r in member.roles)
+
+
+# ── DEBUG DE INTERACCIONES ───────────────────────────────
+def _log_trabajar_error(empleo: str, error: Exception, usuario: str = "?", contexto: str = ""):
+    """Log estandarizado para errores en tableros de !trabajar."""
+    tipo   = type(error).__name__
+    lineas = traceback.extract_tb(error.__traceback__)
+    ultima = lineas[-1] if lineas else None
+    linea  = f"L.{ultima.lineno} en {ultima.filename.split('/')[-1]}" if ultima else "sin traceback"
+    logger.error(
+        f"[TRABAJAR/{empleo.upper()}] {contexto} — {tipo}: {error} | "
+        f"Usuario: {usuario} | {linea}"
+    )
 
 # ── CONFIG DESPIDOS ─────────────────────────────────────
 _despidos_config = {"activo": False}
@@ -614,30 +631,39 @@ class LimpiadorView(ui.View):
         return embed
 
     async def _terminar(self, interaction, exito):
-        tiempo = int(time.time() - self.start_time)
-        base = random.randint(self.info['salario_min'], self.info['salario_max'])
-        ratio = 1.0 + max(0.0, 45 - tiempo) / 45.0 * 0.35
-        pago = min(int(base * ratio), self.info['salario_max'])
-        xp_ganada = self.info.get('xp_ganada', 0)
-        exito_real = True
-        if random.random() < self.info['prob_fallo']:
-            exito_real = False
-            pago = self.info['penalizacion']
-            mensaje = random.choice(self.info['mensajes_fallo']).format(monto=abs(self.info['penalizacion']), COIN=COIN)
-            await update_bank(self.author.id, self.info['penalizacion'])
-            await registrar_resultado(self.author.id, 'Limpiador', False, self.info['penalizacion'], mensaje)
-            await interaction.edit_original_response(embed=discord.Embed(title="🧹 Resultado", description=f"{self.author.mention} {mensaje}", color=discord.Color.red()), view=None)
+        try:
+            tiempo = int(time.time() - self.start_time)
+            base = random.randint(self.info['salario_min'], self.info['salario_max'])
+            ratio = 1.0 + max(0.0, 45 - tiempo) / 45.0 * 0.35
+            pago = min(int(base * ratio), self.info['salario_max'])
+            xp_ganada = self.info.get('xp_ganada', 0)
+            exito_real = True
+            if random.random() < self.info['prob_fallo']:
+                exito_real = False
+                pago = self.info['penalizacion']
+                mensaje = random.choice(self.info['mensajes_fallo']).format(monto=abs(self.info['penalizacion']), COIN=COIN)
+                await update_bank(self.author.id, self.info['penalizacion'])
+                await registrar_resultado(self.author.id, 'Limpiador', False, self.info['penalizacion'], mensaje)
+                await interaction.edit_original_response(embed=discord.Embed(title="🧹 Resultado", description=f"{self.author.mention} {mensaje}", color=discord.Color.red()), view=None)
+                await self._cleanup()
+                return
+            mensaje = random.choice(self.info['mensajes_exito']).format(monto=pago, COIN=COIN)
+            mensaje = f"{mensaje} (+{xp_ganada} XP Laboral)"
+            await update_bank(self.author.id, pago)
+            bonus = await registrar_resultado(self.author.id, 'Limpiador', True, pago, mensaje, xp_ganada=xp_ganada)
+            if bonus["coins"] > 0:
+                await update_bank(self.author.id, bonus["coins"])
+                mensaje += f"\n🌟 **¡Racha de 5!** Bono: **+{bonus['coins']}** {COIN} y **+{bonus['xp']} XP Laboral**"
+            await interaction.edit_original_response(embed=discord.Embed(title="🧹 Resultado", description=f"{self.author.mention} {mensaje}", color=discord.Color.green()), view=None)
             await self._cleanup()
-            return
-        mensaje = random.choice(self.info['mensajes_exito']).format(monto=pago, COIN=COIN)
-        mensaje = f"{mensaje} (+{xp_ganada} XP Laboral)"
-        await update_bank(self.author.id, pago)
-        bonus = await registrar_resultado(self.author.id, 'Limpiador', True, pago, mensaje, xp_ganada=xp_ganada)
-        if bonus["coins"] > 0:
-            await update_bank(self.author.id, bonus["coins"])
-            mensaje += f"\n🌟 **¡Racha de 5!** Bono: **+{bonus['coins']}** {COIN} y **+{bonus['xp']} XP Laboral**"
-        await interaction.edit_original_response(embed=discord.Embed(title="🧹 Resultado", description=f"{self.author.mention} {mensaje}", color=discord.Color.green()), view=None)
-        await self._cleanup()
+        except Exception as e:
+            _log_trabajar_error("Limpiador", e, self.author.name, "_terminar")
+
+    async def on_error(self, interaction: Interaction, error: Exception, item):
+        _log_trabajar_error("Limpiador", error, interaction.user.name, f"on_error — Item: {item}")
+
+    async def on_timeout(self):
+        logger.warning(f"[TRABAJAR/LIMPIADOR] on_timeout — Usuario: {self.author.name}")
 
     async def _cleanup(self):
         await asyncio.sleep(180)
@@ -732,31 +758,40 @@ class IngenieroView(ui.View):
         return embed
 
     async def _terminar(self, interaction, exito):
-        tiempo = int(time.time() - self.start_time)
-        base = random.randint(self.info['salario_min'], self.info['salario_max'])
-        ratio = 1.0 + max(0.0, 45 - tiempo) / 45.0 * 0.35
-        pago = min(int(base * ratio), self.info['salario_max'])
-        xp_ganada = self.info.get('xp_ganada', 0)
-        if random.random() < self.info['prob_fallo']:
-            await update_bank(self.author.id, self.info['penalizacion'])
-            mensaje = random.choice(self.info['mensajes_fallo']).format(monto=abs(self.info['penalizacion']), COIN=COIN)
-            await registrar_resultado(self.author.id, 'ingeniero', False, self.info['penalizacion'], mensaje)
-            await interaction.edit_original_response(embed=discord.Embed(title="🔧 Resultado", description=f"{self.author.mention} {mensaje}", color=discord.Color.red()), view=None)
-        else:
-            await update_bank(self.author.id, pago)
-            mensaje = random.choice(self.info['mensajes_exito']).format(monto=pago, COIN=COIN)
-            mensaje = f"{mensaje} (+{xp_ganada} XP Laboral)"
-            bonus = await registrar_resultado(self.author.id, 'ingeniero', True, pago, mensaje, xp_ganada=xp_ganada)
-            if bonus["coins"] > 0:
-                await update_bank(self.author.id, bonus["coins"])
-                mensaje += f"\n🌟 **¡Racha de 5!** Bono: **+{bonus['coins']}** {COIN} y **+{bonus['xp']} XP Laboral**"
-            await interaction.edit_original_response(embed=discord.Embed(title="🔧 Resultado", description=f"{self.author.mention} {mensaje}", color=discord.Color.green()), view=None)
-        await asyncio.sleep(180)
         try:
-            if self.message:
-                await self.message.delete()
-        except Exception:
-            pass
+            tiempo = int(time.time() - self.start_time)
+            base = random.randint(self.info['salario_min'], self.info['salario_max'])
+            ratio = 1.0 + max(0.0, 45 - tiempo) / 45.0 * 0.35
+            pago = min(int(base * ratio), self.info['salario_max'])
+            xp_ganada = self.info.get('xp_ganada', 0)
+            if random.random() < self.info['prob_fallo']:
+                await update_bank(self.author.id, self.info['penalizacion'])
+                mensaje = random.choice(self.info['mensajes_fallo']).format(monto=abs(self.info['penalizacion']), COIN=COIN)
+                await registrar_resultado(self.author.id, 'ingeniero', False, self.info['penalizacion'], mensaje)
+                await interaction.edit_original_response(embed=discord.Embed(title="🔧 Resultado", description=f"{self.author.mention} {mensaje}", color=discord.Color.red()), view=None)
+            else:
+                await update_bank(self.author.id, pago)
+                mensaje = random.choice(self.info['mensajes_exito']).format(monto=pago, COIN=COIN)
+                mensaje = f"{mensaje} (+{xp_ganada} XP Laboral)"
+                bonus = await registrar_resultado(self.author.id, 'ingeniero', True, pago, mensaje, xp_ganada=xp_ganada)
+                if bonus["coins"] > 0:
+                    await update_bank(self.author.id, bonus["coins"])
+                    mensaje += f"\n🌟 **¡Racha de 5!** Bono: **+{bonus['coins']}** {COIN} y **+{bonus['xp']} XP Laboral**"
+                await interaction.edit_original_response(embed=discord.Embed(title="🔧 Resultado", description=f"{self.author.mention} {mensaje}", color=discord.Color.green()), view=None)
+            await asyncio.sleep(180)
+            try:
+                if self.message:
+                    await self.message.delete()
+            except Exception:
+                pass
+        except Exception as e:
+            _log_trabajar_error("Ingeniero", e, self.author.name, "_terminar")
+
+    async def on_error(self, interaction: Interaction, error: Exception, item):
+        _log_trabajar_error("Ingeniero", error, interaction.user.name, f"on_error — Item: {item}")
+
+    async def on_timeout(self):
+        logger.warning(f"[TRABAJAR/INGENIERO] on_timeout — Usuario: {self.author.name}")
 
 
 class PlomeroView(ui.View):
@@ -831,32 +866,41 @@ class PlomeroView(ui.View):
         return embed
 
     async def _terminar(self, interaction, exito):
-        tiempo = int(time.time() - self.start_time)
-        base = random.randint(self.info['salario_min'], self.info['salario_max'])
-        ratio = 1.0 + max(0.0, 45 - tiempo) / 45.0 * 0.35
-        pago = min(int(base * ratio), self.info['salario_max'])
-        xp_ganada = self.info.get('xp_ganada', 0)
-        # Falla si el usuario agotó intentos O si el azar lo penaliza (prob_fallo)
-        if not exito or random.random() < self.info['prob_fallo']:
-            await update_bank(self.author.id, self.info['penalizacion'])
-            mensaje = random.choice(self.info['mensajes_fallo']).format(monto=abs(self.info['penalizacion']), COIN=COIN)
-            await registrar_resultado(self.author.id, 'plomero', False, self.info['penalizacion'], mensaje)
-            await interaction.edit_original_response(embed=discord.Embed(title="🛠️ Resultado", description=f"{self.author.mention} {mensaje}", color=discord.Color.red()), view=None)
-        else:
-            await update_bank(self.author.id, pago)
-            mensaje = random.choice(self.info['mensajes_exito']).format(monto=pago, COIN=COIN)
-            mensaje = f"{mensaje} (+{xp_ganada} XP Laboral)"
-            bonus = await registrar_resultado(self.author.id, 'plomero', True, pago, mensaje, xp_ganada=xp_ganada)
-            if bonus["coins"] > 0:
-                await update_bank(self.author.id, bonus["coins"])
-                mensaje += f"\n🌟 **¡Racha de 5!** Bono: **+{bonus['coins']}** {COIN} y **+{bonus['xp']} XP Laboral**"
-            await interaction.edit_original_response(embed=discord.Embed(title="🛠️ Resultado", description=f"{self.author.mention} {mensaje}", color=discord.Color.green()), view=None)
-        await asyncio.sleep(180)
         try:
-            if self.message:
-                await self.message.delete()
-        except Exception:
-            pass
+            tiempo = int(time.time() - self.start_time)
+            base = random.randint(self.info['salario_min'], self.info['salario_max'])
+            ratio = 1.0 + max(0.0, 45 - tiempo) / 45.0 * 0.35
+            pago = min(int(base * ratio), self.info['salario_max'])
+            xp_ganada = self.info.get('xp_ganada', 0)
+            # Falla si el usuario agotó intentos O si el azar lo penaliza (prob_fallo)
+            if not exito or random.random() < self.info['prob_fallo']:
+                await update_bank(self.author.id, self.info['penalizacion'])
+                mensaje = random.choice(self.info['mensajes_fallo']).format(monto=abs(self.info['penalizacion']), COIN=COIN)
+                await registrar_resultado(self.author.id, 'plomero', False, self.info['penalizacion'], mensaje)
+                await interaction.edit_original_response(embed=discord.Embed(title="🛠️ Resultado", description=f"{self.author.mention} {mensaje}", color=discord.Color.red()), view=None)
+            else:
+                await update_bank(self.author.id, pago)
+                mensaje = random.choice(self.info['mensajes_exito']).format(monto=pago, COIN=COIN)
+                mensaje = f"{mensaje} (+{xp_ganada} XP Laboral)"
+                bonus = await registrar_resultado(self.author.id, 'plomero', True, pago, mensaje, xp_ganada=xp_ganada)
+                if bonus["coins"] > 0:
+                    await update_bank(self.author.id, bonus["coins"])
+                    mensaje += f"\n🌟 **¡Racha de 5!** Bono: **+{bonus['coins']}** {COIN} y **+{bonus['xp']} XP Laboral**"
+                await interaction.edit_original_response(embed=discord.Embed(title="🛠️ Resultado", description=f"{self.author.mention} {mensaje}", color=discord.Color.green()), view=None)
+            await asyncio.sleep(180)
+            try:
+                if self.message:
+                    await self.message.delete()
+            except Exception:
+                pass
+        except Exception as e:
+            _log_trabajar_error("Plomero", e, self.author.name, "_terminar")
+
+    async def on_error(self, interaction: Interaction, error: Exception, item):
+        _log_trabajar_error("Plomero", error, interaction.user.name, f"on_error — Item: {item}")
+
+    async def on_timeout(self):
+        logger.warning(f"[TRABAJAR/PLOMERO] on_timeout — Usuario: {self.author.name}")
 
 
 async def setup(bot):
