@@ -482,7 +482,7 @@ class Empleos(commands.Cog):
         data["historial_reciente_de_jornadas"] = []
         data["despedido_inactividad"] = False
         await save_empleo_user(data)
-        await ctx.send("🛑 Has renunciado a tu empleo. Podrás aplicar a un nuevo trabajo dentro de 1 hora.")
+        await ctx.send("🛑 Has renunciado a tu empleo. Podrás aplicar a un nuevo trabajo dentro de 15 minutos.")
 
     @commands.command(name="exp")
     async def exp(self, ctx):
