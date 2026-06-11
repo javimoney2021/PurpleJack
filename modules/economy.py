@@ -1,7 +1,10 @@
 from discord.ext import commands
 from discord import app_commands, ui, ButtonStyle, Interaction
 import discord
+import logging
 import time
+
+logger = logging.getLogger("purplejack.economy")
 
 from core.database import get_user, update_balance, update_bank
 from core import cache
@@ -89,7 +92,10 @@ class WithdrawModal(ui.Modal, title="Retirar del Banco"):
             embed.set_field_at(0, name=embed.fields[0].name, value=f"{user['balance']} {COIN}", inline=True)
             embed.set_field_at(1, name=embed.fields[1].name, value=f"{user['bank']} {COIN}", inline=True)
             await self.message.edit(embed=embed)
-            await interaction.response.defer()
+            try:
+                await interaction.response.defer()
+            except discord.errors.NotFound:
+                logger.warning(f"WithdrawModal — interacción expirada para usuario {self.user_id}, retiro procesado correctamente.")
         except ValueError:
             await interaction.response.send_message("❌ Ingresa un número válido.", ephemeral=True)
 

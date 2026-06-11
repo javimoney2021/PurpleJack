@@ -136,11 +136,25 @@ async def shutdown():
     logger.info("Caché flusheada correctamente.")
     await bot.close()
 
+AUTHORIZED_GUILD_ID = 980073134411644939
+
 @bot.event
 async def on_ready():
     logger.info(f"Bot conectado como {bot.user}")
     logger.info("Caché iniciada | Flush cada 5 minutos")
     logger.info(f"Servidores activos: {len(bot.guilds)}")
+
+    # ── Verificar guilds autorizadas al inicio ─────────────
+    for guild in bot.guilds:
+        if guild.id != AUTHORIZED_GUILD_ID:
+            logger.warning(
+                f"Guild no autorizada detectada al iniciar | "
+                f"Nombre: {guild.name} | ID: {guild.id} | "
+                f"Miembros: {guild.member_count} | "
+                f"Fecha: {discord.utils.utcnow().strftime('%Y-%m-%d %H:%M:%S')} UTC"
+            )
+            logger.warning(f"Abandonando guild no autorizada: {guild.name} ({guild.id})")
+            await guild.leave()
 
     try:
         if GUILD_ID:
@@ -157,6 +171,19 @@ async def on_ready():
     asyncio.create_task(check_cargos_loop())
     logger.info("Task de cargos temporales iniciada | Revisión cada 5 minutos")
     logger.info("\n⫷ 𝙋𝙐𝙍𝙋𝙇𝙀𝙅𝘼𝘾𝙆 𝙀𝙉 𝙇𝙄𝙉𝙀𝘼 ⫸\n")
+
+
+@bot.event
+async def on_guild_join(guild: discord.Guild):
+    if guild.id != AUTHORIZED_GUILD_ID:
+        logger.warning(
+            f"Intento de instalación no autorizado detectado | "
+            f"Nombre: {guild.name} | ID: {guild.id} | "
+            f"Miembros: {guild.member_count} | "
+            f"Fecha: {discord.utils.utcnow().strftime('%Y-%m-%d %H:%M:%S')} UTC"
+        )
+        logger.warning(f"Abandonando guild no autorizada: {guild.name} ({guild.id})")
+        await guild.leave()
 
 
 def run_bot():
