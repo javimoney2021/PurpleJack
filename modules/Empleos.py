@@ -503,6 +503,7 @@ class LimpiadorView(ui.View):
         self.celdas_erroneas = set()
         self.message = None
         self.puntos = 0
+        self.terminado = False
         self._generar_tablero()
         self._build_buttons()
 
@@ -528,17 +529,23 @@ class LimpiadorView(ui.View):
         async def callback(interaction: Interaction):
             if interaction.user.id != self.author.id:
                 return await interaction.response.send_message("❌ Este tablero no es tuyo.", ephemeral=True)
+            if self.terminado:
+                return await interaction.response.defer()
             if self.revelados[idx]:
                 return await interaction.response.send_message("✅ Esa casilla ya está descubierta.", ephemeral=True)
             self.revelados[idx] = True
             self.puntos += 1
-            if self.tablero[idx] != "🗑️":
-                self.celdas_erroneas.add(idx)
-            self._build_buttons()
-            await interaction.response.edit_message(embed=self.build_embed(), view=self)
             if self.tablero[idx] == "🗑️":
                 self.basura -= 1
-            if self.basura == 0:
+            else:
+                self.celdas_erroneas.add(idx)
+            terminar_ahora = self.basura == 0
+            if terminar_ahora:
+                self.terminado = True
+                self.stop()
+            self._build_buttons()
+            await interaction.response.edit_message(embed=self.build_embed(), view=self)
+            if terminar_ahora:
                 await self._terminar(interaction, exito=True)
         return callback
 
@@ -602,6 +609,7 @@ class IngenieroView(ui.View):
         self.pares = 0
         self.bloqueado = False
         self.erroneas = set()
+        self.terminado = False
         self._generar_tablero()
         self._build_buttons()
 
@@ -631,7 +639,7 @@ class IngenieroView(ui.View):
         async def callback(interaction: Interaction):
             if interaction.user.id != self.author.id:
                 return await interaction.response.send_message("❌ Este tablero no es tuyo.", ephemeral=True)
-            if self.bloqueado or self.revelados[idx] or idx in self.seleccion:
+            if self.bloqueado or self.terminado or self.revelados[idx] or idx in self.seleccion:
                 return
             self.seleccion.append(idx)
             self._build_buttons()
@@ -648,6 +656,8 @@ class IngenieroView(ui.View):
                     self._build_buttons()
                     await interaction.edit_original_response(embed=self.build_embed(), view=self)
                     if self.pares == 4:
+                        self.terminado = True
+                        self.stop()
                         await self._terminar(interaction, exito=True)
                     return
 
@@ -706,6 +716,7 @@ class PlomeroView(ui.View):
         self.intentos = 0
         self.hallazgos = 0
         self.max_intentos = 6
+        self.terminado = False
         self._generar_tablero()
         self._build_buttons()
 
@@ -729,6 +740,8 @@ class PlomeroView(ui.View):
         async def callback(interaction: Interaction):
             if interaction.user.id != self.author.id:
                 return await interaction.response.send_message("❌ Este tablero no es tuyo.", ephemeral=True)
+            if self.terminado:
+                return await interaction.response.defer()
             if self.revelados[idx]:
                 return await interaction.response.send_message("✅ Esa casilla ya está abierta.", ephemeral=True)
             self.revelados[idx] = True
@@ -736,12 +749,18 @@ class PlomeroView(ui.View):
                 self.hallazgos += 1
             else:
                 self.intentos += 1
+            terminar_exito = None
+            if self.hallazgos >= 3:
+                terminar_exito = True
+            elif self.intentos >= self.max_intentos:
+                terminar_exito = False
+            if terminar_exito is not None:
+                self.terminado = True
+                self.stop()
             self._build_buttons()
             await interaction.response.edit_message(embed=self.build_embed(), view=self)
-            if self.hallazgos >= 3:
-                await self._terminar(interaction, exito=True)
-            elif self.intentos >= self.max_intentos:
-                await self._terminar(interaction, exito=False)
+            if terminar_exito is not None:
+                await self._terminar(interaction, exito=terminar_exito)
         return callback
 
     def build_embed(self):

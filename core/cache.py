@@ -212,6 +212,23 @@ def cleanup_cache():
         _inventory_cache.pop(uid, None)
         _collect_cooldowns.pop(uid, None)
 
+# ── VETERANO CONFIG (protección anti-rob por rol) ──────
+_veterano_config = {}  # {rol_id: {"monto": int, "msj": str}}
+
+def get_veterano_config() -> dict:
+    return _veterano_config
+
+def set_veterano_config(data: dict):
+    global _veterano_config
+    _veterano_config = data
+
+def upsert_veterano_config(rol_id: int, monto: int, msj: str):
+    _veterano_config[rol_id] = {"monto": monto, "msj": msj}
+
+def delete_veterano_config(rol_id: int):
+    _veterano_config.pop(rol_id, None)
+
+
 # ── FLUSH USUARIOS A DB ────────────────────────────────
 async def flush_to_db():
     from core.database import pool

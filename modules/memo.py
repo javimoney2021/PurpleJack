@@ -31,6 +31,7 @@ class MemoView(discord.ui.View):
         self.bloqueado     = False
         self.racha         = 0
         self.message       = None
+        self._terminado    = False
         self._build_buttons()
 
     def _build_buttons(self):
@@ -95,10 +96,13 @@ class MemoView(discord.ui.View):
                     if self.racha >= 2 and self.racha % 2 == 0 and self.intentos_fail > 0:
                         self.intentos_fail -= 1
                     self.seleccion = []
-                    self.bloqueado = False
                     self._build_buttons()
 
                     if self.pares_ok == 8:
+                        if self._terminado:
+                            return
+                        self._terminado = True
+                        self.bloqueado  = True
                         # 🏆 Ganó — devuelve la apuesta + premio total
                         recompensa_total = self.monto * 3
                         ganancia_neta = self.monto * 2
@@ -123,6 +127,7 @@ class MemoView(discord.ui.View):
                         _active_memo.discard(self.author.id)
                         return
 
+                    self.bloqueado = False
                     try:
                         await interaction.edit_original_response(
                             embed=self._build_embed(), view=self
@@ -137,6 +142,10 @@ class MemoView(discord.ui.View):
                     intentos_restantes = MAX_INTENTOS - self.intentos_fail
 
                     if intentos_restantes <= 0:
+                        if self._terminado:
+                            self.bloqueado = False
+                            return
+                        self._terminado = True
                         # 💀 Perdió — apuesta ya descontada al iniciar
                         self.revelado = [True] * 16   # revelar todo
                         self._build_buttons()
@@ -182,8 +191,9 @@ class MemoView(discord.ui.View):
         if estado:
             desc += f"\n{estado}"
 
+        nick = self.author.nick or self.author.display_name
         embed = discord.Embed(
-            title="🧠 Juego de Memoria",
+            title=f"🧠 Juego de Memoria - {nick}",
             description=desc,
             color=discord.Color.blurple()
         )
@@ -230,6 +240,7 @@ class Memo(commands.Cog):
                 f"❌ {ctx.author.mention} El monto debe ser mayor a 0."
             )
         if ctx.author.id in _active_memo:
+            ctx.command.reset_cooldown(ctx)
             return await ctx.send(
                 f"❌ {ctx.author.mention} Ya tienes una partida activa."
             )

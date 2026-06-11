@@ -1395,6 +1395,60 @@ class Staff(commands.Cog):
         _duel_cooldowns[interaction.guild.id] = cooldown
         await interaction.response.send_message(f"✅ Cooldown de !retar cambiado a {cooldown} segundos.", ephemeral=True)
 
+    @app_commands.command(name="veterano_config", description="Configurar Rol Anti-Robo")
+    @app_commands.describe(
+        protect_rol="Rol con protección anti-robo",
+        monto_penalizar="Monto a descontar del banco del atacante",
+        msj_atacante="Mensaje que verá el atacante (se añade tras '🖐️ Lo siento tanto @atacante')"
+    )
+    @is_staff()
+    async def veterano_config(
+        self,
+        interaction: discord.Interaction,
+        protect_rol: discord.Role,
+        monto_penalizar: int,
+        msj_atacante: str
+    ):
+        if monto_penalizar <= 0:
+            return await interaction.response.send_message(
+                "❌ El monto de penalización debe ser mayor a 0.", ephemeral=True
+            )
+
+        await interaction.response.defer(ephemeral=False)
+
+        from core.database import upsert_veterano_config_db
+        await upsert_veterano_config_db(protect_rol.id, monto_penalizar, msj_atacante.strip())
+
+        await interaction.followup.send(
+            f"🛡️ Protección Anti-Robo configurada:\n"
+            f"• Rol protegido: {protect_rol.mention}\n"
+            f"• Penalización al atacante: **{monto_penalizar}** {COIN} (banco)\n"
+            f"• Mensaje: *🖐️ Lo siento tanto {interaction.user.mention} {msj_atacante.strip()}*",
+            ephemeral=False
+        )
+
+    @app_commands.command(name="veterano_eliminar", description="Elimina la protección Anti-Robo de un rol")
+    @app_commands.describe(protect_rol="Rol a desproteger")
+    @is_staff()
+    async def veterano_eliminar(
+        self,
+        interaction: discord.Interaction,
+        protect_rol: discord.Role
+    ):
+        from core import cache as _cache
+        cfg = _cache.get_veterano_config()
+        if protect_rol.id not in cfg:
+            return await interaction.response.send_message(
+                f"❌ {protect_rol.mention} no tiene protección Anti-Robo configurada.", ephemeral=True
+            )
+
+        await interaction.response.defer(ephemeral=False)
+        from core.database import delete_veterano_config_db
+        await delete_veterano_config_db(protect_rol.id)
+        await interaction.followup.send(
+            f"✅ Protección Anti-Robo de {protect_rol.mention} eliminada.", ephemeral=False
+        )
+
 
 async def setup(bot):
     await bot.add_cog(Staff(bot))

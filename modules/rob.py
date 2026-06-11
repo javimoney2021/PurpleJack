@@ -45,6 +45,19 @@ class Rob(commands.Cog):
         author_user = await get_user(author_id)
         target_user = await get_user(target_id)
 
+        # ── Verificar protección Veterano ──────────────────────
+        veterano_cfg = cache.get_veterano_config()
+        if veterano_cfg:
+            target_roles_ids = {r.id for r in target.roles}
+            for rol_id, cfg in veterano_cfg.items():
+                if rol_id in target_roles_ids:
+                    await update_bank(author_id, -cfg["monto"])
+                    set_rob_cooldown(author_id)
+                    await ctx.send(
+                        f"🖐️ Lo siento tanto {ctx.author.mention} {cfg['msj']}"
+                    )
+                    return
+
         # Verificar balance mínimo del objetivo
         if target_user["balance"] < 100:
             target_nick = target.nick or target.display_name

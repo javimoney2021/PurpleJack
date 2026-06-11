@@ -109,6 +109,14 @@ async def init_db():
         )
         """)
 
+        await conn.execute("""
+        CREATE TABLE IF NOT EXISTS veterano_config (
+            rol_id BIGINT PRIMARY KEY,
+            monto_penalizar INTEGER NOT NULL,
+            msj_atacante TEXT NOT NULL
+        )
+        """)
+
     logger.info("Base de datos conectada y tablas verificadas.")
 
 
@@ -730,4 +738,34 @@ async def clear_game_cooldowns(game):
         await conn.execute(
             "DELETE FROM game_cooldowns WHERE game=$1", game
         )
-        
+
+
+# ── VETERANO CONFIG ────────────────────────────────────
+
+async def load_veterano_config_to_cache():
+    async with pool.acquire() as conn:
+        rows = await conn.fetch(
+            "SELECT rol_id, monto_penalizar, msj_atacante FROM veterano_config"
+        )
+    data = {
+        r["rol_id"]: {"monto": r["monto_penalizar"], "msj": r["msj_atacante"]}
+        for r in rows
+    }
+    cache.set_veterano_config(data)
+
+async def upsert_veterano_config_db(rol_id: int, monto: int, msj: str):
+    async with pool.acquire() as conn:
+        await conn.execute("""
+            INSERT INTO veterano_config (rol_id, monto_penalizar, msj_atacante)
+            VALUES ($1, $2, $3)
+            ON CONFLICT (rol_id) DO UPDATE
+            SET monto_penalizar=$2, msj_atacante=$3
+        """, rol_id, monto, msj)
+    cache.upsert_veterano_config(rol_id, monto, msj)
+
+async def delete_veterano_config_db(rol_id: int):
+    async with pool.acquire() as conn:
+        await conn.execute(
+            "DELETE FROM veterano_config WHERE rol_id=$1", rol_id
+        )
+    cache.delete_veterano_config(rol_id)
