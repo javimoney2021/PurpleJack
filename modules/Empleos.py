@@ -468,7 +468,7 @@ class Empleos(commands.Cog):
             return await ctx.send("❌ Usa: `!aplicar <empleo>`")
         empleo = normalizar_empleo(empleo)
         if empleo not in EMPLEOS:
-            return await ctx.send("❌ Empleo no disponible.")
+            return await ctx.send("⭕ Empleo **Invalido** Consulta **!empleos.**")
 
         data = await get_empleo_user(ctx.author.id)
         cooldown_until = data.get("cooldown_renuncia", 0) if data else 0
@@ -623,13 +623,12 @@ class LimpiadorView(ui.View):
         ratio = 1.0 + max(0.0, 45 - tiempo) / 45.0 * 0.35
         pago_actual = min(int(base * ratio), self.info['salario_max'])
 
-        embed = discord.Embed(title="🧹 Limpieza en progreso", color=discord.Color.green())
+        embed = discord.Embed(title=f"🧹 Jornada Limpiador - {self.author.mention}", color=discord.Color.yellow())
         embed.add_field(name="Objetivo", value="Descubre los 3 símbolos de reciclaje para completar la tarea.", inline=False)
-        embed.add_field(name="Celdas abiertas", value=str(descubiertos), inline=True)
-        embed.add_field(name="Símbolos de reciclaje restantes", value=str(self.basura), inline=True)
+        embed.add_field(name="Símbolos de 🗑️ restantes", value=str(self.basura), inline=True)
         embed.add_field(name="Pago estimado actual", value=f"{pago_actual} {COIN}", inline=False)
         embed.set_thumbnail(url="https://pub-a09b3609b6b34dfab5c7aa7742cd1a8a.r2.dev/Purple%20jack%20Harcode/Limpia%20Thumb.webp")
-        embed.set_footer(text=f"Tablero de {self.author.display_name} • Se elimina en 180 segundos")
+        embed.set_footer(text="Trabajo de Limpiador en progreso......")
         return embed
 
     async def _terminar(self, interaction, exito):
@@ -757,12 +756,12 @@ class IngenieroView(ui.View):
         base = random.randint(self.info['salario_min'], self.info['salario_max'])
         ratio = 1.0 + max(0.0, 45 - tiempo) / 45.0 * 0.35
         pago_actual = min(int(base * ratio), self.info['salario_max'])
-        embed = discord.Embed(title="🔧 Modo ingeniería", color=discord.Color.blurple())
-        embed.add_field(name="Objetivo", value="Encuentra los 4 pares de símbolos para completar la revisión.", inline=False)
+        embed = discord.Embed(title=f"🛠️ Jornada Ingeniero - {self.author.mention}", color=discord.Color.blurple())
+        embed.add_field(name="Objetivo", value="Encuentra los 4 pares para reparar la Nave", inline=False)
         embed.add_field(name="Pares encontrados", value=str(self.pares), inline=True)
         embed.add_field(name="Pago estimado actual", value=f"{pago_actual} {COIN}", inline=True)
         embed.set_thumbnail(url="https://pub-a09b3609b6b34dfab5c7aa7742cd1a8a.r2.dev/Purple%20jack%20Harcode/Inge%20thumb.png")
-        embed.set_footer(text=f"Tablero de {self.author.display_name}")
+        embed.set_footer(text="Trabajo de Ingeniero en progreso......")
         return embed
 
     async def _terminar(self, interaction, exito):
@@ -862,7 +861,7 @@ class PlomeroView(ui.View):
         return callback
 
     def build_embed(self):
-        embed = discord.Embed(title="🛠️ Busqueda de Impostores", color=discord.Color.orange())
+        embed = discord.Embed(title=f"💣 Busqueda de Impostores - {self.author.mention}", color=discord.Color.orange())
         intentos_restantes = self.max_intentos - self.intentos
         corazones = "❤️" * intentos_restantes + "🖤" * self.intentos
         embed.add_field(
@@ -873,7 +872,7 @@ class PlomeroView(ui.View):
         embed.add_field(name="Vidas restantes", value=corazones, inline=False)
         embed.add_field(name="Ductos Sellados", value=str(self.hallazgos), inline=True)
         embed.set_thumbnail(url="https://pub-a09b3609b6b34dfab5c7aa7742cd1a8a.r2.dev/Purple%20jack%20Harcode/Plomero%20Thumb.webp")
-        embed.set_footer(text=f"Jornada de {self.author.display_name} En proceso")
+        embed.set_footer(text="Trabajo de Plomero en progreso......")
         return embed
 
     async def _terminar(self, interaction, exito):
