@@ -1450,5 +1450,29 @@ class Staff(commands.Cog):
         )
 
 
+    @app_commands.command(name="despidos", description="Activa o desactiva el sistema de despidos por inactividad (24h sin trabajar)")
+    @app_commands.describe(estado="Elige el estado del sistema de despidos")
+    @app_commands.choices(estado=[
+        app_commands.Choice(name="🟢 ON  — Activar despidos por inactividad", value="on"),
+        app_commands.Choice(name="🔴 OFF — Desactivar despidos por inactividad", value="off"),
+    ])
+    @is_staff()
+    async def despidos(self, interaction: discord.Interaction, estado: app_commands.Choice[str]):
+        from modules.Empleos import _despidos_config
+        _despidos_config["activo"] = (estado.value == "on")
+        if _despidos_config["activo"]:
+            await interaction.response.send_message(
+                "🟢 Sistema de despidos **activado**.\n"
+                "Los usuarios serán despedidos si ejecutan `!trabajar` con más de 24h de inactividad.",
+                ephemeral=False
+            )
+        else:
+            await interaction.response.send_message(
+                "🔴 Sistema de despidos **desactivado**.\n"
+                "Los usuarios pueden trabajar sin riesgo de ser despedidos por inactividad.",
+                ephemeral=False
+            )
+
+
 async def setup(bot):
     await bot.add_cog(Staff(bot))

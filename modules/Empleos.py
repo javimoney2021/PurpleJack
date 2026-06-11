@@ -59,7 +59,7 @@ EMPLEOS = {
         "xp_ganada": 8,
         "duracion_horas": 3,
         "penalizacion": -900,
-        "prob_fallo": 0.00,
+        "prob_fallo": 0.30,
         "mensajes_exito": [
             "Habia un gloton en los ductos, ganas {monto} {COIN}.",
             "Descubres a un sus saliendo de la alcantarilla, ganas {monto} {COIN}.",
@@ -72,6 +72,13 @@ EMPLEOS = {
         ]
     }
 }
+
+# ── BONOS DE RACHA ──────────────────────────────────────
+RACHA_BONUS_XP    = 5     # XP extra al completar racha de 5 éxitos
+RACHA_BONUS_COINS = 0.10  # 10 % del pago como bono de coins por racha
+
+# ── CONFIG DESPIDOS ─────────────────────────────────────
+_despidos_config = {"activo": False}
 
 _EMPLEOS_CACHE = {}
 
@@ -282,24 +289,46 @@ async def reset_empleo_user(user_id):
 async def registrar_resultado(user_id, empleo, exito, pago, motivo, xp_ganada=0):
     data = await get_empleo_user(user_id)
     if not data:
-        return
+        return {"coins": 0, "xp": 0}
     ahora = time.time()
     data["ultimo_trabajo"] = ahora
     data["progreso_permanencia"] = max(data.get("progreso_permanencia", 0), ahora - data.get("fecha_contratacion", ahora))
     data["historial_reciente_de_jornadas"] = (data.get("historial_reciente_de_jornadas", []) + [ahora])[-10:]
+
+    bonus = {"coins": 0, "xp": 0}
+
     if exito:
         data["trabajos_exitosos"] = data.get("trabajos_exitosos", 0) + 1
-        data["exp_laboral"] = data.get("exp_laboral", 0) + max(0, xp_ganada)
-        data["racha_exitos"] = data.get("racha_exitos", 0) + 1
+        data["exp_laboral"]       = data.get("exp_laboral", 0) + max(0, xp_ganada)
+        data["racha_exitos"]      = data.get("racha_exitos", 0) + 1
+        # ── Bono cada 5 éxitos consecutivos ───────────────
         if data["racha_exitos"] % 5 == 0:
-            data["exp_laboral"] += 5
-            data["racha_exitos"] += 0
+            bono_coins = int(pago * RACHA_BONUS_COINS) if pago > 0 else 0
+            data["exp_laboral"] += RACHA_BONUS_XP
+            data["racha_exitos"] = 0   # reset tras el bono
+            bonus = {"coins": bono_coins, "xp": RACHA_BONUS_XP}
         data["total_generado"] = data.get("total_generado", 0) + max(0, pago)
     else:
         data["trabajos_fallidos"] = data.get("trabajos_fallidos", 0) + 1
         data["racha_exitos"] = 0
+
     await save_empleo_user(data)
     await append_historial(user_id, empleo, exito, pago, motivo)
+    return bonus
+
+
+async def despedir_por_inactividad(user_id: int, data: dict):
+    """Despide al usuario por inactividad: limpia empleo en DB y RAM."""
+    data["ultimo_empleo"]               = data.get("empleo_actual")
+    data["empleo_actual"]               = None
+    data["dificultad"]                  = None
+    data["fecha_contratacion"]          = 0
+    data["ultimo_trabajo"]              = 0
+    data["historial_reciente_de_jornadas"] = []
+    data["despedido_inactividad"]       = True
+    data["cooldown_renuncia"]           = 0   # sin cooldown tras ser despedido
+    await save_empleo_user(data)
+    _EMPLEOS_CACHE[user_id] = data
 
 
 class ConfirmarEmpleoView(ui.View):
@@ -445,7 +474,7 @@ class Empleos(commands.Cog):
             return await ctx.send("❌ No posees un empleo activo.")
         data["ultimo_empleo"] = data.get("empleo_actual")
         data["progreso_requisito"] = data.get("progreso_permanencia", 0)
-        data["cooldown_renuncia"] = time.time() + 3600
+        data["cooldown_renuncia"] = time.time() + 900
         data["empleo_actual"] = None
         data["dificultad"] = None
         data["fecha_contratacion"] = 0
@@ -479,6 +508,15 @@ class Empleos(commands.Cog):
         now = time.time()
         if data.get("ultimo_trabajo", 0) and (now - data["ultimo_trabajo"]) < info["duracion_horas"] * 3600:
             return await ctx.send("⏳ Debes esperar 3 horas para volver a trabajar.")
+
+        # ── Despido por inactividad (solo si el sistema está activo) ──
+        if _despidos_config["activo"] and data.get("ultimo_trabajo", 0) > 0:
+            if (now - data["ultimo_trabajo"]) >= 86400:
+                await despedir_por_inactividad(ctx.author.id, data)
+                return await ctx.send(
+                    f"⚠️ {ctx.author.mention} Has sido **despedido** por inactividad "
+                    f"(más de 24h sin trabajar). Usa **!aplicar** para conseguir un nuevo empleo."
+                )
 
         if empleo == "limpiador":
             view = LimpiadorView(self.bot, ctx.author, info)
@@ -583,7 +621,10 @@ class LimpiadorView(ui.View):
         mensaje = random.choice(self.info['mensajes_exito']).format(monto=pago, COIN=COIN)
         mensaje = f"{mensaje} (+{xp_ganada} XP Laboral)"
         await update_bank(self.author.id, pago)
-        await registrar_resultado(self.author.id, 'Limpiador', True, pago, mensaje, xp_ganada=xp_ganada)
+        bonus = await registrar_resultado(self.author.id, 'Limpiador', True, pago, mensaje, xp_ganada=xp_ganada)
+        if bonus["coins"] > 0:
+            await update_bank(self.author.id, bonus["coins"])
+            mensaje += f"\n🌟 **¡Racha de 5!** Bono: **+{bonus['coins']}** {COIN} y **+{bonus['xp']} XP Laboral**"
         await interaction.edit_original_response(embed=discord.Embed(title="🧹 Resultado", description=f"{self.author.mention} {mensaje}", color=discord.Color.green()), view=None)
         await self._cleanup()
 
@@ -694,7 +735,10 @@ class IngenieroView(ui.View):
             await update_bank(self.author.id, pago)
             mensaje = random.choice(self.info['mensajes_exito']).format(monto=pago, COIN=COIN)
             mensaje = f"{mensaje} (+{xp_ganada} XP Laboral)"
-            await registrar_resultado(self.author.id, 'ingeniero', True, pago, mensaje, xp_ganada=xp_ganada)
+            bonus = await registrar_resultado(self.author.id, 'ingeniero', True, pago, mensaje, xp_ganada=xp_ganada)
+            if bonus["coins"] > 0:
+                await update_bank(self.author.id, bonus["coins"])
+                mensaje += f"\n🌟 **¡Racha de 5!** Bono: **+{bonus['coins']}** {COIN} y **+{bonus['xp']} XP Laboral**"
             await interaction.edit_original_response(embed=discord.Embed(title="🔧 Resultado", description=f"{self.author.mention} {mensaje}", color=discord.Color.green()), view=None)
         await asyncio.sleep(180)
         try:
@@ -781,7 +825,8 @@ class PlomeroView(ui.View):
         ratio = 1.0 + max(0.0, 45 - tiempo) / 45.0 * 0.35
         pago = min(int(base * ratio), self.info['salario_max'])
         xp_ganada = self.info.get('xp_ganada', 0)
-        if not exito:
+        # Falla si el usuario agotó intentos O si el azar lo penaliza (prob_fallo)
+        if not exito or random.random() < self.info['prob_fallo']:
             await update_bank(self.author.id, self.info['penalizacion'])
             mensaje = random.choice(self.info['mensajes_fallo']).format(monto=abs(self.info['penalizacion']), COIN=COIN)
             await registrar_resultado(self.author.id, 'plomero', False, self.info['penalizacion'], mensaje)
@@ -790,7 +835,10 @@ class PlomeroView(ui.View):
             await update_bank(self.author.id, pago)
             mensaje = random.choice(self.info['mensajes_exito']).format(monto=pago, COIN=COIN)
             mensaje = f"{mensaje} (+{xp_ganada} XP Laboral)"
-            await registrar_resultado(self.author.id, 'plomero', True, pago, mensaje, xp_ganada=xp_ganada)
+            bonus = await registrar_resultado(self.author.id, 'plomero', True, pago, mensaje, xp_ganada=xp_ganada)
+            if bonus["coins"] > 0:
+                await update_bank(self.author.id, bonus["coins"])
+                mensaje += f"\n🌟 **¡Racha de 5!** Bono: **+{bonus['coins']}** {COIN} y **+{bonus['xp']} XP Laboral**"
             await interaction.edit_original_response(embed=discord.Embed(title="🛠️ Resultado", description=f"{self.author.mention} {mensaje}", color=discord.Color.green()), view=None)
         await asyncio.sleep(180)
         try:
