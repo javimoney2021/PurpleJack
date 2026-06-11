@@ -1,6 +1,7 @@
 from discord.ext import commands
 import discord
 import asyncio
+import logging
 import time
 from core.database import (
     update_bank,
@@ -8,6 +9,8 @@ from core.database import (
 )
 from core import cache
 from core.config import COIN
+
+logger = logging.getLogger(__name__)
 
 
 class Collect(commands.Cog):
@@ -88,12 +91,12 @@ class Collect(commands.Cog):
                         await update_bank(user_id, 0)          # flush con dato ya en cache
                         await save_collect_cooldowns(user_id, cobros)
                     except Exception as e:
-                        print(f"⚠️ collect persist error [{user_id}]: {e}")
+                logger.warning(f"collect persist error [{user_id}]: {e}")
 
                 asyncio.create_task(_persist())
 
         except Exception as e:
-            print(f"ERROR !collect: {e}")
+            logger.error(f"ERROR !collect: {e}")
             await ctx.send("❌ Ocurrió un error al procesar tu collect.")
 
 

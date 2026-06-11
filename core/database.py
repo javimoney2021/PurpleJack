@@ -1,6 +1,9 @@
+import logging
 import asyncpg
 from settings import DATABASE_URL
 from core import cache
+
+logger = logging.getLogger(__name__)
 
 pool = None
 
@@ -106,7 +109,7 @@ async def init_db():
         )
         """)
 
-    print("✅ Base de datos conectada y tablas verificadas.")
+    logger.info("Base de datos conectada y tablas verificadas.")
 
 
 # ── USUARIOS ───────────────────────────────────────────
@@ -155,7 +158,7 @@ async def _flush_user(user_id):
             )
         cache.clear_dirty(user_id)
     except Exception as e:
-        print(f"⚠️ Error en flush inmediato para {user_id}: {e}")
+        logger.warning(f"Error en flush inmediato para {user_id}: {e}")
 
 async def update_cooldown(user_id, command, timestamp):
     await get_user(user_id)

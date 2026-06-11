@@ -1,10 +1,13 @@
 import discord
 import asyncio
+import logging
 import random
 import time
 from discord.ext import commands
 from core.database import get_user, update_balance, update_bank
 from core.config import COIN
+
+logger = logging.getLogger(__name__)
 
 # ── CONFIG ─────────────────────────────────────────────
 DUEL_TIMEOUT = 20  # segundos para aceptar/rechazar
@@ -33,14 +36,14 @@ class AcceptDuelView(discord.ui.View):
     async def on_timeout(self):
         try:
             await self.message.delete()
-        except:
+        except discord.HTTPException:
             pass
         try:
             await self.ctx.send(
                 f"⚔️ {self.ctx.author.mention} **Reto anulado (Sin Respuesta)** Intenta retar a otra persona.",
                 delete_after=15
             )
-        except:
+        except discord.HTTPException:
             pass
         self.ctx.command.reset_cooldown(self.ctx)
 
@@ -77,7 +80,7 @@ class AcceptDuelView(discord.ui.View):
             await asyncio.sleep(3)
             try:
                 await self.message.delete()
-            except:
+            except discord.HTTPException:
                 pass
         
         asyncio.create_task(delete_message())
@@ -127,7 +130,7 @@ class AcceptDuelView(discord.ui.View):
             await asyncio.sleep(3)
             try:
                 await self.message.delete()
-            except:
+            except discord.HTTPException:
                 pass
         
         asyncio.create_task(delete_message())
@@ -243,7 +246,7 @@ class DuelGameView(discord.ui.View):
             await self.end_game()
 
         except Exception as e:
-            print(f"Error en duelo: {e}")
+            logger.error(f"Error en duelo: {e}")
             await self.end_game()
 
     async def hide_sword(self):
@@ -254,7 +257,7 @@ class DuelGameView(discord.ui.View):
                 item.style = discord.ButtonStyle.secondary
         try:
             await self.message.edit(view=self)
-        except:
+        except discord.HTTPException:
             pass
 
     async def end_game(self):
@@ -287,14 +290,14 @@ class DuelGameView(discord.ui.View):
 
         try:
             await self.message.edit(embed=embed, view=self)
-        except:
+        except discord.HTTPException:
             pass
 
         # Esperar 6 segundos y eliminar el mensaje
         await asyncio.sleep(6)
         try:
             await self.message.delete()
-        except:
+        except discord.HTTPException:
             pass
         
         # Abrir permisos de escritura para el rol Español

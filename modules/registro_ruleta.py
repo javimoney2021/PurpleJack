@@ -1,12 +1,12 @@
 import discord
 from discord import app_commands
 from discord.ext import commands
+from core.config import STAFF_ROLE
 
 # ── CONFIG ─────────────────────────────────────────────
 ROL_REGISTRO_ID   = 1507215915396239410
 CANAL_STAFF_ID    = 1502119147046305962
 CANAL_VOZ_ID      = 1507791449985646723
-STAFF_ROLE        = "Equipo de Eventos"
 
 # ── ESTADO GLOBAL (RAM) ────────────────────────────────
 _panel_activo: dict[int, discord.Message] = {}

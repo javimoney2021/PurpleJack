@@ -1,9 +1,12 @@
 import discord
 import asyncio
+import logging
 import random
 from discord.ext import commands
 from core.database import update_balance
-from core.config import COIN
+from core.config import COIN, STAFF_ROLE
+
+logger = logging.getLogger(__name__)
 
 # ── CONFIG BASE ────────────────────────────────────────
 GOLPEAR_GIF = "https://pub-a09b3609b6b34dfab5c7aa7742cd1a8a.r2.dev/Purple%20jack%20Harcode/cofre1.gif"
@@ -11,7 +14,6 @@ MIN_COINS = 150
 MAX_COINS = 800
 MAX_GOLPES = 3
 COFRE_TIMEOUT = 6
-STAFF_ROLE = "Equipo de Eventos"
 
 # ── ESTADO GLOBAL ──────────────────────────────────────
 _golpear_config = {

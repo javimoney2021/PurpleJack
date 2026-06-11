@@ -56,7 +56,6 @@ def get_all_cache():
 
 # ── ROB ────────────────────────────────────────────────
 _rob_cooldowns = {}      # {user_id: timestamp}
-_rob_protection = {}     # {user_id: timestamp}
 
 def get_rob_cooldown(user_id):
     return _rob_cooldowns.get(user_id, 0)
@@ -65,16 +64,10 @@ def set_rob_cooldown(user_id):
     from core.config import rob_config
     _rob_cooldowns[user_id] = time.time() + rob_config["cooldown"]
 
-def get_rob_protection(user_id):
-    return _rob_protection.get(user_id, 0)
-
-def set_rob_protection(user_id):
-    _rob_protection[user_id] = time.time() + 600  # 10 min fijo
-
 def clear_rob_cooldowns_cache():
     _rob_cooldowns.clear()
-    
-    # ── GAME COOLDOWNS (ruleta / rr) ───────────────────────
+
+# ── GAME COOLDOWNS (ruleta / rr) ───────────────────────
 _game_cooldowns = {}  # {(user_id, game): expira_en}
 
 def get_game_cooldown_cache(user_id, game):

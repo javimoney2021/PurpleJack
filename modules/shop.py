@@ -1,20 +1,21 @@
 from discord.ext import commands
 import discord
+import logging
 from core.database import (
     get_user, update_balance, update_bank, get_all_items, get_item_by_name,
     add_to_inventory, get_inventory, remove_from_inventory,
     reduce_stock, add_cargo_temporal
 )
 from core import cache
-from core.config import COIN
+from core.config import COIN, LOG_CHANNEL_ID, TARJETA_CREDITO_ROL_ID
 import time
 import re
 
+logger = logging.getLogger(__name__)
+
 # ── CONFIG ─────────────────────────────────────────────
-LOG_CHANNEL_ID = 1503681101422526494
 ITEMS_PER_PAGE = 5
 PURPLE = 0x9B59B6
-TARJETA_CREDITO_ROL_ID = 1505205139416551527
 
 
 # ── CONFIRMACION DE COMPRA ─────────────────────────────
@@ -151,7 +152,7 @@ class ConfirmBuyView(discord.ui.View):
                 )
 
         except Exception as e:
-            print(f"ERROR ConfirmBuyView confirmar: {e}")
+            logger.error(f"ERROR ConfirmBuyView confirmar: {e}")
             try:
                 await interaction.edit_original_response(content="❌ Error al procesar la compra.", view=self)
             except Exception:
@@ -465,7 +466,7 @@ class UseButton(discord.ui.Button):
                 )
 
         except Exception as e:
-            print(f"ERROR UseButton callback: {e}")
+            logger.error(f"ERROR UseButton callback: {e}")
             try:
                 await interaction.followup.send("❌ Error al usar el item.", ephemeral=True)
             except Exception:
@@ -519,7 +520,7 @@ class InventarioLayout(discord.ui.LayoutView):
             self.add_item(container)
 
         except Exception as e:
-            print(f"ERROR InventarioLayout._build: {e}")
+            logger.error(f"ERROR InventarioLayout._build: {e}")
             raise
 
     async def on_timeout(self):
@@ -686,7 +687,7 @@ class Shop(commands.Cog):
             asyncio.create_task(auto_delete())
 
         except Exception as e:
-            print(f"ERROR inventario command: {e}")
+            logger.error(f"ERROR inventario command: {e}")
             await ctx.send(f"❌ Error al abrir inventario: `{e}`")
 
 

@@ -2,10 +2,13 @@ from discord.ext import commands
 import random
 import time
 import asyncio
+import logging
 
 from core.database import get_user, update_bank, update_balance, update_cooldown
 from core.config import game_config, COIN
 from core import cache as _cache_mod
+
+logger = logging.getLogger(__name__)
 
 WORK_MESSAGES = [
     "🔧 Trabajaste duro y ganaste **{monto}** " + COIN,
@@ -77,7 +80,7 @@ class BasicGames(commands.Cog):
                 await update_balance(ctx.author.id, 0)  # flush con datos ya actualizados
                 await update_cooldown(ctx.author.id, "work", now)
             except Exception as e:
-                print(f"⚠️ work persist error [{ctx.author.id}]: {e}")
+                logger.warning(f"work persist error [{ctx.author.id}]: {e}")
 
         asyncio.create_task(_persist())
 
@@ -127,7 +130,7 @@ class BasicGames(commands.Cog):
                     await update_bank(ctx.author.id, 0)
                 await update_cooldown(ctx.author.id, "crime", now)
             except Exception as e:
-                print(f"⚠️ crime persist error [{ctx.author.id}]: {e}")
+                logger.warning(f"crime persist error [{ctx.author.id}]: {e}")
 
         asyncio.create_task(_persist())
 

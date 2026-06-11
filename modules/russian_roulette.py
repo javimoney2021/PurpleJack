@@ -1,4 +1,5 @@
 import asyncio
+import logging
 import random
 import time
 
@@ -8,6 +9,8 @@ from discord.ext import commands
 from core.config import COIN, rr_config
 from core.database import get_user, update_balance
 from core import cache
+
+logger = logging.getLogger(__name__)
 
 WAIT_IMAGE = "https://raw.githubusercontent.com/javimoney2021/PurpleJack/main/Thumbs/Shot.png"
 SUCCESS_IMAGE = "https://raw.githubusercontent.com/javimoney2021/PurpleJack/main/Thumbs/Salvado.png"
@@ -222,7 +225,7 @@ class RRView(discord.ui.View):
             await interaction.edit_original_response(embed=loss_embed, view=loss_view)
             rr_games.pop(self.game.user_id, None)
         except Exception as e:
-            print(f"Error en disparar: {e}")
+            logger.error(f"Error en disparar: {e}")
             try:
                 await interaction.response.send_message(f"❌ Error al procesar: {e}", ephemeral=True)
             except Exception:
@@ -257,7 +260,7 @@ class RRView(discord.ui.View):
             await interaction.response.edit_message(embed=claim_embed, view=claim_view)
             rr_games.pop(self.game.user_id, None)
         except Exception as e:
-            print(f"Error en reclamar: {e}")
+            logger.error(f"Error en reclamar: {e}")
             try:
                 await interaction.response.send_message(f"❌ Error al procesar: {e}", ephemeral=True)
             except Exception:

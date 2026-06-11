@@ -1,8 +1,11 @@
 import re
+import logging
 import discord
 import asyncio
 import aiohttp
 from io import BytesIO
+
+logger = logging.getLogger(__name__)
 from math import ceil
 from discord.ext import commands
 from discord import app_commands
@@ -17,13 +20,14 @@ from core.database import (
     save_rob_config, save_dados_config, clear_game_cooldowns
 )
 from core import cache
-from core.config import ruleta_config, rr_config, game_config, dados_config, COIN
+from core.config import (
+    ruleta_config, rr_config, game_config, dados_config, COIN,
+    STAFF_ROLE, COORDINADOR_ROLE
+)
 from modules.memo import _memo_config
 from modules.golpear import _golpear_config, spawn_cofre
 from modules.Empleos import _EMPLEOS_CACHE, get_empleo_user, save_empleo_user
 
-STAFF_ROLE = "Equipo de Eventos"
-COORDINADOR_ROLE = "Coordinador-ES"
 
 # ── ANUNCIOS (RAM only) ────────────────────────────────
 _pending_announcements = {}
@@ -800,7 +804,7 @@ class Staff(commands.Cog):
                 ephemeral=False
             )
         except Exception as e:
-            print(f"ERROR editar_item: {e}")
+            logger.error(f"ERROR editar_item: {e}")
             return await interaction.followup.send(
                 "❌ Ocurrió un error al editar el item. Intenta de nuevo más tarde.",
                 ephemeral=True
@@ -972,7 +976,7 @@ class Staff(commands.Cog):
     async def work_edit(self, interaction, minimo: int, maximo: int, cooldown: str):
         try:
             seconds = self.parse_cooldown(cooldown)
-        except:
+        except ValueError:
             return await interaction.response.send_message(
                 "❌ Formato inválido. Usa ejemplos como: 6h o 30m", ephemeral=True
             )
@@ -998,7 +1002,7 @@ class Staff(commands.Cog):
                          ganar_prob: float = None, perder_prob: float = None):
         try:
             seconds = self.parse_cooldown(cooldown)
-        except:
+        except ValueError:
             return await interaction.response.send_message(
                 "❌ Formato inválido. Usa ejemplos como: 6h o 30m", ephemeral=True
             )

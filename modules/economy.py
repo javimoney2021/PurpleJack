@@ -220,7 +220,7 @@ class Economy(commands.Cog):
                 if not member:
                     member = await ctx.guild.fetch_member(uid)
                 nombre = member.display_name
-            except:
+            except Exception:
                 nombre = "Usuario desconocido"
             posicion = medallas[i] if i < 3 else f"**#{i+1}**"
             descripcion += f"{posicion} {nombre} —— {COIN} **{balance}**\n"

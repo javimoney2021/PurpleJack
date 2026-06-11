@@ -7,10 +7,7 @@ import asyncio
 from core.database import get_user, update_balance, update_bank
 from core.config import rob_config, COIN
 from core import cache
-from core.cache import (
-    get_rob_cooldown, set_rob_cooldown,
-    get_rob_protection, set_rob_protection
-)
+from core.cache import get_rob_cooldown, set_rob_cooldown
 
 class Rob(commands.Cog):
     def __init__(self, bot):
@@ -43,15 +40,6 @@ class Rob(commands.Cog):
             remaining = int(cooldown_ts - now)
             return await ctx.send(
                 f"⏳ {ctx.author.mention} Espera **{remaining // 3600}h {(remaining % 3600) // 60}m {remaining % 60}s** para robar de nuevo."
-            )
-
-        # Verificar protección del objetivo
-        protection_ts = get_rob_protection(target_id)
-        if protection_ts > now:
-            remaining = int(protection_ts - now)
-            author_nick = ctx.author.nick or ctx.author.display_name
-            return await ctx.message.reply(
-                f"🛡️ **{author_nick}** Esta persona fue recientemente atacada por la inseguridad, ¿un poquito de caridad humana no? Protección restante: **{remaining // 60}m {remaining % 60}s**."
             )
 
         author_user = await get_user(author_id)
@@ -111,11 +99,8 @@ class Rob(commands.Cog):
                 f"🛡️ {target.mention} Alguien intentó robarte, pero falló. Recibiste **{compensation}** {COIN} en tu banco como indemnización."
             )
 
-        # Aplicar cooldown al author (1 hora)
+        # Aplicar cooldown al author
         set_rob_cooldown(author_id)
-
-        # Aplicar protección al objetivo (1 hora)
-        set_rob_protection(target_id)
 
 
 async def setup(bot):

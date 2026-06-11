@@ -1,5 +1,15 @@
 COIN = "<:PurpleCoin:1501855737842892941>"
 
+# ── ROLES ──────────────────────────────────────────────
+STAFF_ROLE = "Equipo de Eventos"
+COORDINADOR_ROLE = "Coordinador-ES"
+
+# ── CANALES E IDs ──────────────────────────────────────
+AYUDA_CHANNEL_ID = 1488006594976415786
+LOG_CHANNEL_ID = 1503681101422526494
+TARJETA_CREDITO_ROL_ID = 1505205139416551527
+
+# ── CONFIGS DE JUEGOS ──────────────────────────────────
 empleos_config = {
     "activa": True
 }

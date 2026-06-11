@@ -4,7 +4,7 @@ import random
 from discord.ext import commands
 from discord import app_commands
 from core.database import update_balance, get_user
-from core.config import COIN
+from core.config import COIN, STAFF_ROLE
 
 # ── CONFIG ─────────────────────────────────────────────
 JOIN_TIMEOUT  = 12
@@ -12,8 +12,6 @@ MAX_PLAYERS   = 5
 GIF_URL       = "https://pub-a09b3609b6b34dfab5c7aa7742cd1a8a.r2.dev/Purple%20jack%20Harcode/carrera.gif"
 GIF_DURATION  = 12    # segundos que se muestra el gif antes del resultado
 RESULT_DELETE = 15   # segundos antes de borrar el embed final
-
-STAFF_ROLE = "Equipo de Eventos"
 
 # Nombre del bot de relleno
 BOT_NAME = "Jack"
