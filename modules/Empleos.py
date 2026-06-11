@@ -77,6 +77,13 @@ EMPLEOS = {
 RACHA_BONUS_XP    = 5     # XP extra al completar racha de 5 éxitos
 RACHA_BONUS_COINS = 0.10  # 10 % del pago como bono de coins por racha
 
+# ── STAFF BYPASS ─────────────────────────────────────────
+STAFF_BYPASS_ROL  = "Coordinador-ES"   # Rol con cooldowns liberados en empleos
+
+def _es_coordinador(member: discord.Member) -> bool:
+    """True si el miembro posee el rol de bypass de cooldowns."""
+    return any(r.name == STAFF_BYPASS_ROL for r in member.roles)
+
 # ── CONFIG DESPIDOS ─────────────────────────────────────
 _despidos_config = {"activo": False}
 
@@ -447,7 +454,7 @@ class Empleos(commands.Cog):
 
         data = await get_empleo_user(ctx.author.id)
         cooldown_until = data.get("cooldown_renuncia", 0) if data else 0
-        if cooldown_until and time.time() < cooldown_until:
+        if cooldown_until and time.time() < cooldown_until and not _es_coordinador(ctx.author):
             return await ctx.send(f"⏳ Debes esperar {format_relative_time(cooldown_until)} para aplicar a un nuevo empleo.")
 
         if data and data.get("empleo_actual"):
@@ -474,7 +481,7 @@ class Empleos(commands.Cog):
             return await ctx.send("❌ No posees un empleo activo.")
         data["ultimo_empleo"] = data.get("empleo_actual")
         data["progreso_requisito"] = data.get("progreso_permanencia", 0)
-        data["cooldown_renuncia"] = time.time() + 900
+        data["cooldown_renuncia"] = 0 if _es_coordinador(ctx.author) else time.time() + 900
         data["empleo_actual"] = None
         data["dificultad"] = None
         data["fecha_contratacion"] = 0
@@ -495,6 +502,7 @@ class Empleos(commands.Cog):
         embed.add_field(name="Trabajos fallidos", value=str(data.get("trabajos_fallidos", 0)), inline=True)
         embed.add_field(name="Total generado", value=f"{data.get('total_generado', 0)} {COIN}", inline=False)
         embed.set_footer(text="Tu progreso laboral se actualiza al terminar cada jornada.")
+        embed.set_thumbnail(url="https://pub-a09b3609b6b34dfab5c7aa7742cd1a8a.r2.dev/Purple%20jack%20Harcode/exp%20thumb.png")
         await ctx.send(embed=embed)
 
     @commands.command(name="trabajar")
@@ -506,17 +514,20 @@ class Empleos(commands.Cog):
         empleo = data["empleo_actual"].lower()
         info = EMPLEOS[empleo]
         now = time.time()
-        if data.get("ultimo_trabajo", 0) and (now - data["ultimo_trabajo"]) < info["duracion_horas"] * 3600:
-            return await ctx.send("⏳ Debes esperar 3 horas para volver a trabajar.")
+        bypass = _es_coordinador(ctx.author)
 
-        # ── Despido por inactividad (solo si el sistema está activo) ──
-        if _despidos_config["activo"] and data.get("ultimo_trabajo", 0) > 0:
-            if (now - data["ultimo_trabajo"]) >= 86400:
-                await despedir_por_inactividad(ctx.author.id, data)
-                return await ctx.send(
-                    f"⚠️ {ctx.author.mention} Has sido **despedido** por inactividad "
-                    f"(más de 24h sin trabajar). Usa **!aplicar** para conseguir un nuevo empleo."
-                )
+        if not bypass:
+            if data.get("ultimo_trabajo", 0) and (now - data["ultimo_trabajo"]) < info["duracion_horas"] * 3600:
+                return await ctx.send("⏳ Debes esperar 3 horas para volver a trabajar.")
+
+            # ── Despido por inactividad (solo si el sistema está activo) ──
+            if _despidos_config["activo"] and data.get("ultimo_trabajo", 0) > 0:
+                if (now - data["ultimo_trabajo"]) >= 86400:
+                    await despedir_por_inactividad(ctx.author.id, data)
+                    return await ctx.send(
+                        f"⚠️ {ctx.author.mention} Has sido **despedido** por inactividad "
+                        f"(más de 24h sin trabajar). Usa **!aplicar** para conseguir un nuevo empleo."
+                    )
 
         if empleo == "limpiador":
             view = LimpiadorView(self.bot, ctx.author, info)
