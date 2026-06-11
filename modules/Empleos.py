@@ -458,6 +458,7 @@ class Empleos(commands.Cog):
                 ),
                 inline=False,
             )
+        embed.set_thumbnail(url="https://pub-a09b3609b6b34dfab5c7aa7742cd1a8a.r2.dev/Purple%20jack%20Harcode/Empleos%20thumb.png")
         embed.set_footer(text="Aplica con: !aplicar <empleo>")
         await ctx.send(embed=embed)
 
@@ -627,6 +628,7 @@ class LimpiadorView(ui.View):
         embed.add_field(name="Celdas abiertas", value=str(descubiertos), inline=True)
         embed.add_field(name="Símbolos de reciclaje restantes", value=str(self.basura), inline=True)
         embed.add_field(name="Pago estimado actual", value=f"{pago_actual} {COIN}", inline=False)
+        embed.set_thumbnail(url="https://pub-a09b3609b6b34dfab5c7aa7742cd1a8a.r2.dev/Purple%20jack%20Harcode/Limpia%20Thumb.webp")
         embed.set_footer(text=f"Tablero de {self.author.display_name} • Se elimina en 180 segundos")
         return embed
 
@@ -751,9 +753,15 @@ class IngenieroView(ui.View):
         return callback
 
     def build_embed(self):
+        tiempo = int(time.time() - self.start_time)
+        base = random.randint(self.info['salario_min'], self.info['salario_max'])
+        ratio = 1.0 + max(0.0, 45 - tiempo) / 45.0 * 0.35
+        pago_actual = min(int(base * ratio), self.info['salario_max'])
         embed = discord.Embed(title="🔧 Modo ingeniería", color=discord.Color.blurple())
         embed.add_field(name="Objetivo", value="Encuentra los 4 pares de símbolos para completar la revisión.", inline=False)
         embed.add_field(name="Pares encontrados", value=str(self.pares), inline=True)
+        embed.add_field(name="Pago estimado actual", value=f"{pago_actual} {COIN}", inline=True)
+        embed.set_thumbnail(url="https://pub-a09b3609b6b34dfab5c7aa7742cd1a8a.r2.dev/Purple%20jack%20Harcode/Inge%20thumb.png")
         embed.set_footer(text=f"Tablero de {self.author.display_name}")
         return embed
 
@@ -855,13 +863,16 @@ class PlomeroView(ui.View):
 
     def build_embed(self):
         embed = discord.Embed(title="🛠️ Busqueda de Impostores", color=discord.Color.orange())
+        intentos_restantes = self.max_intentos - self.intentos
+        corazones = "❤️" * intentos_restantes + "🖤" * self.intentos
         embed.add_field(
             name="Objetivo",
             value="Encuentra los 3 elementos ideales para sellar ductos. Tienes 6 oportunidades para fallar antes de fracasar.",
             inline=False,
         )
-        embed.add_field(name="Intentos fallidos", value=str(self.intentos), inline=True)
-        embed.add_field(name="Elementos encontrados", value=str(self.hallazgos), inline=True)
+        embed.add_field(name="Vidas restantes", value=corazones, inline=False)
+        embed.add_field(name="Ductos Sellados", value=str(self.hallazgos), inline=True)
+        embed.set_thumbnail(url="https://pub-a09b3609b6b34dfab5c7aa7742cd1a8a.r2.dev/Purple%20jack%20Harcode/Plomero%20Thumb.webp")
         embed.set_footer(text=f"Jornada de {self.author.display_name} En proceso")
         return embed
 
@@ -872,8 +883,7 @@ class PlomeroView(ui.View):
             ratio = 1.0 + max(0.0, 45 - tiempo) / 45.0 * 0.35
             pago = min(int(base * ratio), self.info['salario_max'])
             xp_ganada = self.info.get('xp_ganada', 0)
-            # Falla si el usuario agotó intentos O si el azar lo penaliza (prob_fallo)
-            if not exito or random.random() < self.info['prob_fallo']:
+            if not exito:
                 await update_bank(self.author.id, self.info['penalizacion'])
                 mensaje = random.choice(self.info['mensajes_fallo']).format(monto=abs(self.info['penalizacion']), COIN=COIN)
                 await registrar_resultado(self.author.id, 'plomero', False, self.info['penalizacion'], mensaje)
