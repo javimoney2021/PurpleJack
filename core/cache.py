@@ -209,8 +209,11 @@ def cleanup_cache():
         if now - last > CACHE_EXPIRE
     ]
     for uid in inactive:
+        _cache.pop(uid, None)
+        _dirty.discard(uid)
         _inventory_cache.pop(uid, None)
         _collect_cooldowns.pop(uid, None)
+        _last_activity.pop(uid, None)
 
 # ── VETERANO CONFIG (protección anti-rob por rol) ──────
 _veterano_config = {}  # {rol_id: {"monto": int, "msj": str}}
@@ -236,17 +239,25 @@ async def flush_to_db():
     if not dirty:
         return
     for user_id in dirty:
-        clear_dirty(user_id)
         data = _cache.get(user_id)
         if data:
-            async with pool.acquire() as conn:
-                await conn.execute(
-                    """UPDATE users SET balance=$1, bank=$2,
-                    cooldown_work=$3, cooldown_crime=$4 WHERE id=$5""",
-                    data["balance"], data["bank"],
-                    data["cooldown_work"], data["cooldown_crime"],
-                    user_id
+            try:
+                async with pool.acquire() as conn:
+                    await conn.execute(
+                        """UPDATE users SET balance=$1, bank=$2,
+                        cooldown_work=$3, cooldown_crime=$4 WHERE id=$5""",
+                        data["balance"], data["bank"],
+                        data["cooldown_work"], data["cooldown_crime"],
+                        user_id
+                    )
+                clear_dirty(user_id)
+            except Exception as e:
+                import logging
+                logging.getLogger("purplejack.cache").warning(
+                    f"flush_to_db error para usuario {user_id}: {e}"
                 )
+        else:
+            clear_dirty(user_id)
 
 async def flush_loop():
     while True:

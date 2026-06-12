@@ -4,7 +4,7 @@ import asyncio
 import logging
 import time
 from core.database import (
-    update_bank,
+    update_bank, get_user,
     load_collect_cooldowns_for_user, save_collect_cooldowns
 )
 from core import cache
@@ -63,8 +63,10 @@ class Collect(commands.Cog):
                     ts = int(disponible_en)
                     lineas.append(f"{nombre_rol}  →  <t:{ts}:R>")
 
-            # ── Actualizar banco en cache al instante (sin await) ──────
+            # ── Garantizar usuario en cache antes de actualizar banco ──
             if cobros and total_ganado > 0:
+                if not cache.get_cached(user_id):
+                    await get_user(user_id)
                 cache.update_cached_bank(user_id, total_ganado)
 
             # ── Construir y enviar embed de inmediato ──────────────────
