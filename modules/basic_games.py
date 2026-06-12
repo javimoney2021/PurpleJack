@@ -1,14 +1,10 @@
 from discord.ext import commands
 import random
 import time
-import asyncio
-import logging
 
-from core.database import get_user, update_bank, update_balance, update_cooldown
+from core.database import get_user
 from core.config import game_config, COIN
 from core import cache as _cache_mod
-
-logger = logging.getLogger(__name__)
 
 WORK_MESSAGES = [
     "🔧 Trabajaste duro y ganaste **{monto}** " + COIN,
@@ -49,47 +45,36 @@ class BasicGames(commands.Cog):
         now = int(time.time())
         cooldown = game_config["work"]["cooldown"]
 
-        # ── Leer cooldown desde cache si ya existe, sin hit a DB ──────
+        # Leer cooldown desde cache si ya existe, sin hit a DB
         cached = _cache_mod.get_cached(ctx.author.id)
         if cached:
             last = cached.get("cooldown_work", 0)
         else:
-            # Primera vez del usuario: carga de DB inevitable
+            # Primera vez: get_user crea la fila en DB y popula el cache
             user = await get_user(ctx.author.id)
             last = user.get("cooldown_work", 0)
 
         if now - last < cooldown:
             remaining = cooldown - (now - last)
             nick = ctx.author.nick or ctx.author.display_name
-            return await ctx.message.reply(f"**{nick}** ⏳  Podrás volver a usar **!work** <t:{int(now + remaining)}:R>.")
+            return await ctx.message.reply(
+                f"**{nick}** ⏳ Podrás volver a trabajar <t:{int(now + remaining)}:R>."
+            )
 
         amount = random.randint(game_config["work"]["min"], game_config["work"]["max"])
         msg = random.choice(WORK_MESSAGES).format(monto=amount)
 
-        # ── Actualizar cache en memoria al instante (sin await) ───────
+        # Actualizar RAM al instante — flush_loop persiste a DB cada 10 min
         _cache_mod.update_cached_cooldown(ctx.author.id, "work", now)
         _cache_mod.update_cached_balance(ctx.author.id, amount)
 
-        # ── Responder de inmediato ─────────────────────────────────────
         await ctx.message.reply(f"{ctx.author.mention} {msg}")
-
-        # ── Persistir a DB en background sin bloquear el reply ────────
-        async def _persist():
-            try:
-                await get_user(ctx.author.id)          # garantiza fila en DB
-                await update_balance(ctx.author.id, 0)  # flush con datos ya actualizados
-                await update_cooldown(ctx.author.id, "work", now)
-            except Exception as e:
-                logger.warning(f"work persist error [{ctx.author.id}]: {e}")
-
-        asyncio.create_task(_persist())
 
     @commands.command()
     async def crime(self, ctx):
         now = int(time.time())
         cooldown = game_config["crime"]["cooldown"]
 
-        # ── Leer cooldown desde cache si ya existe, sin hit a DB ──────
         cached = _cache_mod.get_cached(ctx.author.id)
         if cached:
             last = cached.get("cooldown_crime", 0)
@@ -102,7 +87,7 @@ class BasicGames(commands.Cog):
             nick = ctx.author.nick or ctx.author.display_name
             return await ctx.message.reply(
                 f"**{nick}** ⏳ Podrás volver a cometer un crimen <t:{int(now + remaining)}:R>.",
-                delete_after=30
+                delete_after=30,
             )
 
         amount = random.randint(game_config["crime"]["min"], game_config["crime"]["max"])
@@ -117,22 +102,8 @@ class BasicGames(commands.Cog):
 
         _cache_mod.update_cached_cooldown(ctx.author.id, "crime", now)
 
-        # ── Responder de inmediato ─────────────────────────────────────
+        # Actualizar RAM al instante — flush_loop persiste a DB cada 10 min
         await ctx.message.reply(f"{ctx.author.mention} {msg}")
-
-        # ── Persistir a DB en background sin bloquear el reply ────────
-        async def _persist():
-            try:
-                await get_user(ctx.author.id)
-                if success:
-                    await update_balance(ctx.author.id, 0)
-                else:
-                    await update_bank(ctx.author.id, 0)
-                await update_cooldown(ctx.author.id, "crime", now)
-            except Exception as e:
-                logger.warning(f"crime persist error [{ctx.author.id}]: {e}")
-
-        asyncio.create_task(_persist())
 
 
 async def setup(bot):

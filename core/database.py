@@ -89,7 +89,7 @@ async def init_db():
             PRIMARY KEY (user_id, rol_id)
         )
         """)
-        
+
         await conn.execute("""
         CREATE TABLE IF NOT EXISTS game_cooldowns (
             user_id BIGINT,
@@ -133,25 +133,21 @@ async def get_user(user_id):
             data = {"balance": 0, "bank": 0, "cooldown_work": 0, "cooldown_crime": 0}
         else:
             data = {
-                "balance": user["balance"],
-                "bank": user["bank"],
-                "cooldown_work": user["cooldown_work"],
-                "cooldown_crime": user["cooldown_crime"]
+                "balance":        user["balance"],
+                "bank":           user["bank"],
+                "cooldown_work":  user["cooldown_work"],
+                "cooldown_crime": user["cooldown_crime"],
             }
         cache.set_cache(user_id, data)
         return data
 
-async def update_balance(user_id, amount):
-    await get_user(user_id)
-    cache.update_cached_balance(user_id, amount)
-    await _flush_user(user_id)
 
-async def update_bank(user_id, amount):
-    await get_user(user_id)
-    cache.update_cached_bank(user_id, amount)
-    await _flush_user(user_id)
-
-async def _flush_user(user_id):
+async def flush_user_to_db(user_id):
+    """
+    Persiste un usuario específico a DB de forma inmediata.
+    Se usa para operaciones críticas (collect, shop, rob).
+    El dirty-flag se limpia solo tras write exitoso.
+    """
     data = cache.get_cached(user_id)
     if not data:
         return
@@ -162,11 +158,49 @@ async def _flush_user(user_id):
                 cooldown_work=$3, cooldown_crime=$4 WHERE id=$5""",
                 data["balance"], data["bank"],
                 data["cooldown_work"], data["cooldown_crime"],
-                user_id
+                user_id,
             )
         cache.clear_dirty(user_id)
     except Exception as e:
-        logger.warning(f"Error en flush inmediato para {user_id}: {e}")
+        logger.warning(f"flush_user_to_db error para {user_id}: {e}")
+
+
+# ── ESCRITURAS INMEDIATAS (shop, collect, rob, duels) ──
+
+async def update_balance(user_id, amount):
+    """Actualiza balance en RAM y persiste a DB de inmediato."""
+    await get_user(user_id)
+    cache.update_cached_balance(user_id, amount)
+    await flush_user_to_db(user_id)
+
+
+async def update_bank(user_id, amount):
+    """Actualiza banco en RAM y persiste a DB de inmediato."""
+    await get_user(user_id)
+    cache.update_cached_bank(user_id, amount)
+    await flush_user_to_db(user_id)
+
+
+# ── ESCRITURAS EN RAM (mini-juegos: ruleta, rr, dados) ─
+
+async def cache_balance(user_id, amount):
+    """
+    Actualiza balance solo en RAM.
+    La persistencia ocurre en el flush_loop (cada 10 min).
+    Usar en mini-juegos donde no hay transferencia entre usuarios.
+    """
+    await get_user(user_id)  # garantiza fila en DB y usuario en caché
+    cache.update_cached_balance(user_id, amount)
+
+
+async def cache_bank(user_id, amount):
+    """
+    Actualiza banco solo en RAM.
+    La persistencia ocurre en el flush_loop (cada 10 min).
+    """
+    await get_user(user_id)
+    cache.update_cached_bank(user_id, amount)
+
 
 async def update_cooldown(user_id, command, timestamp):
     await get_user(user_id)
@@ -311,7 +345,6 @@ async def remove_from_inventory(user_id, item_nombre):
 
 
 async def get_usos_diarios(user_id: int, item_id: int) -> int:
-    """Devuelve cuántas veces usó el usuario ese item hoy (UTC)."""
     from datetime import date
     today = date.today()
     async with pool.acquire() as conn:
@@ -323,7 +356,6 @@ async def get_usos_diarios(user_id: int, item_id: int) -> int:
 
 
 async def registrar_uso_diario(user_id: int, item_id: int) -> int:
-    """Incrementa el contador diario de uso y devuelve el nuevo total."""
     from datetime import date
     today = date.today()
     async with pool.acquire() as conn:
@@ -376,9 +408,9 @@ async def load_cargos_to_cache():
         if uid not in data:
             data[uid] = []
         data[uid].append({
-            "rol_id": r["rol_id"],
-            "guild_id": r["guild_id"],
-            "expira_en": r["expira_en"]
+            "rol_id":    r["rol_id"],
+            "guild_id":  r["guild_id"],
+            "expira_en": r["expira_en"],
         })
     cache.set_cargos_cache(data)
 
@@ -432,7 +464,6 @@ async def load_collect_cooldowns_for_user(user_id):
     return data
 
 async def save_collect_cooldowns(user_id, cobros: dict):
-    # ── executemany: un solo roundtrip para todos los roles ───────
     rows = [(user_id, rol_id, ultima_vez) for rol_id, ultima_vez in cobros.items()]
     async with pool.acquire() as conn:
         await conn.executemany("""
@@ -440,8 +471,8 @@ async def save_collect_cooldowns(user_id, cobros: dict):
             VALUES ($1, $2, $3)
             ON CONFLICT (user_id, rol_id) DO UPDATE SET ultima_vez=$3
         """, rows)
-            
-            
+
+
 # ── GAME CONFIG ────────────────────────────────────────
 
 async def create_game_config_table():
@@ -476,7 +507,7 @@ async def create_game_config_table():
             game_config["crime"]["max"],
             game_config["crime"]["cooldown"],
             game_config["crime"]["ganar_prob"],
-            game_config["crime"]["perder_prob"]
+            game_config["crime"]["perder_prob"],
         )
 
         await conn.execute("""
@@ -500,7 +531,7 @@ async def create_game_config_table():
             rr_config["cooldown"],
             rr_config["ganar_prob"],
             rr_config["perder_prob"],
-            rr_config["activa"]
+            rr_config["activa"],
         )
 
         await conn.execute("""
@@ -520,7 +551,7 @@ async def create_game_config_table():
             """,
             ruleta_config["max_apuesta"],
             ruleta_config["cooldown"],
-            ruleta_config["activa"]
+            ruleta_config["activa"],
         )
 
         await conn.execute("""
@@ -541,7 +572,7 @@ async def create_game_config_table():
             rob_config["activa"],
             rob_config["cooldown"],
             rob_config["exito_prob"],
-            rob_config["fallo_prob"]
+            rob_config["fallo_prob"],
         )
 
         await conn.execute("""
@@ -565,7 +596,7 @@ async def create_game_config_table():
             dados_config["cooldown"],
             dados_config["exito_prob"],
             dados_config["fallo_prob"],
-            dados_config["activa"]
+            dados_config["activa"],
         )
 
         await conn.execute("""
@@ -581,43 +612,43 @@ async def load_game_config():
         row = await conn.fetchrow("SELECT * FROM game_config LIMIT 1")
         if not row:
             return
-        game_config["work"]["min"]      = row["work_min"]
-        game_config["work"]["max"]      = row["work_max"]
-        game_config["work"]["cooldown"] = row["work_cooldown"]
-        game_config["crime"]["min"]        = row["crime_min"]
-        game_config["crime"]["max"]        = row["crime_max"]
-        game_config["crime"]["cooldown"]   = row["crime_cooldown"]
-        game_config["crime"]["ganar_prob"] = row["crime_ganar_prob"]
-        game_config["crime"]["perder_prob"]= row["crime_perder_prob"]
+        game_config["work"]["min"]          = row["work_min"]
+        game_config["work"]["max"]          = row["work_max"]
+        game_config["work"]["cooldown"]     = row["work_cooldown"]
+        game_config["crime"]["min"]         = row["crime_min"]
+        game_config["crime"]["max"]         = row["crime_max"]
+        game_config["crime"]["cooldown"]    = row["crime_cooldown"]
+        game_config["crime"]["ganar_prob"]  = row["crime_ganar_prob"]
+        game_config["crime"]["perder_prob"] = row["crime_perder_prob"]
 
         rr_row = await conn.fetchrow("SELECT * FROM rr_config LIMIT 1")
         if rr_row:
             rr_config["max_apuesta"] = rr_row["max_apuesta"]
-            rr_config["cooldown"] = rr_row["cooldown"]
-            rr_config["ganar_prob"] = rr_row["ganar_prob"]
+            rr_config["cooldown"]    = rr_row["cooldown"]
+            rr_config["ganar_prob"]  = rr_row["ganar_prob"]
             rr_config["perder_prob"] = rr_row["perder_prob"]
-            rr_config["activa"] = rr_row["activa"]
+            rr_config["activa"]      = rr_row["activa"]
 
         ruleta_row = await conn.fetchrow("SELECT * FROM ruleta_config LIMIT 1")
         if ruleta_row:
             ruleta_config["max_apuesta"] = ruleta_row["max_apuesta"]
-            ruleta_config["cooldown"] = ruleta_row["cooldown"]
-            ruleta_config["activa"] = ruleta_row["activa"]
+            ruleta_config["cooldown"]    = ruleta_row["cooldown"]
+            ruleta_config["activa"]      = ruleta_row["activa"]
 
         rob_row = await conn.fetchrow("SELECT * FROM rob_config_db LIMIT 1")
         if rob_row:
-            rob_config["activa"] = rob_row["activa"]
-            rob_config["cooldown"] = rob_row["cooldown"]
-            rob_config["exito_prob"] = rob_row["exito_prob"]
-            rob_config["fallo_prob"] = rob_row["fallo_prob"]
+            rob_config["activa"]      = rob_row["activa"]
+            rob_config["cooldown"]    = rob_row["cooldown"]
+            rob_config["exito_prob"]  = rob_row["exito_prob"]
+            rob_config["fallo_prob"]  = rob_row["fallo_prob"]
 
         dados_row = await conn.fetchrow("SELECT * FROM dados_config LIMIT 1")
         if dados_row:
             dados_config["max_apuesta"] = dados_row["max_apuesta"]
-            dados_config["cooldown"] = dados_row["cooldown"]
-            dados_config["exito_prob"] = dados_row["exito_prob"]
-            dados_config["fallo_prob"] = dados_row["fallo_prob"]
-            dados_config["activa"] = dados_row["activa"]
+            dados_config["cooldown"]    = dados_row["cooldown"]
+            dados_config["exito_prob"]  = dados_row["exito_prob"]
+            dados_config["fallo_prob"]  = dados_row["fallo_prob"]
+            dados_config["activa"]      = dados_row["activa"]
 
 async def save_game_config():
     from core.config import game_config
@@ -635,7 +666,7 @@ async def save_game_config():
         game_config["crime"]["max"],
         game_config["crime"]["cooldown"],
         game_config["crime"]["ganar_prob"],
-        game_config["crime"]["perder_prob"]
+        game_config["crime"]["perder_prob"],
         )
 
 async def save_rr_config():
@@ -650,7 +681,7 @@ async def save_rr_config():
         rr_config["cooldown"],
         rr_config["ganar_prob"],
         rr_config["perder_prob"],
-        rr_config["activa"]
+        rr_config["activa"],
         )
 
 async def save_ruleta_config():
@@ -662,7 +693,7 @@ async def save_ruleta_config():
         """,
         ruleta_config["max_apuesta"],
         ruleta_config["cooldown"],
-        ruleta_config["activa"]
+        ruleta_config["activa"],
         )
 
 async def save_rob_config():
@@ -674,7 +705,7 @@ async def save_rob_config():
         rob_config["activa"],
         rob_config["cooldown"],
         rob_config["exito_prob"],
-        rob_config["fallo_prob"]
+        rob_config["fallo_prob"],
         )
 
 async def save_dados_config():
@@ -689,7 +720,7 @@ async def save_dados_config():
         dados_config["cooldown"],
         dados_config["exito_prob"],
         dados_config["fallo_prob"],
-        dados_config["activa"]
+        dados_config["activa"],
         )
 
 async def load_dados_config():
@@ -699,10 +730,10 @@ async def load_dados_config():
         if not row:
             return
         dados_config["max_apuesta"] = row["max_apuesta"]
-        dados_config["cooldown"] = row["cooldown"]
-        dados_config["exito_prob"] = row["exito_prob"]
-        dados_config["fallo_prob"] = row["fallo_prob"]
-        dados_config["activa"] = row["activa"]
+        dados_config["cooldown"]    = row["cooldown"]
+        dados_config["exito_prob"]  = row["exito_prob"]
+        dados_config["fallo_prob"]  = row["fallo_prob"]
+        dados_config["activa"]      = row["activa"]
 
 async def get_nave_contenido():
     async with pool.acquire() as conn:
@@ -732,7 +763,7 @@ async def set_game_cooldown(user_id, game, expira_en):
             VALUES ($1, $2, $3)
             ON CONFLICT (user_id, game) DO UPDATE SET expira_en=$3
         """, user_id, game, expira_en)
-        
+
 async def clear_game_cooldowns(game):
     async with pool.acquire() as conn:
         await conn.execute(

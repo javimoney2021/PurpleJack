@@ -1,13 +1,16 @@
 import asyncio
+import logging
 import time
+
+logger = logging.getLogger("purplejack.cache")
 
 # ── USUARIOS ───────────────────────────────────────────
 _cache = {}
 _dirty = set()
 _last_activity = {}
 
-FLUSH_INTERVAL = 300
-CACHE_EXPIRE = 7200
+FLUSH_INTERVAL = 600   # 10 minutos — mini-juegos se persistirán en este ciclo
+CACHE_EXPIRE   = 7200  # 2 horas de inactividad
 
 
 def touch_user(user_id):
@@ -19,10 +22,10 @@ def get_cached(user_id):
 
 def set_cache(user_id, data):
     _cache[user_id] = {
-        "balance": data.get("balance", 0),
-        "bank": data.get("bank", 0),
-        "cooldown_work": data.get("cooldown_work", 0),
-        "cooldown_crime": data.get("cooldown_crime", 0)
+        "balance":        data.get("balance", 0),
+        "bank":           data.get("bank", 0),
+        "cooldown_work":  data.get("cooldown_work", 0),
+        "cooldown_crime": data.get("cooldown_crime", 0),
     }
     touch_user(user_id)
 
@@ -67,7 +70,7 @@ def set_rob_cooldown(user_id):
 def clear_rob_cooldowns_cache():
     _rob_cooldowns.clear()
 
-# ── GAME COOLDOWNS (ruleta / rr) ───────────────────────
+# ── GAME COOLDOWNS (ruleta / rr / dados) ───────────────
 _game_cooldowns = {}  # {(user_id, game): expira_en}
 
 def get_game_cooldown_cache(user_id, game):
@@ -142,9 +145,9 @@ def add_cargo_cache(user_id, guild_id, rol_id, expira_en):
     if user_id not in _cargos_cache:
         _cargos_cache[user_id] = []
     _cargos_cache[user_id].append({
-        "rol_id": rol_id,
-        "guild_id": guild_id,
-        "expira_en": expira_en
+        "rol_id":    rol_id,
+        "guild_id":  guild_id,
+        "expira_en": expira_en,
     })
 
 def remove_cargo_cache(user_id, rol_id):
@@ -167,10 +170,7 @@ def set_collect_config(data: dict):
     _collect_config = data
 
 def upsert_collect_config(rol_id, cantidad, cooldown_horas):
-    _collect_config[rol_id] = {
-        "cantidad": cantidad,
-        "cooldown_horas": cooldown_horas
-    }
+    _collect_config[rol_id] = {"cantidad": cantidad, "cooldown_horas": cooldown_horas}
 
 def delete_collect_config(rol_id):
     _collect_config.pop(rol_id, None)
@@ -209,13 +209,10 @@ def cleanup_cache():
         if now - last > CACHE_EXPIRE
     ]
     for uid in inactive:
-        _cache.pop(uid, None)
-        _dirty.discard(uid)
         _inventory_cache.pop(uid, None)
         _collect_cooldowns.pop(uid, None)
-        _last_activity.pop(uid, None)
 
-# ── VETERANO CONFIG (protección anti-rob por rol) ──────
+# ── VETERANO CONFIG ────────────────────────────────────
 _veterano_config = {}  # {rol_id: {"monto": int, "msj": str}}
 
 def get_veterano_config() -> dict:
@@ -234,30 +231,39 @@ def delete_veterano_config(rol_id: int):
 
 # ── FLUSH USUARIOS A DB ────────────────────────────────
 async def flush_to_db():
+    """
+    Persiste todos los usuarios marcados como dirty a PostgreSQL.
+    El dirty-flag se limpia SOLO después de un write exitoso,
+    garantizando que los datos no se pierdan ante un fallo de conexión.
+    """
     from core.database import pool
     dirty = get_dirty_users()
     if not dirty:
         return
+
+    flushed = 0
     for user_id in dirty:
         data = _cache.get(user_id)
-        if data:
-            try:
-                async with pool.acquire() as conn:
-                    await conn.execute(
-                        """UPDATE users SET balance=$1, bank=$2,
-                        cooldown_work=$3, cooldown_crime=$4 WHERE id=$5""",
-                        data["balance"], data["bank"],
-                        data["cooldown_work"], data["cooldown_crime"],
-                        user_id
-                    )
-                clear_dirty(user_id)
-            except Exception as e:
-                import logging
-                logging.getLogger("purplejack.cache").warning(
-                    f"flush_to_db error para usuario {user_id}: {e}"
+        if not data:
+            clear_dirty(user_id)   # sin datos en caché → nada que persistir
+            continue
+        try:
+            async with pool.acquire() as conn:
+                await conn.execute(
+                    """UPDATE users SET balance=$1, bank=$2,
+                    cooldown_work=$3, cooldown_crime=$4 WHERE id=$5""",
+                    data["balance"], data["bank"],
+                    data["cooldown_work"], data["cooldown_crime"],
+                    user_id,
                 )
-        else:
-            clear_dirty(user_id)
+            clear_dirty(user_id)   # ✅ solo se limpia tras write exitoso
+            flushed += 1
+        except Exception as e:
+            logger.warning(f"flush_to_db error para {user_id}: {e} — reintentará en próximo ciclo")
+
+    if flushed:
+        logger.debug(f"flush_to_db: {flushed} usuario(s) persistidos")
+
 
 async def flush_loop():
     while True:

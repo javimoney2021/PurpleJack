@@ -4,8 +4,10 @@ import asyncio
 import logging
 import time
 from core.database import (
-    update_bank, get_user,
-    load_collect_cooldowns_for_user, save_collect_cooldowns
+    get_user,
+    flush_user_to_db,
+    load_collect_cooldowns_for_user,
+    save_collect_cooldowns,
 )
 from core import cache
 from core.config import COIN
@@ -35,10 +37,11 @@ class Collect(commands.Cog):
 
             if not roles_aplicables:
                 return await ctx.send(
-                    f"❌ {ctx.author.mention} No tienes ningún Rol con collect disponible. Adquiérelos en la **!tienda**"
+                    f"❌ {ctx.author.mention} No tienes ningún Rol con collect disponible. "
+                    f"Adquiérelos en la **!tienda**"
                 )
 
-            # ── Leer cooldowns desde cache (sin await si ya están) ─────
+            # Leer cooldowns desde cache (sin await si ya están cargados)
             cooldowns = cache.get_collect_cooldowns(user_id)
             if cooldowns is None:
                 cooldowns = await load_collect_cooldowns_for_user(user_id)
@@ -63,39 +66,42 @@ class Collect(commands.Cog):
                     ts = int(disponible_en)
                     lineas.append(f"{nombre_rol}  →  <t:{ts}:R>")
 
-            # ── Garantizar usuario en cache antes de actualizar banco ──
+            # ── Garantizar usuario en cache ANTES de actualizar el banco ──
+            # Esto evita la pérdida silenciosa de datos si el usuario no
+            # estaba en cache (inactividad >2h o primer uso del día).
             if cobros and total_ganado > 0:
-                if not cache.get_cached(user_id):
-                    await get_user(user_id)
+                await get_user(user_id)
                 cache.update_cached_bank(user_id, total_ganado)
 
-            # ── Construir y enviar embed de inmediato ──────────────────
+            # Construir y enviar embed de inmediato
             nick = ctx.author.nick or ctx.author.display_name
             embed = discord.Embed(
                 title=f"💷 Mis Collects - {nick} 💷",
                 description="\n".join(lineas),
-                color=discord.Color.purple()
+                color=discord.Color.purple(),
             )
             if total_ganado > 0:
                 embed.add_field(
                     name="Total cobrado",
                     value=f"{COIN} **{total_ganado}** Enviados a tu banco.",
-                    inline=False
+                    inline=False,
                 )
             embed.set_footer(text="💷 Tus collects se enviarán al banco.")
 
             await ctx.message.reply(embed=embed)
 
-            # ── Persistir a DB en background (no bloquea el reply) ─────
-            if cobros:
-                async def _persist():
+            # ── Persistir a DB INMEDIATAMENTE tras la respuesta ───────────
+            # collect es una operación crítica: el banco debe quedar
+            # registrado en DB de inmediato, no esperar el flush de 10 min.
+            if cobros and total_ganado > 0:
+                async def _persist_collect():
                     try:
-                        await update_bank(user_id, 0)          # flush con dato ya en cache
+                        await flush_user_to_db(user_id)
                         await save_collect_cooldowns(user_id, cobros)
                     except Exception as e:
                         logger.warning(f"collect persist error [{user_id}]: {e}")
 
-                asyncio.create_task(_persist())
+                asyncio.create_task(_persist_collect())
 
         except Exception as e:
             logger.error(f"ERROR !collect: {e}")

@@ -3,20 +3,13 @@ import random
 import time
 import asyncio
 from discord.ext import commands
-from core.database import get_user, update_balance, get_game_cooldown, set_game_cooldown
+from core.database import get_user, get_game_cooldown, set_game_cooldown
 from core.config import COIN, dados_config
 from core import cache
 
 DICE_GIF = "https://pub-a09b3609b6b34dfab5c7aa7742cd1a8a.r2.dev/Purple%20jack%20Harcode/dice.gif"
 _ACTIVE_DADOS: set[int] = set()
-DICE_FACES = {
-    1: "1️⃣",
-    2: "2️⃣",
-    3: "3️⃣",
-    4: "4️⃣",
-    5: "5️⃣",
-    6: "6️⃣"
-}
+DICE_FACES = {1: "1️⃣", 2: "2️⃣", 3: "3️⃣", 4: "4️⃣", 5: "5️⃣", 6: "6️⃣"}
 
 
 def format_roll(value):
@@ -24,37 +17,41 @@ def format_roll(value):
 
 
 def format_cooldown(seconds):
-    """Convierte segundos a formato legible (45m, 2h, etc)"""
     if seconds < 60:
         return f"{seconds}s"
     elif seconds < 3600:
-        minutes = seconds // 60
-        return f"{minutes}m"
+        return f"{seconds // 60}m"
     else:
-        hours = seconds // 3600
-        return f"{hours}h"
+        return f"{seconds // 3600}h"
 
 
 def choose_dice_rolls(success: bool):
-    while True:
-        autor_dado_1 = random.randint(1, 6)
-        autor_dado_2 = random.randint(1, 6)
-        bot_dado_1 = random.randint(1, 6)
-        bot_dado_2 = random.randint(1, 6)
-        autor_suma = autor_dado_1 + autor_dado_2
-        bot_suma = bot_dado_1 + bot_dado_2
-        if success and autor_suma > bot_suma:
-            return autor_dado_1, autor_dado_2, bot_dado_1, bot_dado_2
-        if not success and autor_suma < bot_suma:
-            return autor_dado_1, autor_dado_2, bot_dado_1, bot_dado_2
+    """
+    Genera dos pares de dados garantizando un resultado decisivo (sin empate).
+
+    Reintenta hasta 50 veces con dados aleatorios; si se agota el límite
+    (probabilidad ~10^-17, prácticamente imposible) usa un resultado fijo.
+    La probabilidad de éxito/fallo viene configurada en dados_config y se
+    aplica ANTES de llamar a esta función: aquí solo aseguramos la
+    representación visual coherente con ese resultado.
+    """
+    for _ in range(50):
+        d1, d2 = random.randint(1, 6), random.randint(1, 6)
+        b1, b2 = random.randint(1, 6), random.randint(1, 6)
+        if success and d1 + d2 > b1 + b2:
+            return d1, d2, b1, b2
+        if not success and d1 + d2 < b1 + b2:
+            return d1, d2, b1, b2
+    # Fallback determinista — inalcanzable en la práctica
+    return (6, 5, 3, 2) if success else (2, 1, 5, 6)
 
 
 class DadosRollView(discord.ui.View):
     def __init__(self, author_id: int, monto: int):
         super().__init__(timeout=60)
         self.author_id = author_id
-        self.monto = monto
-        self.message = None
+        self.monto     = monto
+        self.message   = None
 
     async def on_timeout(self):
         _ACTIVE_DADOS.discard(self.author_id)
@@ -86,7 +83,7 @@ class DadosRollView(discord.ui.View):
         suspense_embed = discord.Embed(
             title=f"🎲 Lanzando los dados... — {interaction.user.display_name}",
             description="Un momento... el destino está en el aire.",
-            color=discord.Color.dark_purple()
+            color=discord.Color.dark_purple(),
         )
         suspense_embed.set_thumbnail(url=DICE_GIF)
         try:
@@ -96,18 +93,26 @@ class DadosRollView(discord.ui.View):
 
         await asyncio.sleep(4)
 
+        # Determinar resultado según probabilidad configurada
         exito = random.random() <= dados_config["exito_prob"]
-        autor_dado_1, autor_dado_2, bot_dado_1, bot_dado_2 = choose_dice_rolls(exito)
-        autor_suma = autor_dado_1 + autor_dado_2
-        bot_suma = bot_dado_1 + bot_dado_2
+
+        # choose_dice_rolls garantiza que no hay empate: el visual siempre
+        # coincide con el resultado decidido por la probabilidad
+        d1, d2, b1, b2 = choose_dice_rolls(exito)
+        autor_suma = d1 + d2
+        bot_suma   = b1 + b2
+
+        # Mini-juego: actualizar solo en RAM — flush_loop persiste a DB cada 10 min
+        # get_user asegura que el usuario está en cache (seguridad extra)
+        await get_user(self.author_id)
 
         if exito:
             ganancia = self.monto * 2
-            await update_balance(self.author_id, ganancia)
+            cache.update_cached_balance(self.author_id, ganancia)
             resultado_text = f"🎉 ¡Ganaste! Tu apuesta se duplica: +{ganancia} {COIN}."
             color = discord.Color.green()
         else:
-            await update_balance(self.author_id, -self.monto)
+            cache.update_cached_balance(self.author_id, -self.monto)
             resultado_text = f"💀 Perdiste tu apuesta inicial de {self.monto} {COIN}."
             color = discord.Color.red()
 
@@ -120,14 +125,17 @@ class DadosRollView(discord.ui.View):
         embed = discord.Embed(
             title=f"🎲 Resultado de Dados — {interaction.user.display_name}",
             description=(
-                f"**Tus dados:** {format_roll(autor_dado_1)} + {format_roll(autor_dado_2)} = **{autor_suma}**\n"
-                f"**Dados del bot:** {format_roll(bot_dado_1)} + {format_roll(bot_dado_2)} = **{bot_suma}**\n\n"
+                f"**Tus dados:** {format_roll(d1)} + {format_roll(d2)} = **{autor_suma}**\n"
+                f"**Dados del bot:** {format_roll(b1)} + {format_roll(b2)} = **{bot_suma}**\n\n"
                 f"{resultado_text}"
             ),
-            color=color
+            color=color,
         )
         embed.set_thumbnail(url=DICE_GIF)
-        embed.set_footer(text=f"Cooldown: {format_cooldown(dados_config['cooldown'])} | Máx apuesta: {dados_config['max_apuesta']} PurpleCoins")
+        embed.set_footer(
+            text=f"Cooldown: {format_cooldown(dados_config['cooldown'])} | "
+                 f"Máx apuesta: {dados_config['max_apuesta']} PurpleCoins"
+        )
 
         for child in self.children:
             child.disabled = True
@@ -147,9 +155,7 @@ class Dados(commands.Cog):
     @commands.command(name="dados")
     async def dados(self, ctx, monto: int = None):
         if monto is None:
-            return await ctx.send(
-                f"❌ {ctx.author.mention} Usa: `!dados {{monto}}`."
-            )
+            return await ctx.send(f"❌ {ctx.author.mention} Usa: `!dados {{monto}}`.")
 
         if not dados_config["activa"]:
             return await ctx.send(
@@ -163,18 +169,22 @@ class Dados(commands.Cog):
 
         if monto > dados_config["max_apuesta"]:
             return await ctx.send(
-                f"❌ {ctx.author.mention} No puedes apostar más de **{dados_config['max_apuesta']}** {COIN}."
+                f"❌ {ctx.author.mention} No puedes apostar más de "
+                f"**{dados_config['max_apuesta']}** {COIN}."
             )
 
         if ctx.author.id in _ACTIVE_DADOS:
             return await ctx.send(
-                f"❌ {ctx.author.mention} Ya tienes un juego de Dados en curso. Termina la apuesta actual antes de iniciar otra."
+                f"❌ {ctx.author.mention} Ya tienes un juego de Dados en curso. "
+                f"Termina la apuesta actual antes de iniciar otra."
             )
 
+        # get_user garantiza usuario en cache para la actualización del botón
         user = await get_user(ctx.author.id)
         if monto > user["balance"]:
             return await ctx.send(
-                f"❌ {ctx.author.mention} No tienes suficiente balance para apostar {monto} {COIN}."
+                f"❌ {ctx.author.mention} No tienes suficiente balance "
+                f"para apostar {monto} {COIN}."
             )
 
         now = time.time()
@@ -186,10 +196,11 @@ class Dados(commands.Cog):
 
         if expira_en > now:
             remaining = int(expira_en - now)
-            minutos = remaining // 60
+            minutos  = remaining // 60
             segundos = remaining % 60
             return await ctx.send(
-                f"⏳ {ctx.author.mention} Espera **{minutos}m {segundos}s** antes de volver a apostar."
+                f"⏳ {ctx.author.mention} Espera **{minutos}m {segundos}s** "
+                f"antes de volver a apostar."
             )
 
         embed = discord.Embed(
@@ -197,18 +208,19 @@ class Dados(commands.Cog):
             description=(
                 f"{ctx.author.mention} ha apostado **{monto}** {COIN}.\n\n"
                 f"Haz clic en el botón para lanzar tus dados y enfrentarte al bot.\n"
-                f"Chance de éxito: **{int(dados_config['exito_prob']*100)}%**."
+                f"Chance de éxito: **{int(dados_config['exito_prob'] * 100)}%**."
             ),
-            color=discord.Color.blurple()
+            color=discord.Color.blurple(),
         )
         embed.set_thumbnail(url=DICE_GIF)
         embed.set_footer(
-            text=f"Cooldown: {format_cooldown(dados_config['cooldown'])} | Máx apuesta: {dados_config['max_apuesta']} PurpleCoins"
+            text=f"Cooldown: {format_cooldown(dados_config['cooldown'])} | "
+                 f"Máx apuesta: {dados_config['max_apuesta']} PurpleCoins"
         )
 
         _ACTIVE_DADOS.add(ctx.author.id)
 
-        view = DadosRollView(ctx.author.id, monto)
+        view    = DadosRollView(ctx.author.id, monto)
         message = await ctx.reply(embed=embed, view=view, mention_author=False)
         view.message = message
 
