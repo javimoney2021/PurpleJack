@@ -1,0 +1,453 @@
+
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Privacy Policy — PurpleJack Bot</title>
+  <style>
+    :root {
+      --bg:        #0f0f13;
+      --surface:   #17171e;
+      --border:    #2a2a38;
+      --accent:    #9b59b6;
+      --accent-2:  #7d3cae;
+      --text:      #e2e2ec;
+      --muted:     #8888a8;
+      --green:     #2ecc71;
+      --red:       #e74c3c;
+      --radius:    12px;
+    }
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      background: var(--bg);
+      color: var(--text);
+      font-family: 'Segoe UI', system-ui, -apple-system, sans-serif;
+      font-size: 16px;
+      line-height: 1.7;
+      min-height: 100vh;
+    }
+
+    /* ── HEADER ── */
+    header {
+      background: linear-gradient(135deg, #0a1a2e 0%, #12406a 50%, #0a1a2e 100%);
+      border-bottom: 1px solid var(--border);
+      padding: 48px 24px 40px;
+      text-align: center;
+    }
+    header .logo {
+      display: inline-flex;
+      align-items: center;
+      gap: 12px;
+      margin-bottom: 16px;
+    }
+    header .logo svg {
+      width: 40px; height: 40px;
+    }
+    header h1 {
+      font-size: clamp(1.6rem, 4vw, 2.4rem);
+      font-weight: 700;
+      background: linear-gradient(90deg, #6dd5fa, #2980b9);
+      -webkit-background-clip: text;
+      -webkit-text-fill-color: transparent;
+      background-clip: text;
+      letter-spacing: -0.5px;
+    }
+    header .subtitle {
+      color: var(--muted);
+      margin-top: 6px;
+      font-size: 0.95rem;
+    }
+    .badge {
+      display: inline-block;
+      background: rgba(41,128,185,0.18);
+      border: 1px solid rgba(41,128,185,0.35);
+      color: #6dd5fa;
+      border-radius: 999px;
+      font-size: 0.78rem;
+      padding: 4px 14px;
+      margin-top: 12px;
+      letter-spacing: 0.5px;
+    }
+
+    /* ── LAYOUT ── */
+    main {
+      max-width: 820px;
+      margin: 0 auto;
+      padding: 48px 24px 80px;
+    }
+    .notice {
+      background: rgba(41,128,185,0.1);
+      border-left: 4px solid #2980b9;
+      border-radius: 0 var(--radius) var(--radius) 0;
+      padding: 16px 20px;
+      margin-bottom: 40px;
+      font-size: 0.92rem;
+      color: #a8d4f0;
+    }
+
+    /* ── SECTIONS ── */
+    section {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      padding: 32px;
+      margin-bottom: 24px;
+      transition: border-color .2s;
+    }
+    section:hover { border-color: rgba(41,128,185,0.4); }
+
+    .section-num {
+      display: inline-block;
+      background: #2980b9;
+      color: #fff;
+      font-size: 0.72rem;
+      font-weight: 700;
+      letter-spacing: 1px;
+      text-transform: uppercase;
+      padding: 3px 10px;
+      border-radius: 999px;
+      margin-bottom: 12px;
+    }
+    section h2 {
+      font-size: 1.25rem;
+      font-weight: 700;
+      color: #93c9f0;
+      margin-bottom: 16px;
+    }
+    section p {
+      color: #c4c4de;
+      margin-bottom: 12px;
+      font-size: 0.96rem;
+    }
+    section p:last-child { margin-bottom: 0; }
+
+    ul, ol { padding-left: 20px; margin: 10px 0; }
+    li {
+      color: #c4c4de;
+      margin-bottom: 6px;
+      font-size: 0.96rem;
+    }
+    strong { color: var(--text); }
+
+    /* ── TABLE ── */
+    .data-table {
+      width: 100%;
+      border-collapse: collapse;
+      margin: 16px 0;
+      font-size: 0.92rem;
+    }
+    .data-table th {
+      background: rgba(41,128,185,0.15);
+      color: #93c9f0;
+      font-weight: 600;
+      text-align: left;
+      padding: 10px 14px;
+      border: 1px solid var(--border);
+    }
+    .data-table td {
+      padding: 9px 14px;
+      border: 1px solid var(--border);
+      color: #c4c4de;
+      vertical-align: top;
+    }
+    .data-table tr:nth-child(even) td {
+      background: rgba(255,255,255,0.02);
+    }
+
+    /* ── PILLS ── */
+    .pill {
+      display: inline-block;
+      border-radius: 999px;
+      font-size: 0.75rem;
+      font-weight: 600;
+      padding: 2px 10px;
+    }
+    .pill-yes  { background: rgba(46,204,113,0.15); color: #2ecc71; border: 1px solid rgba(46,204,113,0.3); }
+    .pill-no   { background: rgba(231,76,60,0.15);  color: #e74c3c; border: 1px solid rgba(231,76,60,0.3); }
+
+    /* ── HIGHLIGHT ── */
+    .highlight {
+      background: rgba(41,128,185,0.08);
+      border: 1px solid rgba(41,128,185,0.25);
+      border-radius: 8px;
+      padding: 14px 18px;
+      margin: 14px 0;
+    }
+
+    /* ── FOOTER ── */
+    footer {
+      text-align: center;
+      padding: 32px 24px;
+      border-top: 1px solid var(--border);
+      color: var(--muted);
+      font-size: 0.85rem;
+    }
+    footer a { color: #2980b9; text-decoration: none; }
+    footer a:hover { text-decoration: underline; }
+  </style>
+</head>
+<body>
+
+<header>
+  <div class="logo">
+    <svg viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg" width="40" height="40">
+      <circle cx="12" cy="12" r="10" fill="none" stroke="#2980b9" stroke-width="2"/>
+      <path d="M12 8v4M12 16h.01" stroke="#6dd5fa" stroke-width="2.5" stroke-linecap="round"/>
+    </svg>
+  </div>
+  <h1>PurpleJack Bot</h1>
+  <p class="subtitle">Privacy Policy</p>
+  <span class="badge">Effective Date: June 11, 2026</span>
+</header>
+
+<main>
+
+  <div class="notice">
+    This Privacy Policy describes how PurpleJack Bot collects, uses, and retains data when you interact with it on Discord. We are committed to transparency and handling your data responsibly and minimally.
+  </div>
+
+  <!-- 1 -->
+  <section>
+    <span class="section-num">01</span>
+    <h2>Who We Are</h2>
+    <p>PurpleJack Bot ("the Bot", "we", "our") is an independent Discord bot providing a virtual economy experience. The Bot operates exclusively within a single authorized Discord server and is not affiliated with or endorsed by Discord Inc.</p>
+    <p>For privacy inquiries, please contact the server administration through the official authorized Discord server.</p>
+  </section>
+
+  <!-- 2 -->
+  <section>
+    <span class="section-num">02</span>
+    <h2>Data We Collect</h2>
+    <p>The Bot collects only the data strictly necessary to provide its economy and game features. No personal information beyond Discord-provided identifiers is ever collected.</p>
+
+    <table class="data-table">
+      <thead>
+        <tr>
+          <th>Data Type</th>
+          <th>Description</th>
+          <th>Purpose</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td><strong>Discord User ID</strong></td>
+          <td>A unique numeric identifier provided by Discord</td>
+          <td>Identify user accounts in the economy database</td>
+        </tr>
+        <tr>
+          <td><strong>Discord Guild ID</strong></td>
+          <td>Numeric identifier of the Discord server</td>
+          <td>Restrict Bot operation to authorized servers only</td>
+        </tr>
+        <tr>
+          <td><strong>Virtual Balance</strong></td>
+          <td>In-Bot wallet and bank amounts (virtual currency)</td>
+          <td>Economy system functionality</td>
+        </tr>
+        <tr>
+          <td><strong>Cooldown Timestamps</strong></td>
+          <td>Unix timestamps of last command usage</td>
+          <td>Enforce fair-use cooldowns on commands</td>
+        </tr>
+        <tr>
+          <td><strong>Employment Data</strong></td>
+          <td>Current job, hire date, work history, XP, earnings</td>
+          <td>Employment simulation system</td>
+        </tr>
+        <tr>
+          <td><strong>Inventory Data</strong></td>
+          <td>Virtual items owned and their usage dates</td>
+          <td>Virtual shop and item system</td>
+        </tr>
+        <tr>
+          <td><strong>Game History</strong></td>
+          <td>Records of game sessions and outcomes</td>
+          <td>Leaderboards and statistics features</td>
+        </tr>
+        <tr>
+          <td><strong>Role Assignments</strong></td>
+          <td>Discord role IDs for temporary roles granted by the Bot</td>
+          <td>Temporary role management system</td>
+        </tr>
+      </tbody>
+    </table>
+
+    <div class="highlight">
+      <strong>We do not collect:</strong> real names, email addresses, IP addresses, payment information, message content, voice data, or any sensitive personal information.
+    </div>
+  </section>
+
+  <!-- 3 -->
+  <section>
+    <span class="section-num">03</span>
+    <h2>How We Collect Data</h2>
+    <p>Data is collected exclusively through direct interaction with the Bot's commands and features within Discord. Specifically:</p>
+    <ul>
+      <li>When a user executes a Bot command (<code style="background:#1e1e2e;padding:1px 6px;border-radius:4px;color:#c77dff;">!bal</code>, <code style="background:#1e1e2e;padding:1px 6px;border-radius:4px;color:#c77dff;">!trabajar</code>, etc.), their Discord User ID is recorded automatically</li>
+      <li>Economy values are updated as a direct result of game outcomes and commands</li>
+      <li>No passive data collection occurs — the Bot does not monitor messages, reactions, or activity outside of explicit Bot command interactions</li>
+    </ul>
+  </section>
+
+  <!-- 4 -->
+  <section>
+    <span class="section-num">04</span>
+    <h2>How We Use the Data</h2>
+    <p>All collected data is used solely to operate the Bot's features. Specific uses include:</p>
+    <ul>
+      <li><strong>Economy functionality:</strong> tracking virtual balances, transactions, and cooldowns</li>
+      <li><strong>Employment system:</strong> saving job progress, XP, and work history</li>
+      <li><strong>Fair use enforcement:</strong> applying cooldowns to prevent command abuse</li>
+      <li><strong>Leaderboards:</strong> displaying anonymized rankings within the server</li>
+      <li><strong>Administrative tools:</strong> allowing server staff to manage the economy</li>
+    </ul>
+    <p>Data is <strong>never</strong> used for advertising, profiling, or any commercial purpose.</p>
+  </section>
+
+  <!-- 5 -->
+  <section>
+    <span class="section-num">05</span>
+    <h2>Data Storage and Security</h2>
+    <p>Data is stored in a <strong>PostgreSQL database</strong> hosted on a secure cloud infrastructure. The following security measures are in place:</p>
+    <ul>
+      <li>Database credentials are stored as environment variables and never hardcoded</li>
+      <li>Database access is restricted to the Bot's application only</li>
+      <li>An in-memory cache layer (RAM) is used to minimize direct database access and reduce latency</li>
+      <li>Cache is periodically flushed to the persistent database to maintain consistency</li>
+      <li>No data is stored locally on users' devices</li>
+    </ul>
+
+    <table class="data-table" style="margin-top:16px;">
+      <thead>
+        <tr>
+          <th>Storage Layer</th>
+          <th>Type</th>
+          <th>Persistence</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td>RAM Cache</td>
+          <td>In-memory (temporary)</td>
+          <td>Session only; flushed every 5 minutes</td>
+        </tr>
+        <tr>
+          <td>PostgreSQL Database</td>
+          <td>Relational database</td>
+          <td>Persistent long-term storage</td>
+        </tr>
+      </tbody>
+    </table>
+  </section>
+
+  <!-- 6 -->
+  <section>
+    <span class="section-num">06</span>
+    <h2>Data Sharing and Third Parties</h2>
+    <p>We do <strong>not</strong> sell, rent, share, or disclose any user data to third parties under any circumstances, with the following limited exceptions:</p>
+
+    <table class="data-table">
+      <thead>
+        <tr>
+          <th>Party</th>
+          <th>Data Shared</th>
+          <th>Reason</th>
+          <th>User Control</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td>Discord Inc.</td>
+          <td>Bot interactions (standard API usage)</td>
+          <td>Required to operate on Discord's platform</td>
+          <td><span class="pill pill-no">No opt-out</span></td>
+        </tr>
+        <tr>
+          <td>Cloud Host (SquareCloud)</td>
+          <td>Application runtime environment only</td>
+          <td>Bot deployment and hosting</td>
+          <td><span class="pill pill-no">No opt-out</span></td>
+        </tr>
+        <tr>
+          <td>Database Provider</td>
+          <td>Encrypted database storage</td>
+          <td>Persistent data storage</td>
+          <td><span class="pill pill-no">No opt-out</span></td>
+        </tr>
+      </tbody>
+    </table>
+
+    <p style="margin-top:14px;">All third-party services listed operate under their own privacy policies and are used solely for the technical operation of the Bot.</p>
+  </section>
+
+  <!-- 7 -->
+  <section>
+    <span class="section-num">07</span>
+    <h2>Data Retention</h2>
+    <p>Data is retained for as long as a user's account is active within the Bot's economy system. Specifically:</p>
+    <ul>
+      <li><strong>Active accounts:</strong> Data is retained indefinitely while the user interacts with the Bot</li>
+      <li><strong>Inactive accounts:</strong> Data may be purged after an extended period of inactivity at the administrator's discretion</li>
+      <li><strong>Deletion requests:</strong> Users may request the deletion of their economy data by contacting server administration</li>
+      <li><strong>Server removal:</strong> If the Bot leaves or is removed from a server, associated data may be retained for a reasonable transition period</li>
+    </ul>
+  </section>
+
+  <!-- 8 -->
+  <section>
+    <span class="section-num">08</span>
+    <h2>Your Rights</h2>
+    <p>Depending on your jurisdiction, you may have certain rights regarding your data. Regardless of applicable law, we commit to:</p>
+    <ul>
+      <li><strong>Right to access:</strong> You can request a summary of the data stored about your account</li>
+      <li><strong>Right to deletion:</strong> You can request that your economy data be permanently deleted</li>
+      <li><strong>Right to correction:</strong> You can report incorrect data and request corrections through server administration</li>
+      <li><strong>Right to information:</strong> You can ask what data is stored about you at any time</li>
+    </ul>
+    <p>To exercise any of these rights, please contact server administration through the authorized Discord server.</p>
+  </section>
+
+  <!-- 9 -->
+  <section>
+    <span class="section-num">09</span>
+    <h2>Children's Privacy</h2>
+    <p>The Bot is not directed at children under the age of 13. We do not knowingly collect data from users under 13 years of age. As Discord itself requires users to be at least 13 years old, any user interacting with the Bot is presumed to meet this minimum age requirement.</p>
+    <p>If you believe a minor's data has been collected, please contact server administration immediately for removal.</p>
+  </section>
+
+  <!-- 10 -->
+  <section>
+    <span class="section-num">10</span>
+    <h2>Changes to This Privacy Policy</h2>
+    <p>We reserve the right to update this Privacy Policy at any time. When changes are made:</p>
+    <ul>
+      <li>The "Effective Date" at the top of this page will be updated</li>
+      <li>Significant changes may be announced within the authorized Discord server</li>
+      <li>Continued use of the Bot after changes are posted constitutes acceptance of the updated policy</li>
+    </ul>
+  </section>
+
+  <!-- 11 -->
+  <section>
+    <span class="section-num">11</span>
+    <h2>Contact Us</h2>
+    <p>For any privacy-related questions, data requests, or concerns regarding this Privacy Policy, please contact the server administration directly through the official authorized Discord server.</p>
+    <div class="highlight">
+      We are committed to responding to all legitimate privacy inquiries in a timely and transparent manner.
+    </div>
+  </section>
+
+</main>
+
+<footer>
+  <p>PurpleJack Bot &mdash; Virtual Economy for Discord</p>
+  <p style="margin-top:8px;">
+    <a href="terms.html">Terms &amp; Conditions</a>
+    &nbsp;&bull;&nbsp;
+    Last updated: June 11, 2026
+  </p>
+</footer>
+
+</body>
+</html>
