@@ -25,7 +25,7 @@ from core.config import (
     STAFF_ROLE, COORDINADOR_ROLE
 )
 from modules.memo import _memo_config
-from modules.golpear import _golpear_config, señalar_activacion
+from modules.golpear import _golpear_config, señalar_cambio
 from modules.Empleos import _EMPLEOS_CACHE, get_empleo_user, save_empleo_user, get_all_empleos_activos
 
 
@@ -616,9 +616,8 @@ class Staff(commands.Cog):
             _golpear_config["activo"],
         )
 
-        # Si se acaba de activar, despertar el loop para que no espere los 30s del polling
-        if _golpear_config["activo"]:
-            señalar_activacion()
+        # Notificar al loop ante cualquier cambio (activar o desactivar)
+        señalar_cambio()
         
         estado = "✅ Activado" if _golpear_config["activo"] else "🔴 Desactivado"
         canal = self.bot.get_channel(_golpear_config["canal_id"]) if _golpear_config["canal_id"] else None
@@ -683,6 +682,9 @@ class Staff(commands.Cog):
             _golpear_config["max_ganancia"],
             _golpear_config["activo"],
         )
+
+        # Notificar al loop para que adopte los nuevos valores inmediatamente
+        señalar_cambio()
 
         await interaction.followup.send(
             f"✅ Sistema de Cofres configurado:\n"

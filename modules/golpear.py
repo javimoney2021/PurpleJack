@@ -25,17 +25,13 @@ _golpear_config = {
 
 # Evento de señal: se dispara cuando el sistema se activa externamente,
 # permitiendo que el loop salga del sleep largo inmediatamente.
-_activar_event: asyncio.Event = asyncio.Event()
+_cambio_event: asyncio.Event = asyncio.Event()
 
 
-def señalar_activacion():
-    """Llamar desde staff.py al activar el sistema para despertar el loop."""
-    logger.info(
-        f"[DEBUG señalar_activacion] disparando evento — "
-        f"id(_golpear_config)={id(_golpear_config)} | "
-        f"activo={_golpear_config['activo']} | canal_id={_golpear_config['canal_id']}"
-    )
-    _activar_event.set()
+def señalar_cambio():
+    """Llamar desde staff.py ante cualquier cambio de config (activar, desactivar, editar).
+    Interrumpe inmediatamente el sleep del loop para que re-evalue el estado."""
+    _cambio_event.set()
 
 
 # ── VIEW ───────────────────────────────────────────────
@@ -159,7 +155,7 @@ async def spawn_cofre(canal: discord.TextChannel):
 # ── TASK ───────────────────────────────────────────────
 async def golpear_loop(bot):
     await bot.wait_until_ready()
-    logger.info(f"golpear_loop: iniciado y listo — id(_golpear_config)={id(_golpear_config)}")
+    logger.info("golpear_loop: iniciado y listo.")
 
     # Fix definitivo: load_golpear_config_to_cache() ahora devuelve un dict
     # sin tocar sys.modules — se aplica directamente al _golpear_config local.
@@ -179,59 +175,49 @@ async def golpear_loop(bot):
 
     while True:
         try:
-            # ── DEBUG: estado actual del config en cada iteración ──
-            logger.info(
-                f"[DEBUG golpear_loop] iteración — "
-                f"activo={_golpear_config['activo']} | "
-                f"canal_id={_golpear_config['canal_id']}"
-            )
-
             # ── Esperar mientras esté inactivo o sin canal ─────────
             if not _golpear_config["activo"] or not _golpear_config["canal_id"]:
-                logger.info(
-                    f"[DEBUG golpear_loop] sistema inactivo o sin canal. "
-                    f"Esperando señal de activación o revisando en 30s."
-                )
-                # Esperar máx 30s O hasta que se dispare _activar_event
-                _activar_event.clear()
+                logger.info("golpear_loop: sistema inactivo o sin canal — esperando activación.")
+                _cambio_event.clear()
                 try:
-                    await asyncio.wait_for(_activar_event.wait(), timeout=30)
-                    logger.info("[DEBUG golpear_loop] señal de activación recibida, re-evaluando.")
+                    await asyncio.wait_for(_cambio_event.wait(), timeout=60)
                 except asyncio.TimeoutError:
                     pass
                 continue
 
-            # ── Dormir el intervalo aleatorio configurado ──────────
+            # ── Dormir el intervalo configurado, interrumpible por cualquier cambio ──
             wait = random.randint(_golpear_config["min_time"], _golpear_config["max_time"])
             logger.info(f"golpear_loop: próximo cofre en {wait}s.")
+            _cambio_event.clear()
+            try:
+                await asyncio.wait_for(_cambio_event.wait(), timeout=wait)
+                # Si llegamos aquí, hubo un cambio de config antes del timeout
+                logger.info("golpear_loop: config modificada durante el intervalo, re-evaluando.")
+                continue
+            except asyncio.TimeoutError:
+                pass  # Timeout normal: ya pasó el intervalo, proceder con el spawn
 
-            # Dormir en chunks de 30s para poder reaccionar si se desactiva
-            elapsed = 0
-            while elapsed < wait:
-                chunk = min(30, wait - elapsed)
-                await asyncio.sleep(chunk)
-                elapsed += chunk
-                if not _golpear_config["activo"]:
-                    logger.info("golpear_loop: sistema desactivado durante el intervalo, cancelando spawn.")
-                    break
-            else:
-                # ── Resolver el canal (cache primero, fetch como fallback) ─
-                canal_id = _golpear_config["canal_id"]
-                canal = bot.get_channel(canal_id)
-                logger.info(f"[DEBUG golpear_loop] buscando canal {canal_id} en cache: {'encontrado' if canal else 'no encontrado'}")
-                if canal is None:
-                    try:
-                        canal = await bot.fetch_channel(canal_id)
-                        logger.info(f"golpear_loop: canal {canal_id} obtenido via fetch.")
-                    except Exception as e:
-                        logger.warning(f"golpear_loop: no se pudo obtener el canal {canal_id}: {e} — reintentando en 60s.")
-                        await asyncio.sleep(60)
-                        continue
+            # ── Verificar estado DESPUÉS del sleep (puede haber sido desactivado) ──
+            if not _golpear_config["activo"]:
+                logger.info("golpear_loop: sistema desactivado durante el intervalo, cancelando spawn.")
+                continue
 
-                # ── Spawn ──────────────────────────────────────────
-                logger.info(f"golpear_loop: spawneando cofre en #{canal.name} ({canal_id}).")
-                await spawn_cofre(canal)
-                logger.info("golpear_loop: cofre enviado correctamente.")
+            # ── Resolver el canal (cache primero, fetch como fallback) ─────────
+            canal_id = _golpear_config["canal_id"]
+            canal = bot.get_channel(canal_id)
+            if canal is None:
+                try:
+                    canal = await bot.fetch_channel(canal_id)
+                    logger.info(f"golpear_loop: canal {canal_id} obtenido via fetch.")
+                except Exception as e:
+                    logger.warning(f"golpear_loop: no se pudo obtener el canal {canal_id}: {e} — reintentando en 60s.")
+                    await asyncio.sleep(60)
+                    continue
+
+            # ── Spawn ──────────────────────────────────────────────────────────
+            logger.info(f"golpear_loop: spawneando cofre en #{canal.name} ({canal_id}).")
+            await spawn_cofre(canal)
+            logger.info("golpear_loop: cofre enviado correctamente.")
 
         except asyncio.CancelledError:
             logger.info("golpear_loop: tarea cancelada, cerrando loop.")
