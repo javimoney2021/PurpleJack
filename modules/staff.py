@@ -604,29 +604,37 @@ class Staff(commands.Cog):
     @is_staff()
     async def golpear_alternar(self, interaction):
         await interaction.response.defer(ephemeral=False)
-        if not _golpear_config["canal_id"]:
-            return await interaction.followup.send(
-                "❌ Primero configura el canal con **/golpear_editar**.", ephemeral=True
-            )
         _golpear_config["activo"] = not _golpear_config["activo"]
+        
+        from core.database import save_golpear_config
+        await save_golpear_config()
+        
         estado = "✅ Activado" if _golpear_config["activo"] else "🔴 Desactivado"
-        canal = self.bot.get_channel(_golpear_config["canal_id"])
-        canal_txt = canal.mention if canal else f"<#{_golpear_config['canal_id']}>"
-        await interaction.followup.send(
-            f"💥 Sistema de Cofres: **{estado}**\n"
-            f"📌 Canal: {canal_txt}\n"
-            f"⏱️ Intervalo: **{self.parse_cooldown_str(_golpear_config['min_time'])}** — **{self.parse_cooldown_str(_golpear_config['max_time'])}**",
-            ephemeral=False,
+        canal = self.bot.get_channel(_golpear_config["canal_id"]) if _golpear_config["canal_id"] else None
+        canal_txt = canal.mention if canal else f"<#{_golpear_config['canal_id']}>" if _golpear_config["canal_id"] else "No configurado"
+        
+        embed = discord.Embed(
+            title=f"💥 Sistema de Cofres: **{estado.split('**')[1]}**",
+            color=discord.Color.green() if _golpear_config["activo"] else discord.Color.red(),
+            description=(
+                f"📌 **Canal**: {canal_txt}\n"
+                f"⏱️ **Intervalo**: **{self.parse_cooldown_str(_golpear_config['min_time'])}** — **{self.parse_cooldown_str(_golpear_config['max_time'])}**\n"
+                f"💰 **Ganancias**: **{_golpear_config['min_ganancia']}** — **{_golpear_config['max_ganancia']}** {COIN}\n"
+                f"👤 **Activado por**: {interaction.user.mention}"
+            )
         )
+        await interaction.followup.send(embed=embed, ephemeral=False)
 
-    @app_commands.command(name="golpear_editar", description="Configura canal y tiempos del sistema de cofres")
+    @app_commands.command(name="golpear_editar", description="Configura canal, tiempos y ganancias del sistema de cofres")
     @app_commands.describe(
         canal="Canal donde aparecerán los cofres",
         min_time="Tiempo mínimo (ej. 30s, 2m, 1h)",
-        max_time="Tiempo máximo (ej. 60s, 5m, 2h)"
+        max_time="Tiempo máximo (ej. 60s, 5m, 2h)",
+        min_ganancia="Ganancia mínima por cofre",
+        max_ganancia="Ganancia máxima por cofre"
     )
     @is_staff()
-    async def golpear_editar(self, interaction, canal: discord.TextChannel, min_time: str, max_time: str):
+    async def golpear_editar(self, interaction, canal: discord.TextChannel, min_time: str, max_time: str, min_ganancia: int = None, max_ganancia: int = None):
         await interaction.response.defer(ephemeral=False)
         try:
             min_seconds = self.parse_cooldown(min_time)
@@ -637,13 +645,32 @@ class Staff(commands.Cog):
             )
         if min_seconds >= max_seconds:
             return await interaction.followup.send("❌ El tiempo mínimo debe ser menor al máximo.", ephemeral=True)
+        
+        # Validar ganancias si se proporcionan
+        if min_ganancia is None:
+            min_ganancia = _golpear_config.get("min_ganancia", 150)
+        if max_ganancia is None:
+            max_ganancia = _golpear_config.get("max_ganancia", 800)
+        
+        if min_ganancia <= 0 or max_ganancia <= 0:
+            return await interaction.followup.send("❌ Las ganancias deben ser mayores a 0.", ephemeral=True)
+        if min_ganancia >= max_ganancia:
+            return await interaction.followup.send("❌ La ganancia mínima debe ser menor a la máxima.", ephemeral=True)
+        
         _golpear_config["canal_id"] = canal.id
         _golpear_config["min_time"] = min_seconds
         _golpear_config["max_time"] = max_seconds
+        _golpear_config["min_ganancia"] = min_ganancia
+        _golpear_config["max_ganancia"] = max_ganancia
+        
+        from core.database import save_golpear_config
+        await save_golpear_config()
+        
         await interaction.followup.send(
             f"✅ Sistema de Cofres configurado:\n"
             f"📌 Canal: {canal.mention}\n"
-            f"⏱️ Intervalo: **{self.parse_cooldown_str(min_seconds)}** — **{self.parse_cooldown_str(max_seconds)}**",
+            f"⏱️ Intervalo: **{self.parse_cooldown_str(min_seconds)}** — **{self.parse_cooldown_str(max_seconds)}**\n"
+            f"💰 Ganancias: **{min_ganancia}** — **{max_ganancia}** {COIN}",
             ephemeral=False,
         )
 

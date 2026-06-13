@@ -489,7 +489,7 @@ class Empleos(commands.Cog):
     async def cog_load(self):
         await init_empleos_tables()
 
-    @commands.command(name="empleos")
+    @commands.command(name="empleos", aliases=["trabajos"])
     async def empleos(self, ctx):
         embed = discord.Embed(title="💼 Empleos Disponibles", color=discord.Color.blue())
         for nombre, info in EMPLEOS.items():

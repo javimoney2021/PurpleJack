@@ -10,8 +10,6 @@ logger = logging.getLogger(__name__)
 
 # ── CONFIG BASE ────────────────────────────────────────
 GOLPEAR_GIF = "https://pub-a09b3609b6b34dfab5c7aa7742cd1a8a.r2.dev/Purple%20jack%20Harcode/cofre1.gif"
-MIN_COINS = 150
-MAX_COINS = 800
 MAX_GOLPES = 3
 COFRE_TIMEOUT = 6
 
@@ -21,6 +19,8 @@ _golpear_config = {
     "canal_id": None,
     "min_time": 600,
     "max_time": 3600,
+    "min_ganancia": 150,
+    "max_ganancia": 800,
 }
 
 
@@ -83,7 +83,7 @@ class GolpearView(discord.ui.View):
                 "❌ Ya golpeaste este cofre.", ephemeral=True
             )
 
-        monto = random.randint(MIN_COINS, MAX_COINS)
+        monto = random.randint(_golpear_config["min_ganancia"], _golpear_config["max_ganancia"])
         self.golpeadores.append((interaction.user, monto))
         await update_balance(interaction.user.id, monto)
         await interaction.response.defer()

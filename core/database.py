@@ -600,11 +600,60 @@ async def create_game_config_table():
         )
 
         await conn.execute("""
+        CREATE TABLE IF NOT EXISTS golpear_config (
+            id SERIAL PRIMARY KEY,
+            canal_id BIGINT,
+            min_time INTEGER DEFAULT 600,
+            max_time INTEGER DEFAULT 3600,
+            min_ganancia INTEGER DEFAULT 150,
+            max_ganancia INTEGER DEFAULT 800,
+            activo BOOLEAN DEFAULT FALSE
+        )
+        """)
+        golpear_exists = await conn.fetchrow("SELECT * FROM golpear_config LIMIT 1")
+        if not golpear_exists:
+            await conn.execute("""
+            INSERT INTO golpear_config (
+                canal_id, min_time, max_time, min_ganancia, max_ganancia, activo
+            ) VALUES ($1, $2, $3, $4, $5, $6)
+            """,
+            None, 600, 3600, 150, 800, False,
+        )
+
+        await conn.execute("""
         CREATE TABLE IF NOT EXISTS nave_config (
             id INTEGER PRIMARY KEY DEFAULT 1,
             contenido TEXT
         )
         """)
+
+async def load_golpear_config_to_cache():
+    from modules.golpear import _golpear_config
+    async with pool.acquire() as conn:
+        row = await conn.fetchrow("SELECT * FROM golpear_config LIMIT 1")
+    if row:
+        _golpear_config["canal_id"] = row["canal_id"]
+        _golpear_config["min_time"] = row["min_time"]
+        _golpear_config["max_time"] = row["max_time"]
+        _golpear_config["min_ganancia"] = row["min_ganancia"]
+        _golpear_config["max_ganancia"] = row["max_ganancia"]
+        _golpear_config["activo"] = row["activo"]
+
+async def save_golpear_config():
+    from modules.golpear import _golpear_config
+    async with pool.acquire() as conn:
+        await conn.execute("""
+        UPDATE golpear_config SET
+            canal_id=$1, min_time=$2, max_time=$3,
+            min_ganancia=$4, max_ganancia=$5, activo=$6
+        """,
+        _golpear_config["canal_id"],
+        _golpear_config["min_time"],
+        _golpear_config["max_time"],
+        _golpear_config["min_ganancia"],
+        _golpear_config["max_ganancia"],
+        _golpear_config["activo"],
+        )
 
 async def load_game_config():
     from core.config import game_config, rr_config, ruleta_config, rob_config, dados_config
