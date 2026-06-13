@@ -25,7 +25,6 @@ from core.config import (
     STAFF_ROLE, COORDINADOR_ROLE
 )
 from modules.memo import _memo_config
-from modules.golpear import _golpear_config, señalar_cambio
 from modules.Empleos import _EMPLEOS_CACHE, get_empleo_user, save_empleo_user, get_all_empleos_activos
 
 
@@ -600,36 +599,33 @@ class Staff(commands.Cog):
             ephemeral=False,
         )
 
-    @app_commands.command(name="golpear_alternar", description="Activa o desactiva el sistema de cofres")
+        @app_commands.command(name="golpear_alternar", description="Activa o desactiva el sistema de cofres")
     @is_staff()
     async def golpear_alternar(self, interaction):
         await interaction.response.defer(ephemeral=False)
-        _golpear_config["activo"] = not _golpear_config["activo"]
-        
+        import sys
+        gmod = sys.modules["modules.golpear"]
+        cfg = gmod._golpear_config
+        cfg["activo"] = not cfg["activo"]
+
         from core.database import save_golpear_config
         await save_golpear_config(
-            _golpear_config["canal_id"],
-            _golpear_config["min_time"],
-            _golpear_config["max_time"],
-            _golpear_config["min_ganancia"],
-            _golpear_config["max_ganancia"],
-            _golpear_config["activo"],
+            cfg["canal_id"], cfg["min_time"], cfg["max_time"],
+            cfg["min_ganancia"], cfg["max_ganancia"], cfg["activo"],
         )
+        gmod.señalar_cambio()
 
-        # Notificar al loop ante cualquier cambio (activar o desactivar)
-        señalar_cambio()
-        
-        estado = "✅ Activado" if _golpear_config["activo"] else "🔴 Desactivado"
-        canal = self.bot.get_channel(_golpear_config["canal_id"]) if _golpear_config["canal_id"] else None
-        canal_txt = canal.mention if canal else f"<#{_golpear_config['canal_id']}>" if _golpear_config["canal_id"] else "No configurado"
-        
+        estado = "✅ Activado" if cfg["activo"] else "🔴 Desactivado"
+        canal = self.bot.get_channel(cfg["canal_id"]) if cfg["canal_id"] else None
+        canal_txt = canal.mention if canal else f"<#{cfg['canal_id']}>" if cfg["canal_id"] else "No configurado"
+
         embed = discord.Embed(
             title=f"💥 Sistema de Cofres: {estado}",
-            color=discord.Color.green() if _golpear_config["activo"] else discord.Color.red(),
+            color=discord.Color.green() if cfg["activo"] else discord.Color.red(),
             description=(
                 f"📌 **Canal**: {canal_txt}\n"
-                f"⏱️ **Intervalo**: **{self.parse_cooldown_str(_golpear_config['min_time'])}** — **{self.parse_cooldown_str(_golpear_config['max_time'])}**\n"
-                f"💰 **Ganancias**: **{_golpear_config['min_ganancia']}** — **{_golpear_config['max_ganancia']}** {COIN}\n"
+                f"⏱️ **Intervalo**: **{self.parse_cooldown_str(cfg['min_time'])}** — **{self.parse_cooldown_str(cfg['max_time'])}**\n"
+                f"💰 **Ganancias**: **{cfg['min_ganancia']}** — **{cfg['max_ganancia']}** {COIN}\n"
                 f"👤 **Activado por**: {interaction.user.mention}"
             )
         )
@@ -656,35 +652,33 @@ class Staff(commands.Cog):
         if min_seconds >= max_seconds:
             return await interaction.followup.send("❌ El tiempo mínimo debe ser menor al máximo.", ephemeral=True)
         
+        import sys
+        gmod = sys.modules["modules.golpear"]
+        cfg = gmod._golpear_config
+
         # Validar ganancias si se proporcionan
         if min_ganancia is None:
-            min_ganancia = _golpear_config.get("min_ganancia", 150)
+            min_ganancia = cfg.get("min_ganancia", 150)
         if max_ganancia is None:
-            max_ganancia = _golpear_config.get("max_ganancia", 800)
-        
+            max_ganancia = cfg.get("max_ganancia", 800)
+
         if min_ganancia <= 0 or max_ganancia <= 0:
             return await interaction.followup.send("❌ Las ganancias deben ser mayores a 0.", ephemeral=True)
         if min_ganancia >= max_ganancia:
             return await interaction.followup.send("❌ La ganancia mínima debe ser menor a la máxima.", ephemeral=True)
-        
-        _golpear_config["canal_id"] = canal.id
-        _golpear_config["min_time"] = min_seconds
-        _golpear_config["max_time"] = max_seconds
-        _golpear_config["min_ganancia"] = min_ganancia
-        _golpear_config["max_ganancia"] = max_ganancia
-        
+
+        cfg["canal_id"] = canal.id
+        cfg["min_time"] = min_seconds
+        cfg["max_time"] = max_seconds
+        cfg["min_ganancia"] = min_ganancia
+        cfg["max_ganancia"] = max_ganancia
+
         from core.database import save_golpear_config
         await save_golpear_config(
-            _golpear_config["canal_id"],
-            _golpear_config["min_time"],
-            _golpear_config["max_time"],
-            _golpear_config["min_ganancia"],
-            _golpear_config["max_ganancia"],
-            _golpear_config["activo"],
+            cfg["canal_id"], cfg["min_time"], cfg["max_time"],
+            cfg["min_ganancia"], cfg["max_ganancia"], cfg["activo"],
         )
-
-        # Notificar al loop para que adopte los nuevos valores inmediatamente
-        señalar_cambio()
+        gmod.señalar_cambio()
 
         await interaction.followup.send(
             f"✅ Sistema de Cofres configurado:\n"
