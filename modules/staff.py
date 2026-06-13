@@ -614,7 +614,7 @@ class Staff(commands.Cog):
         canal_txt = canal.mention if canal else f"<#{_golpear_config['canal_id']}>" if _golpear_config["canal_id"] else "No configurado"
         
         embed = discord.Embed(
-            title=f"💥 Sistema de Cofres: **{estado.split('**')[1]}**",
+            title=f"💥 Sistema de Cofres: {estado}",
             color=discord.Color.green() if _golpear_config["activo"] else discord.Color.red(),
             description=(
                 f"📌 **Canal**: {canal_txt}\n"
