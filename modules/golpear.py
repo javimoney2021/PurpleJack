@@ -177,7 +177,6 @@ async def golpear_loop(bot):
         try:
             # ── Esperar mientras esté inactivo o sin canal ─────────
             if not _golpear_config["activo"] or not _golpear_config["canal_id"]:
-                logger.info("golpear_loop: sistema inactivo o sin canal — esperando activación.")
                 _cambio_event.clear()
                 try:
                     await asyncio.wait_for(_cambio_event.wait(), timeout=60)
@@ -187,19 +186,15 @@ async def golpear_loop(bot):
 
             # ── Dormir el intervalo configurado, interrumpible por cualquier cambio ──
             wait = random.randint(_golpear_config["min_time"], _golpear_config["max_time"])
-            logger.info(f"golpear_loop: próximo cofre en {wait}s.")
             _cambio_event.clear()
             try:
                 await asyncio.wait_for(_cambio_event.wait(), timeout=wait)
-                # Si llegamos aquí, hubo un cambio de config antes del timeout
-                logger.info("golpear_loop: config modificada durante el intervalo, re-evaluando.")
                 continue
             except asyncio.TimeoutError:
                 pass  # Timeout normal: ya pasó el intervalo, proceder con el spawn
 
             # ── Verificar estado DESPUÉS del sleep (puede haber sido desactivado) ──
             if not _golpear_config["activo"]:
-                logger.info("golpear_loop: sistema desactivado durante el intervalo, cancelando spawn.")
                 continue
 
             # ── Resolver el canal (cache primero, fetch como fallback) ─────────
