@@ -147,6 +147,12 @@ async def golpear_loop(bot):
     await bot.wait_until_ready()
     logger.info("golpear_loop iniciado y listo.")
 
+    # Bug #1 fix: cargar config directamente desde la DB al arrancar el loop,
+    # evitando el problema del dict huérfano causado por el orden de imports en bot.py
+    from core.database import load_golpear_config_to_cache
+    await load_golpear_config_to_cache()
+    logger.info("golpear_loop: config cargada desde DB al iniciar.")
+
     while True:
         try:
             # ── Esperar mientras esté inactivo o sin canal ─────────
@@ -193,18 +199,23 @@ async def golpear_loop(bot):
 
 
 # ── COG ────────────────────────────────────────────────
+_loop_task: asyncio.Task | None = None  # Variable a nivel de módulo para evitar tareas duplicadas en recargas
+
+
 class Golpear(commands.Cog):
     def __init__(self, bot):
         self.bot = bot
-        # Guardar referencia a la tarea para poder cancelarla en unload
-        self._loop_task: asyncio.Task = asyncio.create_task(golpear_loop(bot))
 
     def cog_unload(self):
-        # Bug #4: cancelar la tarea al descargar el cog para evitar tareas duplicadas
-        if self._loop_task and not self._loop_task.done():
-            self._loop_task.cancel()
+        global _loop_task
+        if _loop_task and not _loop_task.done():
+            _loop_task.cancel()
             logger.info("golpear_loop: tarea cancelada por cog_unload.")
 
 
 async def setup(bot):
+    global _loop_task
     await bot.add_cog(Golpear(bot))
+    # Bug #2 fix: crear la tarea DESPUÉS de add_cog, siguiendo el patrón del proyecto
+    if _loop_task is None or _loop_task.done():
+        _loop_task = asyncio.create_task(golpear_loop(bot))
