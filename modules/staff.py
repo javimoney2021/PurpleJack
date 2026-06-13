@@ -25,7 +25,7 @@ from core.config import (
     STAFF_ROLE, COORDINADOR_ROLE
 )
 from modules.memo import _memo_config
-from modules.golpear import _golpear_config, spawn_cofre
+from modules.golpear import _golpear_config, señalar_activacion
 from modules.Empleos import _EMPLEOS_CACHE, get_empleo_user, save_empleo_user, get_all_empleos_activos
 
 
@@ -608,6 +608,10 @@ class Staff(commands.Cog):
         
         from core.database import save_golpear_config
         await save_golpear_config()
+
+        # Si se acaba de activar, despertar el loop para que no espere los 30s del polling
+        if _golpear_config["activo"]:
+            señalar_activacion()
         
         estado = "✅ Activado" if _golpear_config["activo"] else "🔴 Desactivado"
         canal = self.bot.get_channel(_golpear_config["canal_id"]) if _golpear_config["canal_id"] else None
@@ -673,14 +677,6 @@ class Staff(commands.Cog):
             f"💰 Ganancias: **{min_ganancia}** — **{max_ganancia}** {COIN}",
             ephemeral=False,
         )
-
-    @app_commands.command(name="golpear_test", description="Spawna un cofre en un canal")
-    @app_commands.describe(canal="Canal donde aparecerá el cofre de prueba")
-    @is_staff()
-    async def golpear_test(self, interaction, canal: discord.TextChannel):
-        await interaction.response.defer(ephemeral=True)
-        await spawn_cofre(canal)
-        await interaction.followup.send(f"✅ Cofre enviado a {canal.mention}.", ephemeral=True)
 
     # ── ADD ITEM (nuevo flujo: campos de texto directos) ───
     @app_commands.command(name="add_item", description="Agrega un nuevo item a la tienda")

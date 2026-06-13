@@ -23,6 +23,15 @@ _golpear_config = {
     "max_ganancia": 800,
 }
 
+# Evento de señal: se dispara cuando el sistema se activa externamente,
+# permitiendo que el loop salga del sleep largo inmediatamente.
+_activar_event: asyncio.Event = asyncio.Event()
+
+
+def señalar_activacion():
+    """Llamar desde staff.py al activar el sistema para despertar el loop."""
+    _activar_event.set()
+
 
 # ── VIEW ───────────────────────────────────────────────
 class GolpearView(discord.ui.View):
@@ -145,61 +154,87 @@ async def spawn_cofre(canal: discord.TextChannel):
 # ── TASK ───────────────────────────────────────────────
 async def golpear_loop(bot):
     await bot.wait_until_ready()
-    logger.info("golpear_loop iniciado y listo.")
+    logger.info("golpear_loop: iniciado y listo.")
 
-    # Bug #1 fix: cargar config directamente desde la DB al arrancar el loop,
-    # evitando el problema del dict huérfano causado por el orden de imports en bot.py
+    # Fix Bug #1: cargar config directamente desde la DB al arrancar el loop,
+    # evitando el problema del dict huérfano por el orden de imports en bot.py.
     from core.database import load_golpear_config_to_cache
     await load_golpear_config_to_cache()
-    logger.info("golpear_loop: config cargada desde DB al iniciar.")
+    logger.info(
+        f"golpear_loop: config cargada desde DB — "
+        f"activo={_golpear_config['activo']} | "
+        f"canal_id={_golpear_config['canal_id']} | "
+        f"min_time={_golpear_config['min_time']} | "
+        f"max_time={_golpear_config['max_time']}"
+    )
 
     while True:
         try:
+            # ── DEBUG: estado actual del config en cada iteración ──
+            logger.info(
+                f"[DEBUG golpear_loop] iteración — "
+                f"activo={_golpear_config['activo']} | "
+                f"canal_id={_golpear_config['canal_id']}"
+            )
+
             # ── Esperar mientras esté inactivo o sin canal ─────────
             if not _golpear_config["activo"] or not _golpear_config["canal_id"]:
-                await asyncio.sleep(30)
+                logger.info(
+                    f"[DEBUG golpear_loop] sistema inactivo o sin canal. "
+                    f"Esperando señal de activación o revisando en 30s."
+                )
+                # Esperar máx 30s O hasta que se dispare _activar_event
+                _activar_event.clear()
+                try:
+                    await asyncio.wait_for(_activar_event.wait(), timeout=30)
+                    logger.info("[DEBUG golpear_loop] señal de activación recibida, re-evaluando.")
+                except asyncio.TimeoutError:
+                    pass
                 continue
 
             # ── Dormir el intervalo aleatorio configurado ──────────
             wait = random.randint(_golpear_config["min_time"], _golpear_config["max_time"])
             logger.info(f"golpear_loop: próximo cofre en {wait}s.")
-            await asyncio.sleep(wait)
 
-            # ── Re-verificar que sigue activo tras el sleep ────────
-            if not _golpear_config["activo"]:
-                logger.info("golpear_loop: sistema desactivado durante el intervalo, saltando spawn.")
-                continue
+            # Dormir en chunks de 30s para poder reaccionar si se desactiva
+            elapsed = 0
+            while elapsed < wait:
+                chunk = min(30, wait - elapsed)
+                await asyncio.sleep(chunk)
+                elapsed += chunk
+                if not _golpear_config["activo"]:
+                    logger.info("golpear_loop: sistema desactivado durante el intervalo, cancelando spawn.")
+                    break
+            else:
+                # ── Resolver el canal (cache primero, fetch como fallback) ─
+                canal_id = _golpear_config["canal_id"]
+                canal = bot.get_channel(canal_id)
+                logger.info(f"[DEBUG golpear_loop] buscando canal {canal_id} en cache: {'encontrado' if canal else 'no encontrado'}")
+                if canal is None:
+                    try:
+                        canal = await bot.fetch_channel(canal_id)
+                        logger.info(f"golpear_loop: canal {canal_id} obtenido via fetch.")
+                    except Exception as e:
+                        logger.warning(f"golpear_loop: no se pudo obtener el canal {canal_id}: {e} — reintentando en 60s.")
+                        await asyncio.sleep(60)
+                        continue
 
-            # ── Resolver el canal (cache primero, fetch como fallback) ─
-            canal_id = _golpear_config["canal_id"]
-            canal = bot.get_channel(canal_id)
-            if canal is None:
-                try:
-                    canal = await bot.fetch_channel(canal_id)
-                    logger.info(f"golpear_loop: canal {canal_id} no estaba en cache, obtenido via fetch.")
-                except Exception as e:
-                    logger.warning(f"golpear_loop: no se pudo obtener el canal {canal_id}: {e} — reintentando en 60s.")
-                    await asyncio.sleep(60)
-                    continue
-
-            # ── Spawn ──────────────────────────────────────────────
-            logger.info(f"golpear_loop: spawneando cofre en #{canal.name} ({canal_id}).")
-            await spawn_cofre(canal)
-            logger.info("golpear_loop: cofre enviado correctamente.")
+                # ── Spawn ──────────────────────────────────────────
+                logger.info(f"golpear_loop: spawneando cofre en #{canal.name} ({canal_id}).")
+                await spawn_cofre(canal)
+                logger.info("golpear_loop: cofre enviado correctamente.")
 
         except asyncio.CancelledError:
-            # La tarea fue cancelada intencionalmente (cog_unload) — salir limpio
             logger.info("golpear_loop: tarea cancelada, cerrando loop.")
             raise
 
         except Exception as e:
-            # Cualquier otro error (permisos, API, etc.) — loguear y reintentar
             logger.error(f"golpear_loop: error inesperado: {e} — reintentando en 60s.", exc_info=True)
             await asyncio.sleep(60)
 
 
 # ── COG ────────────────────────────────────────────────
-_loop_task: asyncio.Task | None = None  # Variable a nivel de módulo para evitar tareas duplicadas en recargas
+_loop_task: asyncio.Task | None = None  # Nivel de módulo para evitar tareas duplicadas en recargas
 
 
 class Golpear(commands.Cog):
@@ -216,6 +251,6 @@ class Golpear(commands.Cog):
 async def setup(bot):
     global _loop_task
     await bot.add_cog(Golpear(bot))
-    # Bug #2 fix: crear la tarea DESPUÉS de add_cog, siguiendo el patrón del proyecto
+    # Fix Bug #2: crear la tarea DESPUÉS de add_cog, igual que flush_loop y check_cargos_loop
     if _loop_task is None or _loop_task.done():
         _loop_task = asyncio.create_task(golpear_loop(bot))
