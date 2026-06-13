@@ -599,7 +599,7 @@ class Staff(commands.Cog):
             ephemeral=False,
         )
 
-        @app_commands.command(name="golpear_alternar", description="Activa o desactiva el sistema de cofres")
+    @app_commands.command(name="golpear_alternar", description="Activa o desactiva el sistema de cofres")
     @is_staff()
     async def golpear_alternar(self, interaction):
         await interaction.response.defer(ephemeral=False)
