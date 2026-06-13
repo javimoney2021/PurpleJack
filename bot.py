@@ -56,7 +56,7 @@ from core.database import (
     init_db, load_items_to_cache, load_cargos_to_cache,
     load_collect_config_to_cache, delete_cargo_temporal,
     create_game_config_table, load_game_config, load_dados_config,
-    load_veterano_config_to_cache, load_golpear_config_to_cache
+    load_veterano_config_to_cache
 )
 from core import cache
 from core.config import AYUDA_CHANNEL_ID
@@ -196,7 +196,6 @@ def run_bot():
         await create_game_config_table()
         await load_game_config()
         await load_dados_config()
-        await load_golpear_config_to_cache()
         await load_items_to_cache()
         await load_cargos_to_cache()
         await load_collect_config_to_cache()

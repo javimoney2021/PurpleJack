@@ -30,6 +30,11 @@ _activar_event: asyncio.Event = asyncio.Event()
 
 def señalar_activacion():
     """Llamar desde staff.py al activar el sistema para despertar el loop."""
+    logger.info(
+        f"[DEBUG señalar_activacion] disparando evento — "
+        f"id(_golpear_config)={id(_golpear_config)} | "
+        f"activo={_golpear_config['activo']} | canal_id={_golpear_config['canal_id']}"
+    )
     _activar_event.set()
 
 
@@ -154,7 +159,7 @@ async def spawn_cofre(canal: discord.TextChannel):
 # ── TASK ───────────────────────────────────────────────
 async def golpear_loop(bot):
     await bot.wait_until_ready()
-    logger.info("golpear_loop: iniciado y listo.")
+    logger.info(f"golpear_loop: iniciado y listo — id(_golpear_config)={id(_golpear_config)}")
 
     # Fix definitivo: load_golpear_config_to_cache() ahora devuelve un dict
     # sin tocar sys.modules — se aplica directamente al _golpear_config local.
