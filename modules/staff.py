@@ -607,7 +607,14 @@ class Staff(commands.Cog):
         _golpear_config["activo"] = not _golpear_config["activo"]
         
         from core.database import save_golpear_config
-        await save_golpear_config()
+        await save_golpear_config(
+            _golpear_config["canal_id"],
+            _golpear_config["min_time"],
+            _golpear_config["max_time"],
+            _golpear_config["min_ganancia"],
+            _golpear_config["max_ganancia"],
+            _golpear_config["activo"],
+        )
 
         # Si se acaba de activar, despertar el loop para que no espere los 30s del polling
         if _golpear_config["activo"]:
@@ -668,8 +675,15 @@ class Staff(commands.Cog):
         _golpear_config["max_ganancia"] = max_ganancia
         
         from core.database import save_golpear_config
-        await save_golpear_config()
-        
+        await save_golpear_config(
+            _golpear_config["canal_id"],
+            _golpear_config["min_time"],
+            _golpear_config["max_time"],
+            _golpear_config["min_ganancia"],
+            _golpear_config["max_ganancia"],
+            _golpear_config["activo"],
+        )
+
         await interaction.followup.send(
             f"✅ Sistema de Cofres configurado:\n"
             f"📌 Canal: {canal.mention}\n"

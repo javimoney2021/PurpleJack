@@ -156,17 +156,21 @@ async def golpear_loop(bot):
     await bot.wait_until_ready()
     logger.info("golpear_loop: iniciado y listo.")
 
-    # Fix Bug #1: cargar config directamente desde la DB al arrancar el loop,
-    # evitando el problema del dict huérfano por el orden de imports en bot.py.
+    # Fix definitivo: load_golpear_config_to_cache() ahora devuelve un dict
+    # sin tocar sys.modules — se aplica directamente al _golpear_config local.
     from core.database import load_golpear_config_to_cache
-    await load_golpear_config_to_cache()
-    logger.info(
-        f"golpear_loop: config cargada desde DB — "
-        f"activo={_golpear_config['activo']} | "
-        f"canal_id={_golpear_config['canal_id']} | "
-        f"min_time={_golpear_config['min_time']} | "
-        f"max_time={_golpear_config['max_time']}"
-    )
+    datos_db = await load_golpear_config_to_cache()
+    if datos_db:
+        _golpear_config.update(datos_db)
+        logger.info(
+            f"golpear_loop: config cargada desde DB — "
+            f"activo={_golpear_config['activo']} | "
+            f"canal_id={_golpear_config['canal_id']} | "
+            f"min_time={_golpear_config['min_time']} | "
+            f"max_time={_golpear_config['max_time']}"
+        )
+    else:
+        logger.warning("golpear_loop: no se encontró config en DB, usando defaults.")
 
     while True:
         try:

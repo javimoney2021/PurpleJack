@@ -628,31 +628,29 @@ async def create_game_config_table():
         """)
 
 async def load_golpear_config_to_cache():
-    from modules.golpear import _golpear_config
+    """Devuelve un dict con los valores de la DB. NO importa modules.golpear."""
     async with pool.acquire() as conn:
         row = await conn.fetchrow("SELECT * FROM golpear_config LIMIT 1")
     if row:
-        _golpear_config["canal_id"] = row["canal_id"]
-        _golpear_config["min_time"] = row["min_time"]
-        _golpear_config["max_time"] = row["max_time"]
-        _golpear_config["min_ganancia"] = row["min_ganancia"]
-        _golpear_config["max_ganancia"] = row["max_ganancia"]
-        _golpear_config["activo"] = row["activo"]
+        return {
+            "canal_id":     row["canal_id"],
+            "min_time":     row["min_time"],
+            "max_time":     row["max_time"],
+            "min_ganancia": row["min_ganancia"],
+            "max_ganancia": row["max_ganancia"],
+            "activo":       row["activo"],
+        }
+    return None
 
-async def save_golpear_config():
-    from modules.golpear import _golpear_config
+async def save_golpear_config(canal_id, min_time, max_time, min_ganancia, max_ganancia, activo):
+    """Guarda la config en la DB. Recibe los valores explicitamente, NO importa modules.golpear."""
     async with pool.acquire() as conn:
         await conn.execute("""
         UPDATE golpear_config SET
             canal_id=$1, min_time=$2, max_time=$3,
             min_ganancia=$4, max_ganancia=$5, activo=$6
         """,
-        _golpear_config["canal_id"],
-        _golpear_config["min_time"],
-        _golpear_config["max_time"],
-        _golpear_config["min_ganancia"],
-        _golpear_config["max_ganancia"],
-        _golpear_config["activo"],
+        canal_id, min_time, max_time, min_ganancia, max_ganancia, activo,
         )
 
 async def load_game_config():
