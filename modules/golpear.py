@@ -65,7 +65,7 @@ class GolpearView(discord.ui.View):
         except Exception:
             pass
 
-        await asyncio.sleep(15)
+        await asyncio.sleep(240)
         try:
             await self.message.delete()
         except Exception:
@@ -113,14 +113,14 @@ class GolpearView(discord.ui.View):
             color=discord.Color.gold()
         )
         embed.set_image(url=GOLPEAR_GIF)
-        embed.set_footer(text="Este mensaje se eliminará en 15 segundos.")
+        embed.set_footer(text="Ganancias entregadas....")
 
         try:
             await message.edit(embed=embed, view=self)
         except Exception:
             pass
 
-        await asyncio.sleep(15)
+        await asyncio.sleep(240)
         try:
             await message.delete()
         except Exception:
