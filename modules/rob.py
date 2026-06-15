@@ -80,50 +80,19 @@ class Rob(commands.Cog):
                 f"¿Qué le vas a robar? ¡Ve a trabajar!"
             )
 
-        if target_user["balance"] < 1000:
-            await update_bank(author_id, -500)
-            await update_bank(target_id, 500)
-            set_rob_cooldown(author_id)
-            author_actualizado = await get_user(author_id)
-            bank_final  = author_actualizado["bank"]
-            deuda_txt   = (
-                f" Tu banco quedó en **{bank_final}** {COIN}, paga tus deudas."
-                if bank_final < 0 else ""
-            )
-            return await ctx.send(
-                f"😔 {ctx.author.mention} ¿No te da vergüenza robar a los pobres? "
-                f"Se te descontaron **-500** {COIN} del banco y se acreditaron a "
-                f"{target.mention}.{deuda_txt}"
-            )
-
+        # 50/50 configurable — monto fijo de robo: 5000
+        ROB_AMOUNT = 5000
         success = random.random() <= rob_config["exito_prob"]
 
         if success:
-            percentage = random.uniform(0.10, 0.50)
-            amount     = max(1, int(target_user["balance"] * percentage))
-            # Rob es transferencia entre usuarios → escritura inmediata a DB
+            amount = min(ROB_AMOUNT, target_user["balance"])
             await update_balance(author_id, amount)
             await update_balance(target_id, -amount)
-            await ctx.send(
-                f"💰 {ctx.author.mention} ¡Robo exitoso! "
-                f"Le robaste **{amount}** {COIN} a {target.mention}."
+            await ctx.reply(
+                f"💰 Has robado exitosamente **{amount}** {COIN} a {target.mention}."
             )
         else:
-            percentage_penalty = random.uniform(0.10, 0.20)
-            penalty     = max(1, int(target_user["balance"] * percentage_penalty))
-            compensation = 1500
-            # Transferencia entre usuarios → escritura inmediata a DB
-            await update_balance(author_id, -penalty)
-            await update_bank(author_id, -compensation)
-            await update_bank(target_id, compensation)
-            await ctx.send(
-                f"🚔 {ctx.author.mention} ¡Robo fallido! Perdiste **{penalty}** {COIN} "
-                f"de tu balance + **1500** {COIN} de indemnización descontados de tu banco."
-            )
-            await ctx.send(
-                f"🛡️ {target.mention} Alguien intentó robarte, pero falló. "
-                f"Recibiste **{compensation}** {COIN} en tu banco como indemnización."
-            )
+            await ctx.reply("🚔 Tu robo ha fallado.")
 
         set_rob_cooldown(author_id)
 

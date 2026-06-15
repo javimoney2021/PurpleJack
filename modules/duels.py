@@ -16,7 +16,7 @@ TOTAL_ROUNDS = 9
 GRID_SIZE = 5
 RETAL_THUMBNAIL = "https://pub-a09b3609b6b34dfab5c7aa7742cd1a8a.r2.dev/Purple%20jack%20Harcode/Kill.png"
 WIN_THUMBNAIL = "https://pub-a09b3609b6b34dfab5c7aa7742cd1a8a.r2.dev/Purple%20jack%20Harcode/win.png"
-ESPANOL_ROLE = "Español"
+NAVE_ROLE_ID = 1515377564439281726  # Miembros de la Nave
 
 # ── GLOBAL STATE ───────────────────────────────────────
 _active_duels = set()  # {guild_id} para evitar múltiples duelos por servidor
@@ -89,10 +89,10 @@ class AcceptDuelView(discord.ui.View):
         await interaction.response.defer()
         msg_anuncio = await self.ctx.send(f"⚔️ La batalla entre <@{self.retador_id}> y <@{self.retado_id}> Comenzará en segundos.... ⚔️")
         
-        # Cerrar permisos de escritura para el rol Español
-        rol_espanol = discord.utils.get(self.ctx.guild.roles, name=ESPANOL_ROLE)
-        if rol_espanol:
-            await self.ctx.channel.set_permissions(rol_espanol, send_messages=False, view_channel=True, read_message_history=True, add_reactions=True)
+        # Cerrar permisos de escritura para el rol Nave
+        nave_role = self.ctx.guild.get_role(NAVE_ROLE_ID)
+        if nave_role:
+            await self.ctx.channel.set_permissions(nave_role, send_messages=False, view_channel=True, read_message_history=True, add_reactions=True)
         
         await asyncio.sleep(3)
         await msg_anuncio.delete()
@@ -300,11 +300,11 @@ class DuelGameView(discord.ui.View):
         except discord.HTTPException:
             pass
         
-        # Abrir permisos de escritura para el rol Español
+        # Abrir permisos de escritura para el rol Nave
         if self.channel and self.guild:
-            rol_espanol = discord.utils.get(self.guild.roles, name=ESPANOL_ROLE)
-            if rol_espanol:
-                await self.channel.set_permissions(rol_espanol, send_messages=True, view_channel=True, read_message_history=True, add_reactions=True)
+            nave_role = self.guild.get_role(NAVE_ROLE_ID)
+            if nave_role:
+                await self.channel.set_permissions(nave_role, send_messages=True, view_channel=True, read_message_history=True, add_reactions=True)
             # Anunciar fin de batalla
             await self.channel.send("Batalla Finalizada, Se Retoma la Actividad!")
 
@@ -324,8 +324,7 @@ class Duels(commands.Cog):
         if time.time() - last_time < cooldown:
             remaining = cooldown - (time.time() - last_time)
             timestamp = int(ctx.message.created_at.timestamp()) + int(remaining)
-            await ctx.send(f"🚀 La Arena de combate esta ocupada por Jugadores de otros universos Intenta <t:{timestamp}:R>")
-            return
+            await ctx.reply(f"🚀 La Arena de combate esta ocupada por Jugadores de otros universos Intenta <t:{timestamp}:R>")
         _last_duel_times[ctx.guild.id] = time.time()
 
         if ctx.author.id == usuario.id:
@@ -361,7 +360,7 @@ class Duels(commands.Cog):
         elif isinstance(error, commands.CommandOnCooldown):
             retry_after = error.retry_after
             timestamp = int(ctx.message.created_at.timestamp()) + int(retry_after)
-            await ctx.send(f"🚀 La Arena de combate esta ocupada por Jugadores de otros universos Intenta <t:{timestamp}:R>")
+            await ctx.reply(f"🚀 La Arena de combate esta ocupada por Jugadores de otros universos Intenta <t:{timestamp}:R>")
         else:
             raise error
 

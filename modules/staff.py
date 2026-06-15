@@ -22,7 +22,8 @@ from core.database import (
 from core import cache
 from core.config import (
     ruleta_config, rr_config, game_config, dados_config, COIN,
-    STAFF_ROLE, COORDINADOR_ROLE
+    STAFF_ROLE, COORDINADOR_ROLE,
+    STAFF_ROLE_ID, COORDINADOR_ROLE_ID
 )
 from modules.memo import _memo_config
 from modules.Empleos import _EMPLEOS_CACHE, get_empleo_user, save_empleo_user, get_all_empleos_activos
@@ -39,8 +40,8 @@ _pending_nave = {}
 
 def is_staff():
     async def predicate(interaction: discord.Interaction):
-        role = discord.utils.get(interaction.user.roles, name=STAFF_ROLE)
-        if not role:
+        user_role_ids = {r.id for r in interaction.user.roles}
+        if STAFF_ROLE_ID not in user_role_ids and COORDINADOR_ROLE_ID not in user_role_ids:
             await interaction.response.send_message(
                 "❌ No tienes permisos para usar este comando.", ephemeral=True
             )

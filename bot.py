@@ -64,7 +64,12 @@ from core.config import AYUDA_CHANNEL_ID
 intents = discord.Intents.default()
 intents.message_content = True
 intents.members = True
-bot = commands.Bot(command_prefix="!", intents=intents, help_command=None)
+
+async def get_prefix(bot, message):
+    """Normaliza el prefijo '!' aceptando '!comando' y '! comando' indistintamente."""
+    return ["! ", "!"]
+
+bot = commands.Bot(command_prefix=get_prefix, intents=intents, help_command=None)
 
 
 async def load_modules():
@@ -121,8 +126,8 @@ async def check_cargos_loop():
 @bot.event
 async def on_command_error(ctx, error):
     if isinstance(error, commands.CommandNotFound):
-        await ctx.send(
-            f"❌ Este comando no es válido, consulta **/ayuda_nave** en el canal <#{AYUDA_CHANNEL_ID}>",
+        await ctx.reply(
+            "❌ Este comando no es válido, Consulta la Guia de la Nave en <#1505296434076057752>",
             delete_after=10
         )
     elif isinstance(error, commands.CommandOnCooldown):

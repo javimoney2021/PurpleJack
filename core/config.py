@@ -3,6 +3,8 @@ COIN = "<:PurpleCoin:1501855737842892941>"
 # ── ROLES ──────────────────────────────────────────────
 STAFF_ROLE = "Equipo de Eventos"
 COORDINADOR_ROLE = "Coordinador-ES"
+STAFF_ROLE_ID = 1241815781453594678       # Equipo de Eventos
+COORDINADOR_ROLE_ID = 1464644504903614629  # Coordinador-ES
 
 # ── CANALES E IDs ──────────────────────────────────────
 AYUDA_CHANNEL_ID = 1488006594976415786

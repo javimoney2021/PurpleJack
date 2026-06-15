@@ -649,7 +649,7 @@ class Shop(commands.Cog):
                 description="No tienes roles temporales activos en este momento.",
                 color=discord.Color.green()
             )
-            return await ctx.send(embed=embed)
+            return await ctx.reply(embed=embed)
 
         lines = [
             "🟢 **ROLES - TIEMPO RESTANTE**",
@@ -664,7 +664,7 @@ class Shop(commands.Cog):
             color=discord.Color.green()
         )
 
-        await ctx.send(embed=embed)
+        await ctx.reply(embed=embed)
 
     @commands.command(name="inv")
     async def inventario(self, ctx):
