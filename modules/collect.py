@@ -1,6 +1,5 @@
 from discord.ext import commands
 import discord
-import asyncio
 import logging
 import time
 from core.database import (
@@ -90,18 +89,16 @@ class Collect(commands.Cog):
 
             await ctx.message.reply(embed=embed)
 
-            # ── Persistir a DB INMEDIATAMENTE tras la respuesta ───────────
-            # collect es una operación crítica: el banco debe quedar
-            # registrado en DB de inmediato, no esperar el flush de 10 min.
+            # ── Persistir a DB de forma garantizada ──────────────────────
+            # Se awaita directamente para asegurar que el banco y cooldowns
+            # queden escritos en DB antes de terminar el handler.
+            # Blindado contra reinicios inmediatos post-collect.
             if cobros and total_ganado > 0:
-                async def _persist_collect():
-                    try:
-                        await flush_user_to_db(user_id)
-                        await save_collect_cooldowns(user_id, cobros)
-                    except Exception as e:
-                        logger.warning(f"collect persist error [{user_id}]: {e}")
-
-                asyncio.create_task(_persist_collect())
+                try:
+                    await flush_user_to_db(user_id)
+                    await save_collect_cooldowns(user_id, cobros)
+                except Exception as e:
+                    logger.warning(f"collect persist error [{user_id}]: {e}")
 
         except Exception as e:
             logger.error(f"ERROR !collect: {e}")

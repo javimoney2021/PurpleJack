@@ -56,7 +56,7 @@ from core.database import (
     init_db, load_items_to_cache, load_cargos_to_cache,
     load_collect_config_to_cache, delete_cargo_temporal,
     create_game_config_table, load_game_config, load_dados_config,
-    load_veterano_config_to_cache
+    load_veterano_config_to_cache, save_collect_cooldowns
 )
 from core import cache
 from core.config import AYUDA_CHANNEL_ID
@@ -138,6 +138,14 @@ async def on_command_error(ctx, error):
 async def shutdown():
     logger.warning("Apagando bot — flusheando caché a DB...")
     await cache.flush_to_db()
+    # ── Persistir cooldowns de collect pendientes en cache ──
+    all_cooldowns = cache.get_all_collect_cooldowns()
+    for user_id, cobros in all_cooldowns.items():
+        if cobros:
+            try:
+                await save_collect_cooldowns(user_id, cobros)
+            except Exception as e:
+                logger.warning(f"shutdown: error persistiendo collect cooldowns [{user_id}]: {e}")
     logger.info("Caché flusheada correctamente.")
     await bot.close()
 

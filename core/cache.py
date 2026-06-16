@@ -181,6 +181,10 @@ _collect_cooldowns = {}
 def get_collect_cooldowns(user_id):
     return _collect_cooldowns.get(user_id)
 
+def get_all_collect_cooldowns() -> dict:
+    """Retorna copia de todos los cooldowns de collect en cache — usado en shutdown."""
+    return dict(_collect_cooldowns)
+
 def set_collect_cooldowns(user_id, data: dict):
     _collect_cooldowns[user_id] = data
     touch_user(user_id)
