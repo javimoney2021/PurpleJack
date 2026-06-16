@@ -56,9 +56,8 @@ class BasicGames(commands.Cog):
 
         if now - last < cooldown:
             remaining = cooldown - (now - last)
-            nick = ctx.author.nick or ctx.author.display_name
             return await ctx.message.reply(
-                f"**{nick}** ⏳ Podrás volver a trabajar <t:{int(now + remaining)}:R>."
+                f"⏳ Podrás volver a usar **!work** <t:{int(now + remaining)}:R>"
             )
 
         amount = random.randint(game_config["work"]["min"], game_config["work"]["max"])

@@ -581,7 +581,8 @@ class Empleos(commands.Cog):
 
         if not bypass:
             if data.get("ultimo_trabajo", 0) and (now - data["ultimo_trabajo"]) < info["duracion_horas"] * 3600:
-                return await ctx.reply("⏳ Debes esperar 3 horas para volver a trabajar.")
+                disponible_en = int(data["ultimo_trabajo"] + info["duracion_horas"] * 3600)
+                return await ctx.reply(f"⏳ Podrás volver a trabajar <t:{disponible_en}:R>")
 
             # ── Despido por inactividad (solo si el sistema está activo) ──
             if _despidos_config["activo"] and data.get("ultimo_trabajo", 0) > 0:
