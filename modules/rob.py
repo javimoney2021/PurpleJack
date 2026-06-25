@@ -73,26 +73,32 @@ class Rob(commands.Cog):
                     return
 
         # Verificar balance mínimo del objetivo
-        if target_user["balance"] < 100:
-            target_nick = target.nick or target.display_name
-            return await ctx.send(
-                f"🦋 Solo hay mariposas en la cartera de **{target_nick}**. "
-                f"¿Qué le vas a robar? ¡Ve a trabajar!"
+        if target_user["balance"] < 5000:
+            set_rob_cooldown(author_id)
+            return await ctx.message.reply(
+                f"😳 No te avergüenza robar a alguien que no tiene ni para una Tarjeta de Rol? "
+                f"Atrévete a por los más grandes."
             )
 
-        # 50/50 configurable — monto fijo de robo: 5000
-        ROB_AMOUNT = 5000
+        # Porcentajes dinámicos sobre el balance del target
+        # Éxito: 15% — Fallo: 8% (hardcoded)
         success = random.random() <= rob_config["exito_prob"]
 
         if success:
-            amount = min(ROB_AMOUNT, target_user["balance"])
-            await update_balance(author_id, amount)
-            await update_balance(target_id, -amount)
-            await ctx.reply(
-                f"💰 Has robado exitosamente **{amount}** {COIN} a {target.mention}."
+            monto_robo = int(target_user["balance"] * 0.15)
+            await update_balance(author_id, monto_robo)
+            await update_balance(target_id, -monto_robo)
+            await ctx.message.reply(
+                f"✅ Robo exitoso. Le sacaste **{monto_robo:,}** {COIN} a {target.mention} "
+                f"sin que se diera cuenta."
             )
         else:
-            await ctx.reply("🚔 Tu robo ha fallado.")
+            penalizacion = int(target_user["balance"] * 0.08)
+            await update_balance(author_id, -penalizacion)
+            await ctx.message.reply(
+                f"🚔 Tu robo falló. Perdiste **{penalizacion:,}** {COIN} intentando "
+                f"robar a {target.mention}."
+            )
 
         set_rob_cooldown(author_id)
 
