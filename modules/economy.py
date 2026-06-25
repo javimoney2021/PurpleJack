@@ -6,6 +6,7 @@ import time
 from core.database import get_user, update_balance, update_bank
 from core import cache
 from core.config import COIN, game_config, ruleta_config, rob_config, rr_config, dados_config
+from core.cache import MAX_BANK
 
 TOP_COOLDOWN = 300
 
@@ -69,7 +70,23 @@ class DepositModal(ui.Modal, title="Depositar al Banco"):
                     "❌ No tienes suficiente balance.", ephemeral=True
                 )
 
+            # Validar límite de banco antes de proceder
+            banco_actual = user["bank"]
+            if banco_actual >= MAX_BANK:
+                return await interaction.response.send_message(
+                    f"🏦 Tu banco ya está al límite máximo ({MAX_BANK:,} {COIN}).\n"
+                    f"Retira fondos antes de depositar.",
+                    ephemeral=True
+                )
+
+            # Calcular cuánto cabe realmente en el banco
+            espacio_disponible = MAX_BANK - banco_actual
+            aplicado_banco    = min(amount, espacio_disponible)
+            excedente_balance = amount - aplicado_banco
+
             # update_balance / update_bank hacen flush inmediato a DB
+            # update_bank internamente aplica el mismo cálculo vía cache,
+            # por lo que el resultado es siempre consistente.
             await update_balance(self.user_id, -amount)
             await update_bank(self.user_id, amount)
 
@@ -81,7 +98,16 @@ class DepositModal(ui.Modal, title="Depositar al Banco"):
             embed.set_field_at(1, name=embed.fields[1].name,
                                value=f"{user['bank']} {COIN}",    inline=True)
             await self.message.edit(embed=embed)
-            await interaction.response.defer()
+
+            # Informar distribución si el banco se llenó durante el depósito
+            if excedente_balance > 0:
+                await interaction.response.send_message(
+                    f"🏦 Banco lleno: **{aplicado_banco:,}** {COIN} depositados al banco.\n"
+                    f"💰 **{excedente_balance:,}** {COIN} quedaron en tu balance.",
+                    ephemeral=True
+                )
+            else:
+                await interaction.response.defer()
         except ValueError:
             await interaction.response.send_message(
                 "❌ Ingresa un número válido.", ephemeral=True

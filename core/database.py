@@ -175,7 +175,11 @@ async def update_balance(user_id, amount):
 
 
 async def update_bank(user_id, amount):
-    """Actualiza banco en RAM y persiste a DB de inmediato."""
+    """
+    Actualiza banco en RAM y persiste a DB de inmediato.
+    Si amount es positivo y el banco supera MAX_BANK, el excedente
+    se redirige al balance automáticamente. Garantiza flush en ambos casos.
+    """
     await get_user(user_id)
     cache.update_cached_bank(user_id, amount)
     await flush_user_to_db(user_id)
@@ -195,7 +199,8 @@ async def cache_balance(user_id, amount):
 
 async def cache_bank(user_id, amount):
     """
-    Actualiza banco solo en RAM.
+    Actualiza banco solo en RAM respetando MAX_BANK.
+    El excedente se redirige al balance automáticamente.
     La persistencia ocurre en el flush_loop (cada 10 min).
     """
     await get_user(user_id)

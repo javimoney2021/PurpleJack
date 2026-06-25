@@ -10,6 +10,7 @@ from core.database import (
 )
 from core import cache
 from core.config import COIN
+from core.cache import MAX_BANK
 
 logger = logging.getLogger(__name__)
 
@@ -68,8 +69,15 @@ class Collect(commands.Cog):
             # ── Garantizar usuario en cache ANTES de actualizar el banco ──
             # Esto evita la pérdida silenciosa de datos si el usuario no
             # estaba en cache (inactividad >2h o primer uso del día).
+            aplicado_banco    = 0
+            excedente_balance = 0
             if cobros and total_ganado > 0:
                 await get_user(user_id)
+                # Calcular distribución ANTES de aplicar para el mensaje
+                banco_actual      = cache.get_cached(user_id)["bank"]
+                espacio_disponible = max(0, MAX_BANK - banco_actual)
+                aplicado_banco    = min(total_ganado, espacio_disponible)
+                excedente_balance = total_ganado - aplicado_banco
                 cache.update_cached_bank(user_id, total_ganado)
 
             # Construir y enviar embed de inmediato
@@ -80,12 +88,25 @@ class Collect(commands.Cog):
                 color=discord.Color.purple(),
             )
             if total_ganado > 0:
-                embed.add_field(
-                    name="Total cobrado",
-                    value=f"{COIN} **{total_ganado}** Enviados a tu banco.",
-                    inline=False,
-                )
-            embed.set_footer(text="💷 Tus collects se enviarán al banco.")
+                if excedente_balance > 0:
+                    embed.add_field(
+                        name="Total cobrado",
+                        value=(
+                            f"🏦 **{aplicado_banco:,}** {COIN} → Banco\n"
+                            f"💰 **{excedente_balance:,}** {COIN} → Balance *(banco lleno)*"
+                        ),
+                        inline=False,
+                    )
+                    embed.set_footer(text=f"🏦 Banco al límite ({MAX_BANK:,}). El excedente fue al balance.")
+                else:
+                    embed.add_field(
+                        name="Total cobrado",
+                        value=f"{COIN} **{total_ganado:,}** Enviados a tu banco.",
+                        inline=False,
+                    )
+                    embed.set_footer(text="💷 Tus collects se enviarán al banco.")
+            else:
+                embed.set_footer(text="💷 Tus collects se enviarán al banco.")
 
             await ctx.message.reply(embed=embed)
 

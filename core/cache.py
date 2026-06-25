@@ -11,6 +11,7 @@ _last_activity = {}
 
 FLUSH_INTERVAL = 600   # 10 minutos — mini-juegos se persistirán en este ciclo
 CACHE_EXPIRE   = 7200  # 2 horas de inactividad
+MAX_BANK       = 200_000  # Límite máximo de almacenamiento en banco
 
 
 def touch_user(user_id):
@@ -39,9 +40,34 @@ def update_cached_balance(user_id, amount):
         mark_dirty(user_id)
 
 def update_cached_bank(user_id, amount):
-    if user_id in _cache:
+    """
+    Actualiza banco en caché respetando MAX_BANK.
+    Si amount es positivo y supera el límite, el excedente se aplica
+    automáticamente al balance del mismo usuario.
+    Retorna la cantidad efectivamente aplicada al banco.
+    """
+    if user_id not in _cache:
+        return amount  # sin caché no hay nada que hacer, DB lo manejará
+
+    if amount <= 0:
+        # Retiros o penalizaciones: siempre se aplican sin límite
         _cache[user_id]["bank"] += amount
         mark_dirty(user_id)
+        return amount
+
+    banco_actual = _cache[user_id]["bank"]
+    espacio_disponible = max(0, MAX_BANK - banco_actual)
+
+    aplicado_banco    = min(amount, espacio_disponible)
+    excedente_balance = amount - aplicado_banco
+
+    _cache[user_id]["bank"] += aplicado_banco
+
+    if excedente_balance > 0:
+        _cache[user_id]["balance"] += excedente_balance
+
+    mark_dirty(user_id)
+    return aplicado_banco
 
 def update_cached_cooldown(user_id, command, timestamp):
     if user_id in _cache:
