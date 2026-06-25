@@ -15,6 +15,8 @@ EMOJIS_PARES  = ["🎲", "🍪", "🍇", "🔪", "💎", "🍼", "👑", "🚀"]
 # ── ESTADO GLOBAL ──────────────────────────────────────
 _active_memo: set[int] = set()   # {user_id}
 _memo_config = {"activa": True}
+_memo_cooldowns: dict[int, float] = {}  # {user_id: expira_en}
+MEMO_COOLDOWN = 300  # segundos (5 minutos)
 
 
 # ── VIEW ───────────────────────────────────────────────
@@ -225,8 +227,21 @@ class Memo(commands.Cog):
         self.bot = bot
 
     @commands.command(name="memo")
-    @commands.cooldown(1, 300, commands.BucketType.user)
     async def memo(self, ctx, monto: int = None):
+        import time
+        user_id = ctx.author.id
+        now     = time.time()
+
+        # ── Cooldown individual por usuario ────────────────────────
+        expira_en = _memo_cooldowns.get(user_id, 0)
+        if expira_en > now:
+            remaining = int(expira_en - now)
+            tiempo = f"{remaining // 60}m {remaining % 60}s" if remaining >= 60 else f"{remaining}s"
+            return await ctx.send(
+                f"⏳ {ctx.author.mention} Podrás jugar nuevamente en **{tiempo}**.",
+                delete_after=10
+            )
+
         if monto is None:
             return await ctx.send(
                 f"❌ {ctx.author.mention} Formato correcto: `!memo {{monto}}`"
@@ -235,34 +250,34 @@ class Memo(commands.Cog):
             return await ctx.send("🔧 El sistema de Memo está desactivado. Intenta después.")
 
         if monto <= 0:
-            ctx.command.reset_cooldown(ctx)
             return await ctx.send(
                 f"❌ {ctx.author.mention} El monto debe ser mayor a 0."
             )
-        if ctx.author.id in _active_memo:
-            ctx.command.reset_cooldown(ctx)
+        if user_id in _active_memo:
             return await ctx.send(
                 f"❌ {ctx.author.mention} Ya tienes una partida activa."
             )
         if monto > MAX_APUESTA:
-            ctx.command.reset_cooldown(ctx)
             return await ctx.send(
                 f"❌ {ctx.author.mention} La apuesta máxima es **{MAX_APUESTA}** {COIN}."
-            )    
+            )
 
-        user_data = await get_user(ctx.author.id)
+        user_data = await get_user(user_id)
         if user_data["balance"] < monto:
             return await ctx.send(
                 f"❌ {ctx.author.mention} No tienes suficiente balance. "
                 f"Necesitas **{monto}** {COIN}."
             )
 
+        # ── Aplicar cooldown individual ANTES de iniciar partida ──
+        _memo_cooldowns[user_id] = now + MEMO_COOLDOWN
+
         # ── Generar tablero aleatorio ──────────────────────────────
         tablero = EMOJIS_PARES * 2
         random.shuffle(tablero)
 
-        await update_balance(ctx.author.id, -monto)  # descuenta al iniciar
-        _active_memo.add(ctx.author.id)
+        await update_balance(user_id, -monto)  # descuenta al iniciar
+        _active_memo.add(user_id)
 
         view = MemoView(ctx.author, monto, tablero)
         msg  = await ctx.send(embed=view._build_embed(), view=view)
@@ -275,14 +290,7 @@ class Memo(commands.Cog):
                 f"❌ {ctx.author.mention} El monto debe ser un número entero. "
                 f"Formato: `!memo {{monto}}`"
             )
-        elif isinstance(error, commands.CommandOnCooldown):
-            retry = int(error.retry_after)
-            tiempo = f"{retry // 60}m {retry % 60}s" if retry >= 60 else f"{retry}s"
-            await ctx.send(
-                f"⏳ {ctx.author.mention} Podrás jugar nuevamente en **{tiempo}**.",
-                delete_after=10
-            )
-        else:    
+        else:
             raise error
 
 
