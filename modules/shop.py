@@ -17,6 +17,8 @@ logger = logging.getLogger(__name__)
 # ── CONFIG ─────────────────────────────────────────────
 ITEMS_PER_PAGE = 5
 PURPLE = 0x9B59B6
+SHOP_EXPIRE_SECONDS = 150
+SHOP_EXPIRED_MESSAGE = "Tienda Caducó, consulte la tienda nuevamente"
 
 
 # ── CONFIRMACION DE COMPRA ─────────────────────────────
@@ -250,6 +252,9 @@ class BuyButton(discord.ui.Button):
         self.bot = bot
 
     async def callback(self, interaction: discord.Interaction):
+        view: TiendaLayout = self.view
+        if view and view.is_shop_expired():
+            return await view.send_expired_message(interaction)
         if interaction.user.id != self.author_id:
             return await interaction.response.send_message(
                 "❌ Este panel no fue generado por ti.", ephemeral=True
@@ -272,6 +277,8 @@ class PrevButton(discord.ui.Button):
 
     async def callback(self, interaction: discord.Interaction):
         view: TiendaLayout = self.view
+        if view.is_shop_expired():
+            return await view.send_expired_message(interaction)
         if interaction.user.id != view.author_id:
             return await interaction.response.send_message(
                 "❌ Este panel no fue generado por ti.", ephemeral=True
@@ -291,6 +298,8 @@ class NextButton(discord.ui.Button):
 
     async def callback(self, interaction: discord.Interaction):
         view: TiendaLayout = self.view
+        if view.is_shop_expired():
+            return await view.send_expired_message(interaction)
         if interaction.user.id != view.author_id:
             return await interaction.response.send_message(
                 "❌ Este panel no fue generado por ti.", ephemeral=True
@@ -305,12 +314,22 @@ class NextButton(discord.ui.Button):
 
 class TiendaLayout(discord.ui.LayoutView):
     def __init__(self, items, author_id, bot):
-        super().__init__(timeout=60)
+        super().__init__(timeout=3600)
         self.items = items
         self.author_id = author_id
         self.bot = bot
         self.page = 0
+        self.expires_at = time.time() + SHOP_EXPIRE_SECONDS
         self._build()
+
+    def is_shop_expired(self) -> bool:
+        return time.time() >= self.expires_at
+
+    async def send_expired_message(self, interaction: discord.Interaction):
+        await interaction.response.send_message(
+            SHOP_EXPIRED_MESSAGE,
+            ephemeral=True
+        )
 
     def _build(self):
         self.clear_items()
