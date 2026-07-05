@@ -1,6 +1,7 @@
 from discord.ext import commands
 import discord
 import logging
+import asyncio
 from core.database import (
     get_user, update_balance, update_bank, get_all_items, get_item_by_name,
     add_to_inventory, get_inventory, remove_from_inventory,
@@ -33,7 +34,7 @@ class ConfirmBuyView(discord.ui.View):
         if interaction.user.id != self.author_id:
             return await interaction.response.send_message("❌ No es tu confirmación.", ephemeral=True)
 
-        await interaction.response.defer(ephemeral=False)
+        await interaction.response.defer(ephemeral=True)
 
         for item in self.children:
             item.disabled = True
@@ -226,7 +227,7 @@ class QuantityModal(discord.ui.Modal):
                 f"**Total: {total} {COIN}**"
             ),
             view=ConfirmBuyView(self.author_id, self.item, self.bot, unidades=unidades),
-            ephemeral=False
+            ephemeral=True
         )
 
 
@@ -372,6 +373,41 @@ class TiendaLayout(discord.ui.LayoutView):
 
     async def on_timeout(self):
         pass
+
+
+class OpenShopView(discord.ui.View):
+    def __init__(self, author_id: int, bot):
+        super().__init__(timeout=60)
+        self.author_id = author_id
+        self.bot = bot
+
+    @discord.ui.button(label="Abrir Tienda", style=discord.ButtonStyle.success)
+    async def abrir_tienda(self, interaction: discord.Interaction, button: discord.ui.Button):
+        if interaction.user.id != self.author_id:
+            return await interaction.response.send_message(
+                "❌ Este panel no fue generado por ti.", ephemeral=True
+            )
+
+        items = await get_all_items()
+        if not items:
+            return await interaction.response.send_message(
+                "🛒 La tienda está vacía por ahora.", ephemeral=True
+            )
+
+        items = sorted(items, key=lambda i: i["precio"])
+        await interaction.response.send_message(
+            view=TiendaLayout(items, interaction.user.id, self.bot),
+            ephemeral=True
+        )
+
+        asyncio.create_task(self._delete_prompt(interaction.message))
+
+    async def _delete_prompt(self, message: discord.Message):
+        await asyncio.sleep(3)
+        try:
+            await message.delete()
+        except Exception:
+            pass
 
 
 # ── BOTON DE USAR ITEM (inventario) ───────────────────
@@ -569,20 +605,18 @@ class Shop(commands.Cog):
         items = await get_all_items()
         if not items:
             return await ctx.send("🛒 La tienda está vacía por ahora.")
-        items = sorted(items, key=lambda i: i["precio"])
 
-        import asyncio
-        view = TiendaLayout(items, ctx.author.id, self.bot)
-        msg = await ctx.send(view=view)
-
-        async def auto_delete():
-            await asyncio.sleep(60)
-            try:
-                await msg.delete()
-            except Exception:
-                pass
-
-        asyncio.create_task(auto_delete())
+        embed = discord.Embed(
+            title="🛒 Tienda de Articulos - Nave SUS",
+            description=(
+                "Ingresa ahora a la tienda de articulos exclusivos de la **Nave**\n"
+                "Exp del Servidor, Roles, Oroestrellas y mas !!!"
+            ),
+            color=discord.Color.blue()
+        )
+        embed.set_thumbnail(url=ctx.author.display_avatar.url)
+        embed.set_footer(text="Presiona Abrir Tienda para revisar el stock disponible.")
+        await ctx.message.reply(embed=embed, view=OpenShopView(ctx.author.id, self.bot))
 
     @commands.command()
     async def info(self, ctx, *, nombre: str = None):

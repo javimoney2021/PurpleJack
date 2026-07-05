@@ -143,7 +143,7 @@ class DadosRollView(discord.ui.View):
         try:
             await interaction.message.edit(embed=embed, view=self)
             if self.message:
-                asyncio.create_task(self.message.delete(delay=60))
+                asyncio.create_task(self.message.delete(delay=80))
         except Exception:
             pass
 

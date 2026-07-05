@@ -169,7 +169,7 @@ class Economy(commands.Cog):
         embed.add_field(name=f"{COIN} Balance", value=f"{user['balance']} {COIN}", inline=True)
         embed.add_field(name="🏦 Banco",        value=f"{user['bank']} {COIN}",    inline=True)
         embed.set_thumbnail(url=ctx.author.display_avatar.url)
-        await ctx.message.reply(embed=embed, view=FinanceView(ctx.author.id))
+        await ctx.message.reply(embed=embed, view=FinanceView(ctx.author.id), delete_after=120)
 
     def format_cooldown(self, seconds: int) -> str:
         if seconds >= 3600:
@@ -254,7 +254,7 @@ class Economy(commands.Cog):
 
         async with pool.acquire() as conn:
             rows = await conn.fetch(
-                "SELECT id, balance, bank FROM users ORDER BY (balance + bank) DESC LIMIT 10"
+                "SELECT id, balance FROM users ORDER BY balance DESC LIMIT 15"
             )
 
         # Usar la función pública get_all_cache() en lugar de importar _cache
@@ -264,9 +264,9 @@ class Economy(commands.Cog):
         for row in rows:
             uid = row["id"]
             if uid in user_cache:
-                total = user_cache[uid]["balance"] + user_cache[uid]["bank"]
+                total = user_cache[uid]["balance"]
             else:
-                total = row["balance"] + row["bank"]
+                total = row["balance"]
             resultados.append((uid, total))
 
         resultados.sort(key=lambda x: x[1], reverse=True)
@@ -286,12 +286,12 @@ class Economy(commands.Cog):
             descripcion += f"{posicion} {nombre} —— {COIN} **{balance}**\n"
 
         embed = discord.Embed(
-            title=f"{COIN} TOP GLOBAL MÁS RICOS {COIN}",
+            title=f"{COIN} TOP BALANCES MAS RICOS {COIN}",
             description=descripcion,
             color=discord.Color.blue(),
         )
-        embed.set_footer(text="Solo se muestra el Top 10 de los más ricos.")
-        await ctx.send(embed=embed, delete_after=20)
+        embed.set_footer(text="Solo se muestra el Top 15 de los más ricos.")
+        await ctx.send(embed=embed, delete_after=60)
 
     @app_commands.command(name="ayuda_nave", description="Muestra la guía de la Nave-Sus")
     async def ayuda_nave(self, interaction: discord.Interaction):

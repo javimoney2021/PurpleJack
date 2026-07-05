@@ -7,7 +7,7 @@ from core.config import COIN
 
 # ── CONFIG ─────────────────────────────────────────────
 MAX_INTENTOS  = 7
-AUTO_DELETE   = 20
+AUTO_DELETE   = 80
 MAX_APUESTA   = 300
 HIDDEN_EMOJI  = "🟦"
 EMOJIS_PARES  = ["🎲", "🍪", "🍇", "🔪", "💎", "🍼", "👑", "🚀"]
