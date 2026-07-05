@@ -459,7 +459,48 @@ class UseButton(discord.ui.Button):
                         "❌ El rol configurado para este item no existe en el servidor.",
                         ephemeral=True
                     )
-                await interaction.user.add_roles(role)
+
+                member = self.guild.get_member(interaction.user.id)
+                if member is None:
+                    try:
+                        member = await self.guild.fetch_member(interaction.user.id)
+                    except Exception as e:
+                        logger.warning(
+                            f"No se pudo obtener member para usar item {item['nombre']} "
+                            f"({interaction.user.id}): {e}"
+                        )
+                        return await interaction.followup.send(
+                            "❌ No pude verificar tu miembro en el servidor. El item no fue consumido.",
+                            ephemeral=True
+                        )
+
+                try:
+                    await member.add_roles(role, reason=f"Uso de item {item['nombre']} en Purple Jack")
+                except discord.Forbidden:
+                    return await interaction.followup.send(
+                        "❌ No tengo permisos o jerarquía suficiente para otorgar ese rol. El item no fue consumido.",
+                        ephemeral=True
+                    )
+                except discord.HTTPException as e:
+                    logger.warning(
+                        f"Discord no pudo asignar rol {role.id} por item {item['nombre']} "
+                        f"a {interaction.user.id}: {e}"
+                    )
+                    return await interaction.followup.send(
+                        "❌ Discord no confirmó la entrega del rol. El item no fue consumido.",
+                        ephemeral=True
+                    )
+
+                try:
+                    member_check = await self.guild.fetch_member(interaction.user.id)
+                except Exception:
+                    member_check = member
+
+                if role.id not in {r.id for r in member_check.roles}:
+                    return await interaction.followup.send(
+                        "❌ No se pudo confirmar que el rol fue entregado. El item no fue consumido.",
+                        ephemeral=True
+                    )
 
             removed = await remove_from_inventory(interaction.user.id, item["nombre"])
             if not removed:
