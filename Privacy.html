@@ -1,453 +1,954 @@
-
 <!DOCTYPE html>
-<html lang="en">
+<html lang="es">
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>Privacy Policy — PurpleJack Bot</title>
+  <meta name="description" content="Políticas de privacidad del bot Purple Jack para Discord, exclusivo del servidor SuperSus SA Oficial." />
+  <title>Purple Jack - Políticas de Privacidad</title>
   <style>
     :root {
-      --bg:        #0f0f13;
-      --surface:   #17171e;
-      --border:    #2a2a38;
-      --accent:    #9b59b6;
-      --accent-2:  #7d3cae;
-      --text:      #e2e2ec;
-      --muted:     #8888a8;
-      --green:     #2ecc71;
-      --red:       #e74c3c;
-      --radius:    12px;
-    }
-    * { box-sizing: border-box; margin: 0; padding: 0; }
-    body {
-      background: var(--bg);
-      color: var(--text);
-      font-family: 'Segoe UI', system-ui, -apple-system, sans-serif;
-      font-size: 16px;
-      line-height: 1.7;
-      min-height: 100vh;
+      --space-0: #07030d;
+      --space-1: #10051d;
+      --space-2: #18082a;
+      --panel: rgba(20, 10, 34, 0.86);
+      --panel-2: rgba(34, 14, 54, 0.88);
+      --line: rgba(201, 144, 255, 0.26);
+      --line-strong: rgba(207, 158, 255, 0.58);
+      --purple: #b46cff;
+      --violet: #7f45ff;
+      --cyan: #52e6ff;
+      --green: #75ffbd;
+      --gold: #ffd166;
+      --text: #fbf6ff;
+      --muted: #d7c5ea;
+      --soft: #a891bc;
+      --radius: 12px;
+      --shadow: 0 24px 80px rgba(0, 0, 0, 0.48);
     }
 
-    /* ── HEADER ── */
-    header {
-      background: linear-gradient(135deg, #0a1a2e 0%, #12406a 50%, #0a1a2e 100%);
-      border-bottom: 1px solid var(--border);
-      padding: 48px 24px 40px;
-      text-align: center;
+    * {
+      box-sizing: border-box;
+      margin: 0;
+      padding: 0;
     }
-    header .logo {
+
+    html {
+      scroll-behavior: smooth;
+    }
+
+    body {
+      min-height: 100vh;
+      color: var(--text);
+      font-family: "Trebuchet MS", "Segoe UI", system-ui, sans-serif;
+      line-height: 1.7;
+      background:
+        radial-gradient(circle at 50% -10%, rgba(180, 108, 255, 0.34), transparent 28%),
+        radial-gradient(circle at 12% 18%, rgba(82, 230, 255, 0.12), transparent 22%),
+        radial-gradient(circle at 84% 6%, rgba(117, 255, 189, 0.10), transparent 18%),
+        linear-gradient(180deg, var(--space-0) 0%, var(--space-1) 46%, #06020a 100%);
+      overflow-x: hidden;
+    }
+
+    body::before,
+    body::after {
+      content: "";
+      position: fixed;
+      inset: 0;
+      z-index: -2;
+      pointer-events: none;
+    }
+
+    body::before {
+      background:
+        radial-gradient(circle, rgba(255,255,255,0.95) 0 1px, transparent 1.5px) 0 0 / 96px 96px,
+        radial-gradient(circle, rgba(180,108,255,0.85) 0 1px, transparent 1.5px) 18px 42px / 132px 132px,
+        radial-gradient(circle, rgba(82,230,255,0.70) 0 1px, transparent 1.5px) 44px 18px / 168px 168px;
+      opacity: 0.46;
+    }
+
+    body::after {
+      background:
+        linear-gradient(115deg, transparent 0%, rgba(180,108,255,0.10) 38%, transparent 56%),
+        repeating-linear-gradient(90deg, rgba(255,255,255,0.026) 0 1px, transparent 1px 86px),
+        repeating-linear-gradient(0deg, rgba(255,255,255,0.018) 0 1px, transparent 1px 86px);
+      z-index: -1;
+    }
+
+    a {
+      color: inherit;
+    }
+
+    .page {
+      width: min(1160px, calc(100% - 32px));
+      margin: 0 auto;
+    }
+
+    header {
+      padding: 36px 0 22px;
+    }
+
+    .hero {
+      min-height: 560px;
+      display: grid;
+      place-items: center;
+      padding: 42px;
+      position: relative;
+      overflow: hidden;
+      border: 1px solid var(--line);
+      border-radius: 22px;
+      background:
+        linear-gradient(180deg, rgba(7, 3, 13, 0.18), rgba(7, 3, 13, 0.76)),
+        radial-gradient(circle at 50% 20%, rgba(180, 108, 255, 0.28), transparent 34%),
+        linear-gradient(135deg, rgba(23, 8, 42, 0.96), rgba(10, 4, 18, 0.94));
+      box-shadow: var(--shadow), inset 0 0 120px rgba(180, 108, 255, 0.10);
+    }
+
+    .hero::before {
+      content: "";
+      position: absolute;
+      inset: 20px;
+      border: 1px solid rgba(82, 230, 255, 0.16);
+      border-radius: 16px;
+      box-shadow: inset 0 0 36px rgba(82, 230, 255, 0.05);
+    }
+
+    .hero::after {
+      content: "";
+      position: absolute;
+      left: 8%;
+      right: 8%;
+      bottom: 18%;
+      height: 2px;
+      background: linear-gradient(90deg, transparent, rgba(82, 230, 255, 0.7), rgba(180, 108, 255, 0.9), transparent);
+      box-shadow: 0 0 18px rgba(82, 230, 255, 0.55);
+    }
+
+    .ship {
+      position: absolute;
+      width: 150px;
+      height: 54px;
+      opacity: 0.72;
+      filter: drop-shadow(0 0 16px rgba(82, 230, 255, 0.32));
+    }
+
+    .ship::before {
+      content: "";
+      position: absolute;
+      inset: 0;
+      background:
+        linear-gradient(90deg, rgba(82, 230, 255, 0.95), rgba(244, 236, 255, 0.95) 36%, rgba(180, 108, 255, 0.95) 74%),
+        linear-gradient(180deg, rgba(255,255,255,0.88), rgba(126,69,255,0.85));
+      clip-path: polygon(0 50%, 34% 15%, 76% 32%, 100% 50%, 76% 68%, 34% 85%);
+    }
+
+    .ship::after {
+      content: "";
+      position: absolute;
+      left: -54px;
+      top: 23px;
+      width: 62px;
+      height: 8px;
+      background: linear-gradient(90deg, transparent, rgba(82, 230, 255, 0.85));
+      box-shadow: 0 0 14px rgba(82, 230, 255, 0.8);
+    }
+
+    .ship-one {
+      top: 84px;
+      right: 82px;
+      transform: rotate(-12deg) scale(0.9);
+    }
+
+    .ship-two {
+      left: 74px;
+      bottom: 116px;
+      transform: rotate(16deg) scale(0.72);
+      opacity: 0.46;
+    }
+
+    .planet {
+      position: absolute;
+      width: 210px;
+      height: 210px;
+      left: -76px;
+      top: -62px;
+      border-radius: 50%;
+      background:
+        linear-gradient(145deg, rgba(180,108,255,0.84), rgba(57,22,89,0.48)),
+        radial-gradient(circle at 38% 32%, rgba(255,255,255,0.36), transparent 18%);
+      box-shadow: inset -18px -24px 50px rgba(7,3,13,0.52), 0 0 58px rgba(180,108,255,0.26);
+      opacity: 0.72;
+    }
+
+    .planet::after {
+      content: "";
+      position: absolute;
+      left: -28px;
+      top: 86px;
+      width: 268px;
+      height: 24px;
+      border: 2px solid rgba(82,230,255,0.28);
+      border-left-color: transparent;
+      border-right-color: transparent;
+      border-radius: 50%;
+      transform: rotate(-18deg);
+    }
+
+    .hero-content {
+      position: relative;
+      z-index: 2;
+      text-align: center;
+      max-width: 860px;
+      padding: 18px;
+    }
+
+    .eyebrow {
       display: inline-flex;
       align-items: center;
-      gap: 12px;
-      margin-bottom: 16px;
-    }
-    header .logo svg {
-      width: 40px; height: 40px;
-    }
-    header h1 {
-      font-size: clamp(1.6rem, 4vw, 2.4rem);
-      font-weight: 700;
-      background: linear-gradient(90deg, #6dd5fa, #2980b9);
-      -webkit-background-clip: text;
-      -webkit-text-fill-color: transparent;
-      background-clip: text;
-      letter-spacing: -0.5px;
-    }
-    header .subtitle {
-      color: var(--muted);
-      margin-top: 6px;
-      font-size: 0.95rem;
-    }
-    .badge {
-      display: inline-block;
-      background: rgba(41,128,185,0.18);
-      border: 1px solid rgba(41,128,185,0.35);
-      color: #6dd5fa;
+      justify-content: center;
+      min-height: 34px;
+      color: #ebd9ff;
+      background: rgba(82, 230, 255, 0.08);
+      border: 1px solid rgba(82, 230, 255, 0.28);
       border-radius: 999px;
-      font-size: 0.78rem;
-      padding: 4px 14px;
-      margin-top: 12px;
-      letter-spacing: 0.5px;
-    }
-
-    /* ── LAYOUT ── */
-    main {
-      max-width: 820px;
-      margin: 0 auto;
-      padding: 48px 24px 80px;
-    }
-    .notice {
-      background: rgba(41,128,185,0.1);
-      border-left: 4px solid #2980b9;
-      border-radius: 0 var(--radius) var(--radius) 0;
-      padding: 16px 20px;
-      margin-bottom: 40px;
-      font-size: 0.92rem;
-      color: #a8d4f0;
-    }
-
-    /* ── SECTIONS ── */
-    section {
-      background: var(--surface);
-      border: 1px solid var(--border);
-      border-radius: var(--radius);
-      padding: 32px;
-      margin-bottom: 24px;
-      transition: border-color .2s;
-    }
-    section:hover { border-color: rgba(41,128,185,0.4); }
-
-    .section-num {
-      display: inline-block;
-      background: #2980b9;
-      color: #fff;
-      font-size: 0.72rem;
-      font-weight: 700;
-      letter-spacing: 1px;
+      padding: 6px 14px;
+      font-size: 0.82rem;
+      font-weight: 800;
+      letter-spacing: 0;
       text-transform: uppercase;
-      padding: 3px 10px;
-      border-radius: 999px;
+      margin-bottom: 20px;
+      box-shadow: 0 0 18px rgba(82, 230, 255, 0.10);
+    }
+
+    h1 {
+      font-family: Impact, "Arial Black", "Trebuchet MS", sans-serif;
+      font-size: 4.8rem;
+      line-height: 0.96;
+      letter-spacing: 0;
+      text-transform: uppercase;
+      color: #ffffff;
+      text-shadow:
+        0 0 12px rgba(180, 108, 255, 0.72),
+        0 0 34px rgba(82, 230, 255, 0.25),
+        0 8px 0 rgba(65, 20, 104, 0.55);
       margin-bottom: 12px;
     }
-    section h2 {
-      font-size: 1.25rem;
+
+    .subtitle {
+      color: var(--cyan);
+      font-size: 1.38rem;
+      font-weight: 900;
+      text-transform: uppercase;
+      text-shadow: 0 0 18px rgba(82, 230, 255, 0.38);
+      margin-bottom: 18px;
+    }
+
+    .lead {
+      color: var(--muted);
+      font-size: 1.08rem;
+      max-width: 780px;
+      margin: 0 auto;
+    }
+
+    .meta-row {
+      display: flex;
+      flex-wrap: wrap;
+      justify-content: center;
+      gap: 10px;
+      margin-top: 26px;
+    }
+
+    .meta {
+      display: inline-flex;
+      align-items: center;
+      min-height: 38px;
+      padding: 7px 14px;
+      border: 1px solid rgba(244, 236, 255, 0.18);
+      color: #efe3ff;
+      background: rgba(255, 255, 255, 0.055);
+      font-size: 0.88rem;
       font-weight: 700;
-      color: #93c9f0;
-      margin-bottom: 16px;
+      clip-path: polygon(10px 0, 100% 0, calc(100% - 10px) 100%, 0 100%);
     }
-    section p {
-      color: #c4c4de;
+
+    nav {
+      position: sticky;
+      top: 0;
+      z-index: 10;
+      margin: 22px 0 34px;
+      padding: 12px;
+      background: rgba(8, 3, 14, 0.88);
+      border: 1px solid rgba(82, 230, 255, 0.18);
+      border-radius: 14px;
+      backdrop-filter: blur(16px);
+      box-shadow: 0 16px 44px rgba(0,0,0,0.28);
+    }
+
+    .nav-grid {
+      display: grid;
+      grid-template-columns: repeat(4, minmax(0, 1fr));
+      gap: 10px;
+    }
+
+    .nav-grid a {
+      min-height: 46px;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      text-align: center;
+      text-decoration: none;
+      color: #f4ecff;
+      background:
+        linear-gradient(135deg, rgba(82,230,255,0.10), rgba(180,108,255,0.14)),
+        rgba(255,255,255,0.04);
+      border: 1px solid rgba(180, 108, 255, 0.32);
+      border-radius: 10px;
+      padding: 9px 10px;
+      font-size: 0.92rem;
+      font-weight: 850;
+      box-shadow: inset 0 0 18px rgba(82,230,255,0.04);
+      transition: transform 0.18s ease, border-color 0.18s ease, box-shadow 0.18s ease;
+      position: relative;
+      overflow: hidden;
+    }
+
+    .nav-grid a::before {
+      content: "";
+      position: absolute;
+      inset: 0;
+      border-top: 1px solid rgba(82,230,255,0.44);
+      opacity: 0.78;
+    }
+
+    .nav-grid a:hover {
+      transform: translateY(-2px);
+      border-color: rgba(82, 230, 255, 0.72);
+      box-shadow: 0 0 22px rgba(82, 230, 255, 0.14), inset 0 0 20px rgba(180,108,255,0.12);
+    }
+
+    main {
+      padding-bottom: 64px;
+    }
+
+    section {
+      scroll-margin-top: 104px;
+      margin-bottom: 22px;
+      padding: 30px;
+      background:
+        linear-gradient(135deg, rgba(255,255,255,0.035), transparent 28%),
+        var(--panel);
+      border: 1px solid var(--line);
+      border-radius: var(--radius);
+      box-shadow: 0 16px 52px rgba(0, 0, 0, 0.30), inset 0 1px 0 rgba(255,255,255,0.04);
+      position: relative;
+      overflow: hidden;
+    }
+
+    section::before {
+      content: "";
+      position: absolute;
+      left: 0;
+      top: 0;
+      bottom: 0;
+      width: 4px;
+      background: linear-gradient(180deg, var(--cyan), var(--purple));
+      box-shadow: 0 0 18px rgba(82,230,255,0.38);
+    }
+
+    .section-label {
+      display: inline-flex;
+      align-items: center;
+      min-height: 29px;
+      padding: 4px 11px;
+      border-radius: 999px;
+      background: rgba(82, 230, 255, 0.08);
+      border: 1px solid rgba(82, 230, 255, 0.26);
+      color: #c8f7ff;
+      font-size: 0.78rem;
+      font-weight: 900;
+      letter-spacing: 0;
+      text-transform: uppercase;
       margin-bottom: 12px;
-      font-size: 0.96rem;
     }
-    section p:last-child { margin-bottom: 0; }
 
-    ul, ol { padding-left: 20px; margin: 10px 0; }
+    h2 {
+      font-size: 1.72rem;
+      line-height: 1.22;
+      margin-bottom: 14px;
+      letter-spacing: 0;
+      color: #ffffff;
+      text-shadow: 0 0 14px rgba(180,108,255,0.28);
+    }
+
+    h3 {
+      color: #efe0ff;
+      font-size: 1.04rem;
+      margin: 22px 0 8px;
+    }
+
+    p {
+      color: var(--muted);
+      margin-bottom: 12px;
+    }
+
+    p:last-child {
+      margin-bottom: 0;
+    }
+
+    strong {
+      color: var(--text);
+    }
+
+    ul {
+      margin: 12px 0 0 20px;
+      color: var(--muted);
+    }
+
     li {
-      color: #c4c4de;
-      margin-bottom: 6px;
-      font-size: 0.96rem;
+      margin-bottom: 8px;
     }
-    strong { color: var(--text); }
 
-    /* ── TABLE ── */
+    .notice {
+      border-color: rgba(117, 255, 189, 0.32);
+      background:
+        linear-gradient(135deg, rgba(117, 255, 189, 0.10), rgba(180, 108, 255, 0.10)),
+        var(--panel);
+    }
+
+    .warning {
+      border-color: rgba(255, 209, 102, 0.38);
+      background:
+        linear-gradient(135deg, rgba(255, 209, 102, 0.12), rgba(180, 108, 255, 0.10)),
+        var(--panel);
+    }
+
+    .info-grid {
+      display: grid;
+      grid-template-columns: repeat(3, minmax(0, 1fr));
+      gap: 12px;
+      margin-top: 18px;
+    }
+
+    .info-box {
+      padding: 16px;
+      border: 1px solid rgba(82, 230, 255, 0.16);
+      border-radius: 12px;
+      background: rgba(255, 255, 255, 0.045);
+      box-shadow: inset 0 0 22px rgba(180,108,255,0.04);
+    }
+
+    .info-box span {
+      display: block;
+      color: var(--soft);
+      font-size: 0.78rem;
+      font-weight: 900;
+      text-transform: uppercase;
+      letter-spacing: 0;
+      margin-bottom: 4px;
+    }
+
+    .info-box b {
+      color: var(--text);
+      font-size: 0.98rem;
+    }
+
     .data-table {
       width: 100%;
       border-collapse: collapse;
-      margin: 16px 0;
-      font-size: 0.92rem;
+      margin-top: 16px;
+      overflow: hidden;
+      border-radius: 12px;
+      font-size: 0.94rem;
     }
-    .data-table th {
-      background: rgba(41,128,185,0.15);
-      color: #93c9f0;
-      font-weight: 600;
-      text-align: left;
-      padding: 10px 14px;
-      border: 1px solid var(--border);
-    }
+
+    .data-table th,
     .data-table td {
-      padding: 9px 14px;
-      border: 1px solid var(--border);
-      color: #c4c4de;
+      border: 1px solid rgba(255, 255, 255, 0.08);
+      padding: 12px 14px;
+      text-align: left;
       vertical-align: top;
     }
-    .data-table tr:nth-child(even) td {
-      background: rgba(255,255,255,0.02);
+
+    .data-table th {
+      color: #ffffff;
+      background: linear-gradient(135deg, rgba(82,230,255,0.14), rgba(180,108,255,0.18));
+      font-weight: 900;
     }
 
-    /* ── PILLS ── */
-    .pill {
-      display: inline-block;
-      border-radius: 999px;
-      font-size: 0.75rem;
-      font-weight: 600;
-      padding: 2px 10px;
-    }
-    .pill-yes  { background: rgba(46,204,113,0.15); color: #2ecc71; border: 1px solid rgba(46,204,113,0.3); }
-    .pill-no   { background: rgba(231,76,60,0.15);  color: #e74c3c; border: 1px solid rgba(231,76,60,0.3); }
-
-    /* ── HIGHLIGHT ── */
-    .highlight {
-      background: rgba(41,128,185,0.08);
-      border: 1px solid rgba(41,128,185,0.25);
-      border-radius: 8px;
-      padding: 14px 18px;
-      margin: 14px 0;
-    }
-
-    /* ── FOOTER ── */
-    footer {
-      text-align: center;
-      padding: 32px 24px;
-      border-top: 1px solid var(--border);
+    .data-table td {
       color: var(--muted);
-      font-size: 0.85rem;
+      background: rgba(255, 255, 255, 0.035);
     }
-    footer a { color: #2980b9; text-decoration: none; }
-    footer a:hover { text-decoration: underline; }
+
+    .tag {
+      display: inline-flex;
+      align-items: center;
+      min-height: 28px;
+      border-radius: 999px;
+      padding: 3px 10px;
+      font-size: 0.78rem;
+      font-weight: 900;
+      color: #07130f;
+      background: var(--green);
+    }
+
+    .tag-purple {
+      color: #f8f1ff;
+      background: var(--violet);
+    }
+
+    footer {
+      border-top: 1px solid rgba(82, 230, 255, 0.18);
+      background:
+        linear-gradient(90deg, rgba(82,230,255,0.06), rgba(180,108,255,0.10), rgba(82,230,255,0.06)),
+        rgba(6, 2, 10, 0.90);
+      padding: 28px 0 34px;
+      color: var(--soft);
+    }
+
+    .footer-inner {
+      width: min(1160px, calc(100% - 32px));
+      margin: 0 auto;
+      display: flex;
+      flex-wrap: wrap;
+      gap: 12px;
+      align-items: center;
+      justify-content: space-between;
+    }
+
+    .footer-inner a {
+      color: #d9c1ff;
+      text-decoration: none;
+      font-weight: 800;
+    }
+
+    .footer-inner a:hover {
+      text-decoration: underline;
+    }
+
+    @media (max-width: 900px) {
+      .hero {
+        min-height: 500px;
+        padding: 30px 22px;
+      }
+
+      h1 {
+        font-size: 3.5rem;
+      }
+
+      .subtitle {
+        font-size: 1.16rem;
+      }
+
+      .nav-grid {
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+      }
+
+      section {
+        padding: 22px;
+      }
+
+      .info-grid {
+        grid-template-columns: 1fr;
+      }
+
+      .ship-one {
+        right: 24px;
+        top: 62px;
+      }
+
+      .ship-two {
+        left: 22px;
+        bottom: 80px;
+      }
+    }
+
+    @media (max-width: 560px) {
+      .page {
+        width: min(100% - 22px, 1160px);
+      }
+
+      header {
+        padding-top: 22px;
+      }
+
+      .hero {
+        min-height: 480px;
+      }
+
+      h1 {
+        font-size: 2.7rem;
+      }
+
+      .lead {
+        font-size: 1rem;
+      }
+
+      .nav-grid {
+        grid-template-columns: 1fr;
+      }
+
+      .data-table {
+        display: block;
+        overflow-x: auto;
+        white-space: nowrap;
+      }
+
+      .ship {
+        width: 110px;
+        height: 42px;
+      }
+
+      .planet {
+        width: 150px;
+        height: 150px;
+      }
+
+      .footer-inner {
+        display: block;
+      }
+
+      .footer-inner p + p {
+        margin-top: 8px;
+      }
+    }
   </style>
 </head>
 <body>
-
-<header>
-  <div class="logo">
-    <svg viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg" width="40" height="40">
-      <circle cx="12" cy="12" r="10" fill="none" stroke="#2980b9" stroke-width="2"/>
-      <path d="M12 8v4M12 16h.01" stroke="#6dd5fa" stroke-width="2.5" stroke-linecap="round"/>
-    </svg>
-  </div>
-  <h1>PurpleJack Bot</h1>
-  <p class="subtitle">Privacy Policy</p>
-  <span class="badge">Effective Date: June 11, 2026</span>
-</header>
-
-<main>
-
-  <div class="notice">
-    This Privacy Policy describes how PurpleJack Bot collects, uses, and retains data when you interact with it on Discord. We are committed to transparency and handling your data responsibly and minimally.
-  </div>
-
-  <!-- 1 -->
-  <section>
-    <span class="section-num">01</span>
-    <h2>Who We Are</h2>
-    <p>PurpleJack Bot ("the Bot", "we", "our") is an independent Discord bot providing a virtual economy experience. The Bot operates exclusively within a single authorized Discord server and is not affiliated with or endorsed by Discord Inc.</p>
-    <p>For privacy inquiries, please contact the server administration through the official authorized Discord server.</p>
-  </section>
-
-  <!-- 2 -->
-  <section>
-    <span class="section-num">02</span>
-    <h2>Data We Collect</h2>
-    <p>The Bot collects only the data strictly necessary to provide its economy and game features. No personal information beyond Discord-provided identifiers is ever collected.</p>
-
-    <table class="data-table">
-      <thead>
-        <tr>
-          <th>Data Type</th>
-          <th>Description</th>
-          <th>Purpose</th>
-        </tr>
-      </thead>
-      <tbody>
-        <tr>
-          <td><strong>Discord User ID</strong></td>
-          <td>A unique numeric identifier provided by Discord</td>
-          <td>Identify user accounts in the economy database</td>
-        </tr>
-        <tr>
-          <td><strong>Discord Guild ID</strong></td>
-          <td>Numeric identifier of the Discord server</td>
-          <td>Restrict Bot operation to authorized servers only</td>
-        </tr>
-        <tr>
-          <td><strong>Virtual Balance</strong></td>
-          <td>In-Bot wallet and bank amounts (virtual currency)</td>
-          <td>Economy system functionality</td>
-        </tr>
-        <tr>
-          <td><strong>Cooldown Timestamps</strong></td>
-          <td>Unix timestamps of last command usage</td>
-          <td>Enforce fair-use cooldowns on commands</td>
-        </tr>
-        <tr>
-          <td><strong>Employment Data</strong></td>
-          <td>Current job, hire date, work history, XP, earnings</td>
-          <td>Employment simulation system</td>
-        </tr>
-        <tr>
-          <td><strong>Inventory Data</strong></td>
-          <td>Virtual items owned and their usage dates</td>
-          <td>Virtual shop and item system</td>
-        </tr>
-        <tr>
-          <td><strong>Game History</strong></td>
-          <td>Records of game sessions and outcomes</td>
-          <td>Leaderboards and statistics features</td>
-        </tr>
-        <tr>
-          <td><strong>Role Assignments</strong></td>
-          <td>Discord role IDs for temporary roles granted by the Bot</td>
-          <td>Temporary role management system</td>
-        </tr>
-      </tbody>
-    </table>
-
-    <div class="highlight">
-      <strong>We do not collect:</strong> real names, email addresses, IP addresses, payment information, message content, voice data, or any sensitive personal information.
+  <header class="page">
+    <div class="hero">
+      <div class="planet" aria-hidden="true"></div>
+      <div class="ship ship-one" aria-hidden="true"></div>
+      <div class="ship ship-two" aria-hidden="true"></div>
+      <div class="hero-content">
+        <span class="eyebrow">Documento oficial de privacidad</span>
+        <h1>Purple Jack</h1>
+        <p class="subtitle">Políticas de Privacidad</p>
+        <p class="lead">
+          Política oficial sobre recopilación, uso, conservación y protección de datos del bot gaming Purple Jack en
+          Discord. Purple Jack es de uso exclusivo para el servidor <strong>SuperSus SA Oficial</strong> y opera con
+          mecanicas de economia ficticia, tienda, inventario, juegos recreativos y funciones internas del servidor.
+        </p>
+        <div class="meta-row">
+          <span class="meta">Última actualización: 5 de julio de 2026</span>
+          <span class="meta">Responsable: newhozzi2026</span>
+          <span class="meta">Uso exclusivo: SuperSus SA Oficial</span>
+        </div>
+      </div>
     </div>
-  </section>
+  </header>
 
-  <!-- 3 -->
-  <section>
-    <span class="section-num">03</span>
-    <h2>How We Collect Data</h2>
-    <p>Data is collected exclusively through direct interaction with the Bot's commands and features within Discord. Specifically:</p>
-    <ul>
-      <li>When a user executes a Bot command (<code style="background:#1e1e2e;padding:1px 6px;border-radius:4px;color:#c77dff;">!bal</code>, <code style="background:#1e1e2e;padding:1px 6px;border-radius:4px;color:#c77dff;">!trabajar</code>, etc.), their Discord User ID is recorded automatically</li>
-      <li>Economy values are updated as a direct result of game outcomes and commands</li>
-      <li>No passive data collection occurs — the Bot does not monitor messages, reactions, or activity outside of explicit Bot command interactions</li>
-    </ul>
-  </section>
-
-  <!-- 4 -->
-  <section>
-    <span class="section-num">04</span>
-    <h2>How We Use the Data</h2>
-    <p>All collected data is used solely to operate the Bot's features. Specific uses include:</p>
-    <ul>
-      <li><strong>Economy functionality:</strong> tracking virtual balances, transactions, and cooldowns</li>
-      <li><strong>Employment system:</strong> saving job progress, XP, and work history</li>
-      <li><strong>Fair use enforcement:</strong> applying cooldowns to prevent command abuse</li>
-      <li><strong>Leaderboards:</strong> displaying anonymized rankings within the server</li>
-      <li><strong>Administrative tools:</strong> allowing server staff to manage the economy</li>
-    </ul>
-    <p>Data is <strong>never</strong> used for advertising, profiling, or any commercial purpose.</p>
-  </section>
-
-  <!-- 5 -->
-  <section>
-    <span class="section-num">05</span>
-    <h2>Data Storage and Security</h2>
-    <p>Data is stored in a <strong>PostgreSQL database</strong> hosted on a secure cloud infrastructure. The following security measures are in place:</p>
-    <ul>
-      <li>Database credentials are stored as environment variables and never hardcoded</li>
-      <li>Database access is restricted to the Bot's application only</li>
-      <li>An in-memory cache layer (RAM) is used to minimize direct database access and reduce latency</li>
-      <li>Cache is periodically flushed to the persistent database to maintain consistency</li>
-      <li>No data is stored locally on users' devices</li>
-    </ul>
-
-    <table class="data-table" style="margin-top:16px;">
-      <thead>
-        <tr>
-          <th>Storage Layer</th>
-          <th>Type</th>
-          <th>Persistence</th>
-        </tr>
-      </thead>
-      <tbody>
-        <tr>
-          <td>RAM Cache</td>
-          <td>In-memory (temporary)</td>
-          <td>Session only; flushed every 5 minutes</td>
-        </tr>
-        <tr>
-          <td>PostgreSQL Database</td>
-          <td>Relational database</td>
-          <td>Persistent long-term storage</td>
-        </tr>
-      </tbody>
-    </table>
-  </section>
-
-  <!-- 6 -->
-  <section>
-    <span class="section-num">06</span>
-    <h2>Data Sharing and Third Parties</h2>
-    <p>We do <strong>not</strong> sell, rent, share, or disclose any user data to third parties under any circumstances, with the following limited exceptions:</p>
-
-    <table class="data-table">
-      <thead>
-        <tr>
-          <th>Party</th>
-          <th>Data Shared</th>
-          <th>Reason</th>
-          <th>User Control</th>
-        </tr>
-      </thead>
-      <tbody>
-        <tr>
-          <td>Discord Inc.</td>
-          <td>Bot interactions (standard API usage)</td>
-          <td>Required to operate on Discord's platform</td>
-          <td><span class="pill pill-no">No opt-out</span></td>
-        </tr>
-        <tr>
-          <td>Cloud Host (SquareCloud)</td>
-          <td>Application runtime environment only</td>
-          <td>Bot deployment and hosting</td>
-          <td><span class="pill pill-no">No opt-out</span></td>
-        </tr>
-        <tr>
-          <td>Database Provider</td>
-          <td>Encrypted database storage</td>
-          <td>Persistent data storage</td>
-          <td><span class="pill pill-no">No opt-out</span></td>
-        </tr>
-      </tbody>
-    </table>
-
-    <p style="margin-top:14px;">All third-party services listed operate under their own privacy policies and are used solely for the technical operation of the Bot.</p>
-  </section>
-
-  <!-- 7 -->
-  <section>
-    <span class="section-num">07</span>
-    <h2>Data Retention</h2>
-    <p>Data is retained for as long as a user's account is active within the Bot's economy system. Specifically:</p>
-    <ul>
-      <li><strong>Active accounts:</strong> Data is retained indefinitely while the user interacts with the Bot</li>
-      <li><strong>Inactive accounts:</strong> Data may be purged after an extended period of inactivity at the administrator's discretion</li>
-      <li><strong>Deletion requests:</strong> Users may request the deletion of their economy data by contacting server administration</li>
-      <li><strong>Server removal:</strong> If the Bot leaves or is removed from a server, associated data may be retained for a reasonable transition period</li>
-    </ul>
-  </section>
-
-  <!-- 8 -->
-  <section>
-    <span class="section-num">08</span>
-    <h2>Your Rights</h2>
-    <p>Depending on your jurisdiction, you may have certain rights regarding your data. Regardless of applicable law, we commit to:</p>
-    <ul>
-      <li><strong>Right to access:</strong> You can request a summary of the data stored about your account</li>
-      <li><strong>Right to deletion:</strong> You can request that your economy data be permanently deleted</li>
-      <li><strong>Right to correction:</strong> You can report incorrect data and request corrections through server administration</li>
-      <li><strong>Right to information:</strong> You can ask what data is stored about you at any time</li>
-    </ul>
-    <p>To exercise any of these rights, please contact server administration through the authorized Discord server.</p>
-  </section>
-
-  <!-- 9 -->
-  <section>
-    <span class="section-num">09</span>
-    <h2>Children's Privacy</h2>
-    <p>The Bot is not directed at children under the age of 13. We do not knowingly collect data from users under 13 years of age. As Discord itself requires users to be at least 13 years old, any user interacting with the Bot is presumed to meet this minimum age requirement.</p>
-    <p>If you believe a minor's data has been collected, please contact server administration immediately for removal.</p>
-  </section>
-
-  <!-- 10 -->
-  <section>
-    <span class="section-num">10</span>
-    <h2>Changes to This Privacy Policy</h2>
-    <p>We reserve the right to update this Privacy Policy at any time. When changes are made:</p>
-    <ul>
-      <li>The "Effective Date" at the top of this page will be updated</li>
-      <li>Significant changes may be announced within the authorized Discord server</li>
-      <li>Continued use of the Bot after changes are posted constitutes acceptance of the updated policy</li>
-    </ul>
-  </section>
-
-  <!-- 11 -->
-  <section>
-    <span class="section-num">11</span>
-    <h2>Contact Us</h2>
-    <p>For any privacy-related questions, data requests, or concerns regarding this Privacy Policy, please contact the server administration directly through the official authorized Discord server.</p>
-    <div class="highlight">
-      We are committed to responding to all legitimate privacy inquiries in a timely and transparent manner.
+  <nav class="page" aria-label="Atajos de políticas">
+    <div class="nav-grid">
+      <a href="#identidad">Identidad</a>
+      <a href="#datos">Datos tratados</a>
+      <a href="#economia">Economía ficticia</a>
+      <a href="#uso">Uso de datos</a>
+      <a href="#seguridad">Seguridad</a>
+      <a href="#retencion">Retención</a>
+      <a href="#derechos">Derechos</a>
+      <a href="#contacto">Contacto</a>
     </div>
-  </section>
+  </nav>
 
-</main>
+  <main class="page">
+    <section id="resumen" class="notice">
+      <span class="section-label">Resumen claro</span>
+      <h2>Compromiso de privacidad</h2>
+      <p>
+        Purple Jack utiliza solo la información necesaria para operar sus funciones dentro de Discord. El bot no solicita
+        contraseñas, tokens, correos electrónicos, direcciones IP, datos de pago ni información financiera real. Los datos
+        tratados se limitan a identificadores de Discord y registros internos necesarios para la economía ficticia,
+        juegos, cooldowns, roles temporales, inventario y administración funcional del bot.
+      </p>
+    </section>
 
-<footer>
-  <p>PurpleJack Bot &mdash; Virtual Economy for Discord</p>
-  <p style="margin-top:8px;">
-    <a href="terms.html">Terms &amp; Conditions</a>
-    &nbsp;&bull;&nbsp;
-    Last updated: June 11, 2026
-  </p>
-</footer>
+    <section id="identidad">
+      <span class="section-label">01</span>
+      <h2>Identidad del bot y alcance</h2>
+      <p>
+        <strong>Purple Jack</strong> es un bot de Discord desarrollado para uso exclusivo dentro de
+        <strong>SuperSus SA Oficial</strong>. Su finalidad es ofrecer mecánicas gaming internas de entretenimiento,
+        economía ficticia, tienda de artículos, inventario, rankings, minijuegos, roles temporales y herramientas de
+        operación comunitaria.
+      </p>
+      <p>
+        Purple Jack no es un servicio público general, no está afiliado oficialmente con Discord Inc. y no representa a
+        Discord. Discord es la plataforma sobre la cual opera el bot mediante sus API oficiales.
+      </p>
+      <div class="info-grid">
+        <div class="info-box">
+          <span>Bot</span>
+          <b>Purple Jack</b>
+        </div>
+        <div class="info-box">
+          <span>Ámbito de uso</span>
+          <b>SuperSus SA Oficial</b>
+        </div>
+        <div class="info-box">
+          <span>Responsable</span>
+          <b>newhozzi2026</b>
+        </div>
+      </div>
+    </section>
 
+    <section id="datos">
+      <span class="section-label">02</span>
+      <h2>Datos que Purple Jack puede tratar</h2>
+      <p>
+        El bot procesa datos mínimos y funcionales. Estos datos permiten identificar usuarios dentro del sistema,
+        mantener progreso, aplicar límites de uso y ejecutar las mecánicas internas del bot.
+      </p>
+      <table class="data-table">
+        <thead>
+          <tr>
+            <th>Dato</th>
+            <th>Descripción</th>
+            <th>Finalidad</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td><strong>ID de usuario de Discord</strong></td>
+            <td>Identificador numérico proporcionado por Discord.</td>
+            <td>Asociar balance, inventario, cooldowns y progreso al usuario correcto.</td>
+          </tr>
+          <tr>
+            <td><strong>ID de servidor, canal o rol</strong></td>
+            <td>Identificadores técnicos de Discord usados por el bot.</td>
+            <td>Limitar el funcionamiento al entorno autorizado, publicar respuestas y gestionar roles temporales.</td>
+          </tr>
+          <tr>
+            <td><strong>Balance, banco e inventario</strong></td>
+            <td>Registros internos de moneda ficticia, artículos virtuales y cantidades.</td>
+            <td>Operar la economía ficticia, tienda, compras, recompensas y comandos de consulta.</td>
+          </tr>
+          <tr>
+            <td><strong>Cooldowns y marcas de tiempo</strong></td>
+            <td>Fechas u horas de uso de comandos y juegos.</td>
+            <td>Prevenir abuso, mantener equilibrio y controlar tiempos de espera.</td>
+          </tr>
+          <tr>
+            <td><strong>Registros operativos</strong></td>
+            <td>Eventos como compras, uso de items, ajustes staff o acciones económicas relevantes.</td>
+            <td>Auditoria interna, soporte, seguridad y control operativo del bot.</td>
+          </tr>
+          <tr>
+            <td><strong>Roles temporales</strong></td>
+            <td>ID de usuario, ID de servidor, ID de rol y tiempo de expiración.</td>
+            <td>Asignar y retirar roles temporales comprados o activados mediante el bot.</td>
+          </tr>
+        </tbody>
+      </table>
+      <h3>Datos que Purple Jack no solicita ni almacena</h3>
+      <ul>
+        <li>Contraseñas, tokens de acceso o credenciales de Discord.</li>
+        <li>Datos bancarios, tarjetas, cuentas de pago, direcciones o documentos personales.</li>
+        <li>Correos electrónicos, números de teléfono o direcciones IP.</li>
+        <li>Contenido privado fuera de las interacciones necesarias con el bot.</li>
+        <li>Datos sensibles no necesarios para la funcionalidad declarada.</li>
+      </ul>
+    </section>
+
+    <section id="economia" class="warning">
+      <span class="section-label">03</span>
+      <h2>Economía ficticia y ausencia de apuestas reales</h2>
+      <p>
+        El sistema económico de Purple Jack es <strong>totalmente ficticio</strong>. Las monedas, balances, banco,
+        articulos, recompensas, rankings, juegos y resultados internos no representan dinero real, no tienen valor
+        monetario fuera del servidor y no pueden convertirse, retirarse, venderse ni intercambiarse por divisas reales.
+      </p>
+      <p>
+        Purple Jack no procesa pagos reales, apuestas con dinero real, premios monetarios, retiros, depositos,
+        conversiones financieras ni transacciones externas. Sus juegos y mecánicas de economía son recreativos y están
+        limitados al entorno comunitario de <strong>SuperSus SA Oficial</strong>.
+      </p>
+      <p>
+        Cualquier referencia a monedas, banco, tienda, recompensas o juegos dentro del bot debe entenderse como parte de
+        una simulación interna de entretenimiento sin relación con servicios financieros, azar regulado o apuestas con
+        divisa real.
+      </p>
+    </section>
+
+    <section id="uso">
+      <span class="section-label">04</span>
+      <h2>Cómo se utilizan los datos</h2>
+      <p>
+        Los datos se utilizan exclusivamente para prestar las funciones declaradas del bot dentro de su entorno
+        autorizado. Purple Jack no vende, alquila ni comercializa datos de usuarios.
+      </p>
+      <ul>
+        <li><strong>Economía:</strong> consultar y actualizar balance, banco, rankings y recompensas ficticias.</li>
+        <li><strong>Tienda e inventario:</strong> gestionar compras, stock, artículos virtuales y uso de items.</li>
+        <li><strong>Juegos recreativos:</strong> aplicar resultados, límites, cooldowns y balances ficticios.</li>
+        <li><strong>Roles:</strong> asignar o retirar roles temporales cuando una mecánica autorizada lo requiera.</li>
+        <li><strong>Administracion:</strong> permitir acciones staff, auditoria operativa y soporte funcional del bot.</li>
+        <li><strong>Prevencion de abuso:</strong> limitar spam de comandos, duplicaciones, uso excesivo o acciones inconsistentes.</li>
+      </ul>
+    </section>
+
+    <section id="discord">
+      <span class="section-label">05</span>
+      <h2>Cumplimiento con Discord Developer</h2>
+      <p>
+        Purple Jack procura operar de forma compatible con las reglas aplicables a desarrolladores de Discord, incluyendo
+        el principio de utilizar datos de API solo para la funcionalidad declarada y necesaria del bot.
+      </p>
+      <ul>
+        <li>No se solicitan credenciales, tokens ni acceso externo a cuentas de Discord.</li>
+        <li>No se usan datos de Discord para publicidad, venta de datos, perfilado comercial o discriminación.</li>
+        <li>No se contacta a usuarios fuera de Discord usando datos obtenidos mediante el bot.</li>
+        <li>No se realiza scraping, minería masiva ni extracción de información ajena a la funcionalidad del bot.</li>
+        <li>No se utiliza contenido de mensajes para entrenar modelos de inteligencia artificial.</li>
+      </ul>
+      <p>
+        Para información de plataforma, Discord mantiene sus propias políticas y términos oficiales. Esta política
+        describe únicamente el tratamiento de datos realizado por Purple Jack dentro de su operación autorizada.
+      </p>
+    </section>
+
+    <section id="seguridad">
+      <span class="section-label">06</span>
+      <h2>Almacenamiento, seguridad y acceso</h2>
+      <p>
+        Purple Jack almacena la información funcional en una base de datos y utiliza caché en memoria para mejorar la
+        velocidad de respuesta del bot. El acceso a los datos se limita al sistema del bot y al responsable o personal
+        técnico autorizado que necesite intervenir por mantenimiento, soporte o auditoría.
+      </p>
+      <ul>
+        <li>Los accesos técnicos se mantienen restringidos al responsable y equipo autorizado.</li>
+        <li>Las credenciales sensibles deben permanecer fuera del código fuente y gestionarse como configuración segura.</li>
+        <li>La caché en memoria reduce latencia y se sincroniza periódicamente con la base de datos.</li>
+        <li>Los logs operativos se usan para trazabilidad, soporte y control interno del bot.</li>
+      </ul>
+      <table class="data-table">
+        <thead>
+          <tr>
+            <th>Capa</th>
+            <th>Uso</th>
+            <th>Persistencia</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td><strong>Cache en memoria</strong></td>
+            <td>Respuesta rapida y operaciones frecuentes.</td>
+            <td>Temporal; se limpia o sincroniza periodicamente.</td>
+          </tr>
+          <tr>
+            <td><strong>Base de datos</strong></td>
+            <td>Conservación de balance, inventario, cooldowns y configuraciones.</td>
+            <td>Persistente mientras el bot opere y el dato sea necesario.</td>
+          </tr>
+          <tr>
+            <td><strong>Canales de log internos</strong></td>
+            <td>Registro de eventos relevantes de economía, tienda o staff.</td>
+            <td>Segun configuracion y necesidades operativas del bot.</td>
+          </tr>
+        </tbody>
+      </table>
+    </section>
+
+    <section id="terceros">
+      <span class="section-label">07</span>
+      <h2>Servicios de terceros y divulgación</h2>
+      <p>
+        Purple Jack opera sobre Discord y puede depender de infraestructura técnica para alojamiento y base de datos.
+        Fuera de lo necesario para que el bot funcione, los datos no se comparten con terceros, no se venden y no se
+        entregan a redes publicitarias o intermediarios de datos.
+      </p>
+      <ul>
+        <li><strong>Discord:</strong> plataforma donde ocurre la interacción y proveedor de los identificadores técnicos.</li>
+        <li><strong>Proveedor de alojamiento:</strong> ejecuta la aplicación del bot.</li>
+        <li><strong>Proveedor de base de datos:</strong> almacena la información funcional necesaria.</li>
+      </ul>
+    </section>
+
+    <section id="retencion">
+      <span class="section-label">08</span>
+      <h2>Retención y eliminación de datos</h2>
+      <p>
+        Los datos se conservan mientras sean necesarios para operar Purple Jack dentro de SuperSus SA Oficial, mantener la
+        economía ficticia, resolver incidencias o cumplir funciones administrativas del bot.
+      </p>
+      <ul>
+        <li>Los usuarios activos conservan su progreso, balances, inventario y cooldowns.</li>
+        <li>Los datos inactivos pueden ser limpiados o archivados a criterio del responsable.</li>
+        <li>Si un usuario solicita eliminación, el responsable revisará la solicitud y eliminará o anonimizará los datos cuando sea razonablemente posible.</li>
+        <li>Al retirar el bot del servidor, los datos asociados podrán conservarse durante un periodo razonable para respaldo, auditoría o transición.</li>
+      </ul>
+    </section>
+
+    <section id="derechos">
+      <span class="section-label">09</span>
+      <h2>Derechos y solicitudes de usuarios</h2>
+      <p>
+        Los usuarios pueden solicitar información sobre los datos funcionales asociados a su ID de Discord dentro de
+        Purple Jack. También pueden solicitar corrección, revisión o eliminación de datos cuando corresponda.
+      </p>
+      <ul>
+        <li><strong>Acceso:</strong> solicitar un resumen de balance, inventario, cooldowns u otros datos funcionales.</li>
+        <li><strong>Corrección:</strong> reportar errores o inconsistencias para revisión.</li>
+        <li><strong>Eliminación:</strong> pedir la eliminación de datos asociados al usuario, cuando sea compatible con la seguridad y auditoría del bot.</li>
+        <li><strong>Soporte:</strong> reportar fallos, abusos o dudas sobre el funcionamiento del bot.</li>
+      </ul>
+    </section>
+
+    <section id="menores">
+      <span class="section-label">10</span>
+      <h2>Privacidad de menores</h2>
+      <p>
+        Purple Jack no está dirigido a menores de 13 años ni a usuarios que no cumplan la edad mínima requerida por
+        Discord en su jurisdicción. El bot opera dentro de Discord y presume que los usuarios cumplen los requisitos de
+        edad de la plataforma.
+      </p>
+      <p>
+        Si se detecta un caso que requiera revisión, el responsable podrá tomar medidas de moderación, restricción o
+        eliminación de datos según corresponda.
+      </p>
+    </section>
+
+    <section id="cambios">
+      <span class="section-label">11</span>
+      <h2>Cambios en estas políticas</h2>
+      <p>
+        Estas políticas pueden actualizarse para reflejar mejoras técnicas, cambios de funciones, ajustes de seguridad o
+        requisitos de Discord Developer. Cuando se realicen cambios relevantes, se actualizará la fecha de este documento
+        y, si corresponde, se comunicará dentro del entorno oficial de SuperSus SA Oficial.
+      </p>
+    </section>
+
+    <section id="contacto">
+      <span class="section-label">12</span>
+      <h2>Contacto y responsable</h2>
+      <p>
+        Para solicitudes de privacidad, soporte, eliminación de datos o reportes relacionados con Purple Jack, el usuario
+        puede contactar mediante los canales oficiales disponibles dentro de <strong>SuperSus SA Oficial</strong>.
+      </p>
+      <p>
+        Responsable operativo y de privacidad del bot: <strong>newhozzi2026</strong>.
+      </p>
+      <div class="info-grid">
+        <div class="info-box">
+          <span>Estado</span>
+          <b><span class="tag">Documento activo</span></b>
+        </div>
+        <div class="info-box">
+          <span>Uso</span>
+          <b><span class="tag tag-purple">Discord Developer</span></b>
+        </div>
+        <div class="info-box">
+          <span>Ámbito</span>
+          <b>Uso exclusivo en SuperSus SA Oficial</b>
+        </div>
+      </div>
+    </section>
+  </main>
+
+  <footer>
+    <div class="footer-inner">
+      <p>© 2026 Purple Jack. Responsable: newhozzi2026.</p>
+      <p>Uso exclusivo para SuperSus SA Oficial · <a href="Terms.html">Términos y condiciones</a></p>
+    </div>
+  </footer>
 </body>
 </html>

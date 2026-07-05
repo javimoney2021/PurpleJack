@@ -1,319 +1,814 @@
-
 <!DOCTYPE html>
-<html lang="en">
+<html lang="es">
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>Terms & Conditions — PurpleJack Bot</title>
+  <meta name="description" content="Términos y condiciones del bot Purple Jack para Discord, exclusivo para SuperSus SA Oficial." />
+  <title>Purple Jack - Términos y Condiciones</title>
   <style>
     :root {
-      --bg:        #0f0f13;
-      --surface:   #17171e;
-      --border:    #2a2a38;
-      --accent:    #9b59b6;
-      --accent-2:  #7d3cae;
-      --text:      #e2e2ec;
-      --muted:     #8888a8;
-      --radius:    12px;
+      --space-0: #07030d;
+      --space-1: #10051d;
+      --panel: rgba(20, 10, 34, 0.86);
+      --line: rgba(201, 144, 255, 0.26);
+      --purple: #b46cff;
+      --violet: #7f45ff;
+      --cyan: #52e6ff;
+      --green: #75ffbd;
+      --gold: #ffd166;
+      --text: #fbf6ff;
+      --muted: #d7c5ea;
+      --soft: #a891bc;
+      --radius: 12px;
+      --shadow: 0 24px 80px rgba(0, 0, 0, 0.48);
     }
-    * { box-sizing: border-box; margin: 0; padding: 0; }
+
+    * {
+      box-sizing: border-box;
+      margin: 0;
+      padding: 0;
+    }
+
+    html {
+      scroll-behavior: smooth;
+    }
+
     body {
-      background: var(--bg);
-      color: var(--text);
-      font-family: 'Segoe UI', system-ui, -apple-system, sans-serif;
-      font-size: 16px;
-      line-height: 1.7;
       min-height: 100vh;
+      color: var(--text);
+      font-family: "Trebuchet MS", "Segoe UI", system-ui, sans-serif;
+      line-height: 1.7;
+      background:
+        radial-gradient(circle at 50% -10%, rgba(180, 108, 255, 0.34), transparent 28%),
+        radial-gradient(circle at 12% 18%, rgba(82, 230, 255, 0.12), transparent 22%),
+        radial-gradient(circle at 84% 6%, rgba(117, 255, 189, 0.10), transparent 18%),
+        linear-gradient(180deg, var(--space-0) 0%, var(--space-1) 46%, #06020a 100%);
+      overflow-x: hidden;
     }
 
-    /* ── HEADER ── */
-    header {
-      background: linear-gradient(135deg, #1a0a2e 0%, #2d1260 50%, #1a0a2e 100%);
-      border-bottom: 1px solid var(--border);
-      padding: 48px 24px 40px;
-      text-align: center;
-    }
-    header .logo {
-      display: inline-flex;
-      align-items: center;
-      gap: 12px;
-      margin-bottom: 16px;
-    }
-    header .logo svg {
-      width: 40px; height: 40px;
-      fill: var(--accent);
-    }
-    header h1 {
-      font-size: clamp(1.6rem, 4vw, 2.4rem);
-      font-weight: 700;
-      background: linear-gradient(90deg, #c77dff, #9b59b6);
-      -webkit-background-clip: text;
-      -webkit-text-fill-color: transparent;
-      background-clip: text;
-      letter-spacing: -0.5px;
-    }
-    header .subtitle {
-      color: var(--muted);
-      margin-top: 6px;
-      font-size: 0.95rem;
-    }
-    .badge {
-      display: inline-block;
-      background: rgba(155,89,182,0.18);
-      border: 1px solid rgba(155,89,182,0.35);
-      color: #c77dff;
-      border-radius: 999px;
-      font-size: 0.78rem;
-      padding: 4px 14px;
-      margin-top: 12px;
-      letter-spacing: 0.5px;
+    body::before,
+    body::after {
+      content: "";
+      position: fixed;
+      inset: 0;
+      z-index: -2;
+      pointer-events: none;
     }
 
-    /* ── LAYOUT ── */
-    main {
-      max-width: 820px;
+    body::before {
+      background:
+        radial-gradient(circle, rgba(255,255,255,0.95) 0 1px, transparent 1.5px) 0 0 / 96px 96px,
+        radial-gradient(circle, rgba(180,108,255,0.85) 0 1px, transparent 1.5px) 18px 42px / 132px 132px,
+        radial-gradient(circle, rgba(82,230,255,0.70) 0 1px, transparent 1.5px) 44px 18px / 168px 168px;
+      opacity: 0.46;
+    }
+
+    body::after {
+      background:
+        linear-gradient(115deg, transparent 0%, rgba(180,108,255,0.10) 38%, transparent 56%),
+        repeating-linear-gradient(90deg, rgba(255,255,255,0.026) 0 1px, transparent 1px 86px),
+        repeating-linear-gradient(0deg, rgba(255,255,255,0.018) 0 1px, transparent 1px 86px);
+      z-index: -1;
+    }
+
+    a {
+      color: inherit;
+    }
+
+    .page {
+      width: min(1160px, calc(100% - 32px));
       margin: 0 auto;
-      padding: 48px 24px 80px;
-    }
-    .notice {
-      background: rgba(155,89,182,0.1);
-      border-left: 4px solid var(--accent);
-      border-radius: 0 var(--radius) var(--radius) 0;
-      padding: 16px 20px;
-      margin-bottom: 40px;
-      font-size: 0.92rem;
-      color: #c9b8e8;
     }
 
-    /* ── SECTIONS ── */
-    section {
-      background: var(--surface);
-      border: 1px solid var(--border);
-      border-radius: var(--radius);
-      padding: 32px;
-      margin-bottom: 24px;
-      transition: border-color .2s;
-    }
-    section:hover { border-color: rgba(155,89,182,0.4); }
-
-    .section-num {
-      display: inline-block;
-      background: var(--accent);
-      color: #fff;
-      font-size: 0.72rem;
-      font-weight: 700;
-      letter-spacing: 1px;
-      text-transform: uppercase;
-      padding: 3px 10px;
-      border-radius: 999px;
-      margin-bottom: 12px;
-    }
-    section h2 {
-      font-size: 1.25rem;
-      font-weight: 700;
-      color: #d4aaff;
-      margin-bottom: 16px;
-    }
-    section p {
-      color: #c4c4de;
-      margin-bottom: 12px;
-      font-size: 0.96rem;
-    }
-    section p:last-child { margin-bottom: 0; }
-
-    ul, ol {
-      padding-left: 20px;
-      margin: 10px 0;
-    }
-    li {
-      color: #c4c4de;
-      margin-bottom: 6px;
-      font-size: 0.96rem;
-    }
-    strong { color: var(--text); }
-
-    /* ── HIGHLIGHT BOX ── */
-    .highlight {
-      background: rgba(155,89,182,0.08);
-      border: 1px solid rgba(155,89,182,0.25);
-      border-radius: 8px;
-      padding: 14px 18px;
-      margin: 14px 0;
+    header {
+      padding: 36px 0 22px;
     }
 
-    /* ── FOOTER ── */
-    footer {
+    .hero {
+      min-height: 560px;
+      display: grid;
+      place-items: center;
+      padding: 42px;
+      position: relative;
+      overflow: hidden;
+      border: 1px solid var(--line);
+      border-radius: 22px;
+      background:
+        linear-gradient(180deg, rgba(7, 3, 13, 0.18), rgba(7, 3, 13, 0.76)),
+        radial-gradient(circle at 50% 20%, rgba(180, 108, 255, 0.28), transparent 34%),
+        linear-gradient(135deg, rgba(23, 8, 42, 0.96), rgba(10, 4, 18, 0.94));
+      box-shadow: var(--shadow), inset 0 0 120px rgba(180, 108, 255, 0.10);
+    }
+
+    .hero::before {
+      content: "";
+      position: absolute;
+      inset: 20px;
+      border: 1px solid rgba(82, 230, 255, 0.16);
+      border-radius: 16px;
+      box-shadow: inset 0 0 36px rgba(82, 230, 255, 0.05);
+    }
+
+    .hero::after {
+      content: "";
+      position: absolute;
+      left: 8%;
+      right: 8%;
+      bottom: 18%;
+      height: 2px;
+      background: linear-gradient(90deg, transparent, rgba(82, 230, 255, 0.7), rgba(180, 108, 255, 0.9), transparent);
+      box-shadow: 0 0 18px rgba(82, 230, 255, 0.55);
+    }
+
+    .ship {
+      position: absolute;
+      width: 150px;
+      height: 54px;
+      opacity: 0.72;
+      filter: drop-shadow(0 0 16px rgba(82, 230, 255, 0.32));
+    }
+
+    .ship::before {
+      content: "";
+      position: absolute;
+      inset: 0;
+      background:
+        linear-gradient(90deg, rgba(82, 230, 255, 0.95), rgba(244, 236, 255, 0.95) 36%, rgba(180, 108, 255, 0.95) 74%),
+        linear-gradient(180deg, rgba(255,255,255,0.88), rgba(126,69,255,0.85));
+      clip-path: polygon(0 50%, 34% 15%, 76% 32%, 100% 50%, 76% 68%, 34% 85%);
+    }
+
+    .ship::after {
+      content: "";
+      position: absolute;
+      left: -54px;
+      top: 23px;
+      width: 62px;
+      height: 8px;
+      background: linear-gradient(90deg, transparent, rgba(82, 230, 255, 0.85));
+      box-shadow: 0 0 14px rgba(82, 230, 255, 0.8);
+    }
+
+    .ship-one {
+      top: 84px;
+      right: 82px;
+      transform: rotate(-12deg) scale(0.9);
+    }
+
+    .ship-two {
+      left: 74px;
+      bottom: 116px;
+      transform: rotate(16deg) scale(0.72);
+      opacity: 0.46;
+    }
+
+    .planet {
+      position: absolute;
+      width: 210px;
+      height: 210px;
+      left: -76px;
+      top: -62px;
+      border-radius: 50%;
+      background:
+        linear-gradient(145deg, rgba(180,108,255,0.84), rgba(57,22,89,0.48)),
+        radial-gradient(circle at 38% 32%, rgba(255,255,255,0.36), transparent 18%);
+      box-shadow: inset -18px -24px 50px rgba(7,3,13,0.52), 0 0 58px rgba(180,108,255,0.26);
+      opacity: 0.72;
+    }
+
+    .planet::after {
+      content: "";
+      position: absolute;
+      left: -28px;
+      top: 86px;
+      width: 268px;
+      height: 24px;
+      border: 2px solid rgba(82,230,255,0.28);
+      border-left-color: transparent;
+      border-right-color: transparent;
+      border-radius: 50%;
+      transform: rotate(-18deg);
+    }
+
+    .hero-content {
+      position: relative;
+      z-index: 2;
       text-align: center;
-      padding: 32px 24px;
-      border-top: 1px solid var(--border);
-      color: var(--muted);
-      font-size: 0.85rem;
+      max-width: 860px;
+      padding: 18px;
     }
-    footer a {
-      color: var(--accent);
-      text-decoration: none;
-    }
-    footer a:hover { text-decoration: underline; }
 
-    /* ── NAV LINK ── */
-    .nav-link {
+    .eyebrow {
       display: inline-flex;
       align-items: center;
-      gap: 6px;
-      color: var(--accent);
-      text-decoration: none;
-      font-size: 0.88rem;
-      margin-bottom: 40px;
+      justify-content: center;
+      min-height: 34px;
+      color: #ebd9ff;
+      background: rgba(82, 230, 255, 0.08);
+      border: 1px solid rgba(82, 230, 255, 0.28);
+      border-radius: 999px;
+      padding: 6px 14px;
+      font-size: 0.82rem;
+      font-weight: 800;
+      text-transform: uppercase;
+      margin-bottom: 20px;
+      box-shadow: 0 0 18px rgba(82, 230, 255, 0.10);
     }
-    .nav-link:hover { text-decoration: underline; }
+
+    h1 {
+      font-family: Impact, "Arial Black", "Trebuchet MS", sans-serif;
+      font-size: 4.8rem;
+      line-height: 0.96;
+      text-transform: uppercase;
+      color: #ffffff;
+      text-shadow:
+        0 0 12px rgba(180, 108, 255, 0.72),
+        0 0 34px rgba(82, 230, 255, 0.25),
+        0 8px 0 rgba(65, 20, 104, 0.55);
+      margin-bottom: 12px;
+    }
+
+    .subtitle {
+      color: var(--cyan);
+      font-size: 1.38rem;
+      font-weight: 900;
+      text-transform: uppercase;
+      text-shadow: 0 0 18px rgba(82, 230, 255, 0.38);
+      margin-bottom: 18px;
+    }
+
+    .lead {
+      color: var(--muted);
+      font-size: 1.08rem;
+      max-width: 780px;
+      margin: 0 auto;
+    }
+
+    .meta-row {
+      display: flex;
+      flex-wrap: wrap;
+      justify-content: center;
+      gap: 10px;
+      margin-top: 26px;
+    }
+
+    .meta {
+      display: inline-flex;
+      align-items: center;
+      min-height: 38px;
+      padding: 7px 14px;
+      border: 1px solid rgba(244, 236, 255, 0.18);
+      color: #efe3ff;
+      background: rgba(255, 255, 255, 0.055);
+      font-size: 0.88rem;
+      font-weight: 700;
+      clip-path: polygon(10px 0, 100% 0, calc(100% - 10px) 100%, 0 100%);
+    }
+
+    nav {
+      position: sticky;
+      top: 0;
+      z-index: 10;
+      margin: 22px 0 34px;
+      padding: 12px;
+      background: rgba(8, 3, 14, 0.88);
+      border: 1px solid rgba(82, 230, 255, 0.18);
+      border-radius: 14px;
+      backdrop-filter: blur(16px);
+      box-shadow: 0 16px 44px rgba(0,0,0,0.28);
+    }
+
+    .nav-grid {
+      display: grid;
+      grid-template-columns: repeat(4, minmax(0, 1fr));
+      gap: 10px;
+    }
+
+    .nav-grid a {
+      min-height: 46px;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      text-align: center;
+      text-decoration: none;
+      color: #f4ecff;
+      background: linear-gradient(135deg, rgba(82,230,255,0.10), rgba(180,108,255,0.14)), rgba(255,255,255,0.04);
+      border: 1px solid rgba(180, 108, 255, 0.32);
+      border-radius: 10px;
+      padding: 9px 10px;
+      font-size: 0.92rem;
+      font-weight: 850;
+      box-shadow: inset 0 0 18px rgba(82,230,255,0.04);
+      transition: transform 0.18s ease, border-color 0.18s ease, box-shadow 0.18s ease;
+      position: relative;
+      overflow: hidden;
+    }
+
+    .nav-grid a::before {
+      content: "";
+      position: absolute;
+      inset: 0;
+      border-top: 1px solid rgba(82,230,255,0.44);
+      opacity: 0.78;
+    }
+
+    .nav-grid a:hover {
+      transform: translateY(-2px);
+      border-color: rgba(82, 230, 255, 0.72);
+      box-shadow: 0 0 22px rgba(82, 230, 255, 0.14), inset 0 0 20px rgba(180,108,255,0.12);
+    }
+
+    main {
+      padding-bottom: 64px;
+    }
+
+    section {
+      scroll-margin-top: 104px;
+      margin-bottom: 22px;
+      padding: 30px;
+      background: linear-gradient(135deg, rgba(255,255,255,0.035), transparent 28%), var(--panel);
+      border: 1px solid var(--line);
+      border-radius: var(--radius);
+      box-shadow: 0 16px 52px rgba(0, 0, 0, 0.30), inset 0 1px 0 rgba(255,255,255,0.04);
+      position: relative;
+      overflow: hidden;
+    }
+
+    section::before {
+      content: "";
+      position: absolute;
+      left: 0;
+      top: 0;
+      bottom: 0;
+      width: 4px;
+      background: linear-gradient(180deg, var(--cyan), var(--purple));
+      box-shadow: 0 0 18px rgba(82,230,255,0.38);
+    }
+
+    .section-label {
+      display: inline-flex;
+      align-items: center;
+      min-height: 29px;
+      padding: 4px 11px;
+      border-radius: 999px;
+      background: rgba(82, 230, 255, 0.08);
+      border: 1px solid rgba(82, 230, 255, 0.26);
+      color: #c8f7ff;
+      font-size: 0.78rem;
+      font-weight: 900;
+      text-transform: uppercase;
+      margin-bottom: 12px;
+    }
+
+    h2 {
+      font-size: 1.72rem;
+      line-height: 1.22;
+      margin-bottom: 14px;
+      color: #ffffff;
+      text-shadow: 0 0 14px rgba(180,108,255,0.28);
+    }
+
+    h3 {
+      color: #efe0ff;
+      font-size: 1.04rem;
+      margin: 22px 0 8px;
+    }
+
+    p {
+      color: var(--muted);
+      margin-bottom: 12px;
+    }
+
+    p:last-child {
+      margin-bottom: 0;
+    }
+
+    strong {
+      color: var(--text);
+    }
+
+    ul {
+      margin: 12px 0 0 20px;
+      color: var(--muted);
+    }
+
+    li {
+      margin-bottom: 8px;
+    }
+
+    .notice {
+      border-color: rgba(117, 255, 189, 0.32);
+      background: linear-gradient(135deg, rgba(117, 255, 189, 0.10), rgba(180, 108, 255, 0.10)), var(--panel);
+    }
+
+    .warning {
+      border-color: rgba(255, 209, 102, 0.38);
+      background: linear-gradient(135deg, rgba(255, 209, 102, 0.12), rgba(180, 108, 255, 0.10)), var(--panel);
+    }
+
+    .info-grid {
+      display: grid;
+      grid-template-columns: repeat(3, minmax(0, 1fr));
+      gap: 12px;
+      margin-top: 18px;
+    }
+
+    .info-box {
+      padding: 16px;
+      border: 1px solid rgba(82, 230, 255, 0.16);
+      border-radius: 12px;
+      background: rgba(255, 255, 255, 0.045);
+      box-shadow: inset 0 0 22px rgba(180,108,255,0.04);
+    }
+
+    .info-box span {
+      display: block;
+      color: var(--soft);
+      font-size: 0.78rem;
+      font-weight: 900;
+      text-transform: uppercase;
+      margin-bottom: 4px;
+    }
+
+    .info-box b {
+      color: var(--text);
+      font-size: 0.98rem;
+    }
+
+    .tag {
+      display: inline-flex;
+      align-items: center;
+      min-height: 28px;
+      border-radius: 999px;
+      padding: 3px 10px;
+      font-size: 0.78rem;
+      font-weight: 900;
+      color: #07130f;
+      background: var(--green);
+    }
+
+    .tag-purple {
+      color: #f8f1ff;
+      background: var(--violet);
+    }
+
+    footer {
+      border-top: 1px solid rgba(82, 230, 255, 0.18);
+      background: linear-gradient(90deg, rgba(82,230,255,0.06), rgba(180,108,255,0.10), rgba(82,230,255,0.06)), rgba(6, 2, 10, 0.90);
+      padding: 28px 0 34px;
+      color: var(--soft);
+    }
+
+    .footer-inner {
+      width: min(1160px, calc(100% - 32px));
+      margin: 0 auto;
+      display: flex;
+      flex-wrap: wrap;
+      gap: 12px;
+      align-items: center;
+      justify-content: space-between;
+    }
+
+    .footer-inner a {
+      color: #d9c1ff;
+      text-decoration: none;
+      font-weight: 800;
+    }
+
+    .footer-inner a:hover {
+      text-decoration: underline;
+    }
+
+    @media (max-width: 900px) {
+      .hero {
+        min-height: 500px;
+        padding: 30px 22px;
+      }
+
+      h1 {
+        font-size: 3.5rem;
+      }
+
+      .subtitle {
+        font-size: 1.16rem;
+      }
+
+      .nav-grid {
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+      }
+
+      section {
+        padding: 22px;
+      }
+
+      .info-grid {
+        grid-template-columns: 1fr;
+      }
+
+      .ship-one {
+        right: 24px;
+        top: 62px;
+      }
+
+      .ship-two {
+        left: 22px;
+        bottom: 80px;
+      }
+    }
+
+    @media (max-width: 560px) {
+      .page {
+        width: min(100% - 22px, 1160px);
+      }
+
+      header {
+        padding-top: 22px;
+      }
+
+      .hero {
+        min-height: 480px;
+      }
+
+      h1 {
+        font-size: 2.7rem;
+      }
+
+      .lead {
+        font-size: 1rem;
+      }
+
+      .nav-grid {
+        grid-template-columns: 1fr;
+      }
+
+      .ship {
+        width: 110px;
+        height: 42px;
+      }
+
+      .planet {
+        width: 150px;
+        height: 150px;
+      }
+
+      .footer-inner {
+        display: block;
+      }
+
+      .footer-inner p + p {
+        margin-top: 8px;
+      }
+    }
   </style>
 </head>
 <body>
-
-<header>
-  <div class="logo">
-    <svg viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
-      <path d="M12 2L2 7l10 5 10-5-10-5zM2 17l10 5 10-5M2 12l10 5 10-5"/>
-    </svg>
-  </div>
-  <h1>PurpleJack Bot</h1>
-  <p class="subtitle">Terms &amp; Conditions</p>
-  <span class="badge">Effective Date: June 11, 2026</span>
-</header>
-
-<main>
-
-  <div class="notice">
-    Please read these Terms &amp; Conditions carefully before using PurpleJack Bot. By interacting with the Bot in any Discord server, you confirm that you have read, understood, and agreed to be bound by these terms.
-  </div>
-
-  <!-- 1 -->
-  <section>
-    <span class="section-num">01</span>
-    <h2>Acceptance of Terms</h2>
-    <p>By using PurpleJack Bot ("the Bot", "we", "our"), you agree to these Terms &amp; Conditions. If you do not agree with any part of these terms, you must immediately cease using the Bot.</p>
-    <p>These Terms apply to all users who interact with the Bot through any Discord server where it operates. The Bot is an independent project and is not affiliated with or endorsed by Discord Inc.</p>
-  </section>
-
-  <!-- 2 -->
-  <section>
-    <span class="section-num">02</span>
-    <h2>Description of the Bot</h2>
-    <p>PurpleJack Bot is a Discord-based virtual economy bot designed exclusively for entertainment purposes. It provides the following features within authorized Discord servers:</p>
-    <ul>
-      <li>A virtual currency economy system with balance management</li>
-      <li>Games of chance: roulette, dice, memory games, Russian roulette, races, and duels</li>
-      <li>An employment simulation system with interactive minigames (Cleaner, Engineer, Plumber)</li>
-      <li>A virtual shop with purchasable items and effects</li>
-      <li>Leaderboards, collectibles, and server events</li>
-      <li>Administrative tools for server staff</li>
-    </ul>
-    <div class="highlight">
-      <strong>⚠️ Important:</strong> All currency, items, and rewards within PurpleJack are <strong>purely virtual and have no real-world monetary value</strong>. No real money is involved at any stage.
+  <header class="page">
+    <div class="hero">
+      <div class="planet" aria-hidden="true"></div>
+      <div class="ship ship-one" aria-hidden="true"></div>
+      <div class="ship ship-two" aria-hidden="true"></div>
+      <div class="hero-content">
+        <span class="eyebrow">Documento oficial de uso</span>
+        <h1>Purple Jack</h1>
+        <p class="subtitle">Términos y Condiciones</p>
+        <p class="lead">
+          Estos términos regulan el uso del bot gaming Purple Jack en Discord. Purple Jack es de uso exclusivo para
+          <strong>SuperSus SA Oficial</strong> y ofrece mecánicas recreativas de economía ficticia, tienda, inventario,
+          minijuegos, rankings y funciones internas de comunidad.
+        </p>
+        <div class="meta-row">
+          <span class="meta">Última actualización: 5 de julio de 2026</span>
+          <span class="meta">Responsable: newhozzi2026</span>
+          <span class="meta">Uso exclusivo: SuperSus SA Oficial</span>
+        </div>
+      </div>
     </div>
-  </section>
+  </header>
 
-  <!-- 3 -->
-  <section>
-    <span class="section-num">03</span>
-    <h2>Eligibility and Server Restriction</h2>
-    <p>The Bot is authorized to operate exclusively within the designated Discord server. Any server not explicitly authorized will result in the Bot automatically leaving the server upon detection.</p>
-    <p>To use the Bot you must:</p>
-    <ul>
-      <li>Be of legal age in your jurisdiction to use online platforms and Discord services</li>
-      <li>Comply with Discord's own <a href="https://discord.com/terms" style="color:#c77dff;" target="_blank" rel="noopener">Terms of Service</a> and Community Guidelines</li>
-      <li>Be a member of the authorized Discord server</li>
-    </ul>
-  </section>
+  <nav class="page" aria-label="Atajos de términos">
+    <div class="nav-grid">
+      <a href="#aceptacion">Aceptación</a>
+      <a href="#servicio">Servicio</a>
+      <a href="#economia">Economía ficticia</a>
+      <a href="#conducta">Conducta</a>
+      <a href="#staff">Administración</a>
+      <a href="#disponibilidad">Disponibilidad</a>
+      <a href="#responsabilidad">Responsabilidad</a>
+      <a href="#contacto">Contacto</a>
+    </div>
+  </nav>
 
-  <!-- 4 -->
-  <section>
-    <span class="section-num">04</span>
-    <h2>User Conduct</h2>
-    <p>Users agree not to:</p>
-    <ul>
-      <li>Exploit bugs, glitches, or vulnerabilities to gain unfair advantages in the economy system</li>
-      <li>Use automated scripts, bots, or macros to interact with the Bot</li>
-      <li>Attempt to manipulate, disrupt, or interfere with the Bot's functionality or database</li>
-      <li>Harass, threaten, or impersonate other users through Bot interactions</li>
-      <li>Attempt to access or modify data belonging to other users</li>
-      <li>Use the Bot for any illegal activity or in violation of applicable laws</li>
-    </ul>
-    <p>Violations may result in permanent restriction of access to Bot features at the discretion of the server administration.</p>
-  </section>
+  <main class="page">
+    <section id="resumen" class="notice">
+      <span class="section-label">Resumen claro</span>
+      <h2>Uso responsable del bot</h2>
+      <p>
+        Al interactuar con Purple Jack, aceptas estos términos y confirmas que entiendes que sus sistemas son recreativos,
+        ficticios y limitados al entorno de Discord donde el bot está autorizado. Si no estás de acuerdo con estas
+        condiciones, debes dejar de utilizar sus comandos, botones e interacciones.
+      </p>
+    </section>
 
-  <!-- 5 -->
-  <section>
-    <span class="section-num">05</span>
-    <h2>Virtual Economy and Games of Chance</h2>
-    <p>The Bot includes games involving virtual currency that simulate probability and chance. By using these features, you acknowledge:</p>
-    <ul>
-      <li>All virtual currency is <strong>fictional</strong> and holds no real monetary value</li>
-      <li>There is no ability to exchange virtual currency for real money or goods</li>
-      <li>Games involving chance are for entertainment only and do not constitute gambling</li>
-      <li>The Bot makes no guarantee of fair outcomes beyond programmed probabilities</li>
-      <li>Virtual balance losses are permanent within the system and will not be refunded except at staff discretion</li>
-    </ul>
-  </section>
+    <section id="aceptacion">
+      <span class="section-label">01</span>
+      <h2>Aceptación de los términos</h2>
+      <p>
+        Estos Términos y Condiciones aplican a toda persona que use Purple Jack mediante comandos de prefijo,
+        interacciones, botones, menús, juegos, tienda, inventario o cualquier otra función disponible dentro de Discord.
+      </p>
+      <p>
+        El uso continuado del bot implica aceptación de estos términos, de la política de privacidad asociada y de las
+        normas internas aplicables al entorno donde Purple Jack opera.
+      </p>
+    </section>
 
-  <!-- 6 -->
-  <section>
-    <span class="section-num">06</span>
-    <h2>Intellectual Property</h2>
-    <p>All code, logic, design, and content of PurpleJack Bot are the exclusive property of the Bot's developer. You are granted a limited, non-exclusive, non-transferable right to use the Bot solely within the authorized Discord server for personal, non-commercial entertainment purposes.</p>
-    <p>You may not copy, modify, distribute, sell, or create derivative works based on the Bot or its underlying code without explicit written permission from the developer.</p>
-  </section>
+    <section id="servicio">
+      <span class="section-label">02</span>
+      <h2>Descripción del servicio</h2>
+      <p>
+        Purple Jack es un bot de entretenimiento para Discord con funciones de economía ficticia y herramientas de
+        comunidad. Entre sus sistemas puede incluir:
+      </p>
+      <ul>
+        <li>Balance principal, banco, ranking económico y consultas de perfil.</li>
+        <li>Tienda de artículos, stock, inventario, uso de items y roles temporales.</li>
+        <li>Minijuegos recreativos como dados, memoria, ruleta, duelos u otras mecánicas internas.</li>
+        <li>Cooldowns, límites de uso, recompensas ficticias y registros operativos.</li>
+        <li>Herramientas staff para configurar economía, juegos, tienda, roles o eventos internos.</li>
+      </ul>
+      <div class="info-grid">
+        <div class="info-box">
+          <span>Bot</span>
+          <b>Purple Jack</b>
+        </div>
+        <div class="info-box">
+          <span>Ámbito</span>
+          <b>SuperSus SA Oficial</b>
+        </div>
+        <div class="info-box">
+          <span>Responsable</span>
+          <b>newhozzi2026</b>
+        </div>
+      </div>
+    </section>
 
-  <!-- 7 -->
-  <section>
-    <span class="section-num">07</span>
-    <h2>Disclaimers and Limitation of Liability</h2>
-    <p>The Bot is provided <strong>"as is"</strong> without any warranty of any kind, express or implied. We do not guarantee:</p>
-    <ul>
-      <li>Uninterrupted or error-free operation of the Bot</li>
-      <li>Permanent availability of the service</li>
-      <li>Preservation of virtual economy data in all circumstances</li>
-    </ul>
-    <p>To the fullest extent permitted by applicable law, the developer shall not be liable for any indirect, incidental, special, or consequential damages arising from your use of or inability to use the Bot.</p>
-  </section>
+    <section id="exclusividad">
+      <span class="section-label">03</span>
+      <h2>Uso exclusivo y acceso autorizado</h2>
+      <p>
+        Purple Jack está diseñado para uso exclusivo en <strong>SuperSus SA Oficial</strong>. Su presencia, configuración
+        y operación fuera de ese entorno no se consideran autorizadas salvo aprobación expresa del responsable.
+      </p>
+      <p>
+        El bot no es un servicio público general, no está afiliado oficialmente con Discord Inc. y no representa a
+        Discord. El usuario también debe cumplir los Términos de Servicio y normas comunitarias de Discord.
+      </p>
+    </section>
 
-  <!-- 8 -->
-  <section>
-    <span class="section-num">08</span>
-    <h2>Service Modifications and Termination</h2>
-    <p>We reserve the right to:</p>
-    <ul>
-      <li>Modify, suspend, or discontinue the Bot or any of its features at any time without notice</li>
-      <li>Update these Terms &amp; Conditions at any time; continued use of the Bot constitutes acceptance of updated terms</li>
-      <li>Reset, adjust, or modify virtual economy data for maintenance, balancing, or other operational reasons</li>
-      <li>Restrict or terminate access for any user who violates these Terms</li>
-    </ul>
-  </section>
+    <section id="economia" class="warning">
+      <span class="section-label">04</span>
+      <h2>Economía ficticia y ausencia de apuestas reales</h2>
+      <p>
+        Toda moneda, balance, banco, artículo, recompensa, ranking, juego o resultado dentro de Purple Jack es
+        <strong>completamente ficticio</strong>. No representa dinero real, no tiene valor monetario fuera del bot y no
+        puede cambiarse, venderse, transferirse o retirarse por divisa real.
+      </p>
+      <p>
+        Purple Jack no procesa pagos reales, apuestas con dinero real, premios monetarios, depósitos, retiros,
+        conversiones financieras ni transacciones externas. Los juegos de azar simulado son únicamente mecánicas
+        recreativas para entretenimiento del entorno autorizado.
+      </p>
+      <p>
+        Las pérdidas, ganancias o cambios de balance dentro del bot forman parte del sistema ficticio y no generan
+        derechos económicos reales, reembolsos monetarios ni obligaciones financieras.
+      </p>
+    </section>
 
-  <!-- 9 -->
-  <section>
-    <span class="section-num">09</span>
-    <h2>Governing Law</h2>
-    <p>These Terms &amp; Conditions shall be governed by and construed in accordance with applicable laws. Any disputes arising in connection with these terms shall be resolved through good-faith negotiation between the parties involved.</p>
-  </section>
+    <section id="conducta">
+      <span class="section-label">05</span>
+      <h2>Conducta del usuario</h2>
+      <p>Al usar Purple Jack, el usuario se compromete a no realizar las siguientes acciones:</p>
+      <ul>
+        <li>Explotar errores, bugs, carreras de comandos o vulnerabilidades para obtener ventaja.</li>
+        <li>Usar macros, scripts, automatizaciones externas o bots para interactuar de forma abusiva.</li>
+        <li>Intentar manipular el balance, inventario, stock, cooldowns, roles o base de datos.</li>
+        <li>Suplantar usuarios, acosar, amenazar o usar el bot para afectar la experiencia de otros.</li>
+        <li>Forzar spam de comandos, inundar canales o saturar respuestas del bot.</li>
+        <li>Intentar acceder, extraer o modificar datos que no le corresponden.</li>
+        <li>Usar Purple Jack para actividades ilegales o contrarias a las reglas de Discord.</li>
+      </ul>
+    </section>
 
-  <!-- 10 -->
-  <section>
-    <span class="section-num">10</span>
-    <h2>Contact</h2>
-    <p>For questions, concerns, or reports regarding these Terms &amp; Conditions or the Bot's operation, please contact the server administration through the official authorized Discord server.</p>
-  </section>
+    <section id="staff">
+      <span class="section-label">06</span>
+      <h2>Administración, ajustes y moderación</h2>
+      <p>
+        El responsable o personal autorizado puede intervenir el sistema cuando sea necesario para mantenimiento,
+        balanceo, corrección de errores, prevención de abuso, auditoría o protección de la comunidad.
+      </p>
+      <ul>
+        <li>Se pueden ajustar balances, banco, inventario, stock o roles cuando exista una razón operativa válida.</li>
+        <li>Se pueden reiniciar cooldowns, corregir configuraciones o limitar funciones temporalmente.</li>
+        <li>Se puede restringir el acceso a funciones del bot ante abuso, explotación o incumplimiento de estos términos.</li>
+        <li>Las decisiones operativas pueden apoyarse en registros internos del bot y reportes de usuarios.</li>
+      </ul>
+    </section>
 
-</main>
+    <section id="disponibilidad">
+      <span class="section-label">07</span>
+      <h2>Disponibilidad, cambios y mantenimiento</h2>
+      <p>
+        Purple Jack se ofrece según disponibilidad técnica. Puede experimentar interrupciones por mantenimiento, reinicios,
+        actualizaciones, errores de Discord, hosting, base de datos o cambios internos del proyecto.
+      </p>
+      <ul>
+        <li>Las funciones pueden modificarse, suspenderse o retirarse sin aviso previo.</li>
+        <li>La economía ficticia puede ajustarse para equilibrio, estabilidad o corrección de errores.</li>
+        <li>No se garantiza disponibilidad permanente ni ausencia total de errores.</li>
+        <li>Los datos del sistema pueden ser restaurados, corregidos o depurados cuando sea necesario.</li>
+      </ul>
+    </section>
 
-<footer>
-  <p>PurpleJack Bot &mdash; Virtual Economy for Discord</p>
-  <p style="margin-top:8px;">
-    <a href="privacy.html">Privacy Policy</a>
-    &nbsp;&bull;&nbsp;
-    Last updated: June 11, 2026
-  </p>
-</footer>
+    <section id="propiedad">
+      <span class="section-label">08</span>
+      <h2>Propiedad intelectual</h2>
+      <p>
+        Purple Jack, su lógica, diseño, mecánicas, estructura, textos y código pertenecen a su responsable o titulares
+        autorizados. El usuario recibe únicamente permiso limitado para utilizar el bot dentro del entorno autorizado.
+      </p>
+      <p>
+        No se permite copiar, revender, distribuir, clonar, modificar o reutilizar el bot, su código, diseño o sistemas
+        internos sin autorización expresa del responsable.
+      </p>
+    </section>
 
+    <section id="responsabilidad">
+      <span class="section-label">09</span>
+      <h2>Limitación de responsabilidad</h2>
+      <p>
+        Purple Jack se proporciona como herramienta recreativa y operativa para Discord. El responsable no garantiza que
+        el bot funcione sin interrupciones, errores, pérdidas de datos ficticios o incompatibilidades futuras.
+      </p>
+      <p>
+        En la máxima medida permitida, el responsable no será responsable por pérdidas indirectas, daños, conflictos,
+        expectativas de ganancia ficticia, interrupciones, errores de terceros o consecuencias derivadas del uso indebido
+        del bot.
+      </p>
+    </section>
+
+    <section id="privacidad">
+      <span class="section-label">10</span>
+      <h2>Privacidad y datos</h2>
+      <p>
+        El tratamiento de datos de Purple Jack se describe en su Política de Privacidad. Al usar el bot, el usuario
+        entiende que ciertos identificadores y registros funcionales son necesarios para operar balance, inventario,
+        cooldowns, juegos, roles temporales y funciones internas.
+      </p>
+      <p>
+        Consulta el documento correspondiente aquí: <a href="Privacy.html">Políticas de Privacidad</a>.
+      </p>
+    </section>
+
+    <section id="cambios">
+      <span class="section-label">11</span>
+      <h2>Cambios en estos términos</h2>
+      <p>
+        Estos términos pueden actualizarse para reflejar cambios técnicos, nuevas funciones, ajustes de seguridad,
+        requisitos de Discord Developer o necesidades operativas de Purple Jack. La fecha de actualización indicará la
+        versión vigente del documento.
+      </p>
+    </section>
+
+    <section id="contacto">
+      <span class="section-label">12</span>
+      <h2>Contacto</h2>
+      <p>
+        Para dudas, reportes, solicitudes o consultas sobre estos términos, el usuario puede contactar mediante los
+        canales oficiales disponibles dentro de <strong>SuperSus SA Oficial</strong>.
+      </p>
+      <p>Responsable operativo del bot: <strong>newhozzi2026</strong>.</p>
+      <div class="info-grid">
+        <div class="info-box">
+          <span>Estado</span>
+          <b><span class="tag">Documento activo</span></b>
+        </div>
+        <div class="info-box">
+          <span>Uso</span>
+          <b><span class="tag tag-purple">Discord Developer</span></b>
+        </div>
+        <div class="info-box">
+          <span>Ámbito</span>
+          <b>Uso exclusivo en SuperSus SA Oficial</b>
+        </div>
+      </div>
+    </section>
+  </main>
+
+  <footer>
+    <div class="footer-inner">
+      <p>© 2026 Purple Jack. Responsable: newhozzi2026.</p>
+      <p>Uso exclusivo para SuperSus SA Oficial · <a href="Privacy.html">Políticas de Privacidad</a></p>
+    </div>
+  </footer>
 </body>
 </html>
