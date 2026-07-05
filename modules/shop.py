@@ -376,10 +376,11 @@ class TiendaLayout(discord.ui.LayoutView):
 
 
 class OpenShopView(discord.ui.View):
-    def __init__(self, author_id: int, bot):
+    def __init__(self, author_id: int, bot, command_message: discord.Message):
         super().__init__(timeout=60)
         self.author_id = author_id
         self.bot = bot
+        self.command_message = command_message
 
     @discord.ui.button(label="Abrir Tienda", style=discord.ButtonStyle.success)
     async def abrir_tienda(self, interaction: discord.Interaction, button: discord.ui.Button):
@@ -400,14 +401,15 @@ class OpenShopView(discord.ui.View):
             ephemeral=True
         )
 
-        asyncio.create_task(self._delete_prompt(interaction.message))
+        asyncio.create_task(self._delete_public_messages(interaction.message))
 
-    async def _delete_prompt(self, message: discord.Message):
+    async def _delete_public_messages(self, prompt_message: discord.Message):
         await asyncio.sleep(3)
-        try:
-            await message.delete()
-        except Exception:
-            pass
+        for message in (prompt_message, self.command_message):
+            try:
+                await message.delete()
+            except Exception:
+                pass
 
 
 # ── BOTON DE USAR ITEM (inventario) ───────────────────
@@ -616,7 +618,7 @@ class Shop(commands.Cog):
         )
         embed.set_thumbnail(url=ctx.author.display_avatar.url)
         embed.set_footer(text="Presiona Abrir Tienda para revisar el stock disponible.")
-        await ctx.message.reply(embed=embed, view=OpenShopView(ctx.author.id, self.bot))
+        await ctx.message.reply(embed=embed, view=OpenShopView(ctx.author.id, self.bot, ctx.message))
 
     @commands.command()
     async def info(self, ctx, *, nombre: str = None):
