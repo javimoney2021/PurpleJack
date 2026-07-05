@@ -897,17 +897,6 @@ class Staff(commands.Cog):
                 f"❌ Item **{item}** no encontrado.", ephemeral=True
             )
         await add_to_inventory(usuario.id, found["id"], cantidad)
-        cache.add_to_inventory_cache(usuario.id, {
-            "id": found["id"],
-            "nombre": found["nombre"],
-            "icono": found["icono"] or "",
-            "utilizable": found["utilizable"],
-            "mensaje_uso": found["mensaje_uso"],
-            "rol_id": found["rol_id"],
-            "duracion": found.get("duracion", 0),
-            "limite_uso": found.get("limite_uso", 0),
-            "cantidad": cantidad
-        })
         icono = found["icono"] if found["icono"] else "🔹"
         await interaction.followup.send(
             f"✅ Se han agregado {cantidad}x {icono} {found['nombre']} al inventario de {usuario.mention}.",
@@ -1159,6 +1148,8 @@ class Staff(commands.Cog):
         dados_config["exito_prob"] = exito
         dados_config["fallo_prob"] = fallo
         await save_dados_config()
+        await clear_game_cooldowns("dados")
+        cache.clear_game_cooldowns_cache("dados")
 
         await interaction.response.send_message(
             f"✅ Dados actualizados:\n• Max apuesta: {max_apuesta}\n• CD: {cooldown}\n• Éxito: {int(exito*100)}%\n• Fallo: {int(fallo*100)}%",

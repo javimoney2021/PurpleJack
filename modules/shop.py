@@ -3,9 +3,8 @@ import discord
 import logging
 import asyncio
 from core.database import (
-    get_user, update_balance, update_bank, get_all_items, get_item_by_name,
-    add_to_inventory, get_inventory, remove_from_inventory,
-    reduce_stock, add_cargo_temporal
+    update_bank, get_all_items, get_item_by_name, purchase_item,
+    get_inventory, remove_from_inventory, add_cargo_temporal
 )
 from core import cache
 from core.config import COIN, LOG_CHANNEL_ID, TARJETA_CREDITO_ROL_ID
@@ -42,35 +41,36 @@ class ConfirmBuyView(discord.ui.View):
             item.disabled = True
 
         try:
-            items_fresh = await get_all_items()
-            item_fresh = next((i for i in items_fresh if i["id"] == self.item["id"]), None)
+            tiene_tarjeta = any(r.id == TARJETA_CREDITO_ROL_ID for r in interaction.user.roles)
+            purchase = await purchase_item(
+                interaction.user.id,
+                self.item["id"],
+                self.unidades,
+                use_bank=tiene_tarjeta,
+            )
 
-            if not item_fresh:
-                return await interaction.edit_original_response(
-                    content="❌ El item ya no existe en la tienda.", view=self
-                )
-            if item_fresh["stock"] == 0:
-                return await interaction.edit_original_response(
-                    content=f"❌ **{item_fresh['nombre']}** sin stock.", view=self
-                )
+            if not purchase["ok"]:
+                reason = purchase["reason"]
+                item_fresh = purchase.get("item") or self.item
+                precio_unitario = purchase.get("precio_unitario", item_fresh.get("precio", 0))
+                total = purchase.get("total", precio_unitario * self.unidades)
 
-            # ── Validar stock suficiente para la cantidad pedida ───
-            if item_fresh["stock"] != -1 and item_fresh["stock"] < self.unidades:
-                return await interaction.edit_original_response(
-                    content=f"❌ Solo hay **{item_fresh['stock']}** unidad/es disponibles de **{item_fresh['nombre']}**.",
-                    view=self
-                )
-
-            # ── Validar límite por usuario ─────────────
-            limite = item_fresh.get("limite_por_usuario", 0)
-            if limite and limite > 0:
-                inv = cache.get_inventory_cache(interaction.user.id)
-                if inv is None:
-                    from core.database import get_inventory
-                    inv = await get_inventory(interaction.user.id)
-                poseidos = next((i["cantidad"] for i in inv if i["id"] == item_fresh["id"]), 0)
-                if poseidos + self.unidades > limite:
-                    disponibles = limite - poseidos
+                if reason == "not_found":
+                    return await interaction.edit_original_response(
+                        content="❌ El item ya no existe en la tienda.", view=self
+                    )
+                if reason == "out_of_stock":
+                    return await interaction.edit_original_response(
+                        content=f"❌ **{item_fresh['nombre']}** sin stock.", view=self
+                    )
+                if reason == "insufficient_stock":
+                    return await interaction.edit_original_response(
+                        content=f"❌ Solo hay **{purchase['available']}** unidad/es disponibles de **{item_fresh['nombre']}**.",
+                        view=self
+                    )
+                if reason == "limit":
+                    disponibles = purchase["available"]
+                    limite = purchase["limit"]
                     if disponibles <= 0:
                         return await interaction.edit_original_response(
                             content=f"🫤 Has alcanzado el limite de compra de **{limite}** unidad/es de **{item_fresh['nombre']}** Por usuario.",
@@ -80,48 +80,24 @@ class ConfirmBuyView(discord.ui.View):
                         content=f"🫤 Solo puedes comprar **{disponibles}** unidad/es más de **{item_fresh['nombre']}** (límite: {limite} por usuario).",
                         view=self
                     )
-
-            # ── Calcular precio total según unidades elegidas ──────
-            precio_unitario = item_fresh["precio"]
-            total = precio_unitario * self.unidades
-            cantidad_compra = item_fresh.get("cantidad", 1) * self.unidades
-
-            user = await get_user(interaction.user.id)
-            tiene_tarjeta = any(r.id == TARJETA_CREDITO_ROL_ID for r in interaction.user.roles)
-
-            if tiene_tarjeta:
-                if user["bank"] < total:
+                if reason == "insufficient_bank":
                     return await interaction.edit_original_response(
                         content=f"❌ No tienes suficiente banco. Necesitas **{total}** {COIN} ({self.unidades}x {precio_unitario}).",
                         view=self
                     )
-                await update_bank(interaction.user.id, -total)
-            else:
-                if user["balance"] < total:
+                if reason == "insufficient_balance":
                     return await interaction.edit_original_response(
                         content=f"❌ {interaction.user.mention} No tienes suficiente balance. Necesitas **{total}** {COIN} ({self.unidades}x {precio_unitario}),\nO una 💳 **Tarjeta de Crédito para usar el dinero de tu Banco directamente**",
                         view=self
                     )
-                await update_balance(interaction.user.id, -total)
+                return await interaction.edit_original_response(
+                    content="❌ No se pudo procesar la compra.", view=self
+                )
 
-            await add_to_inventory(interaction.user.id, item_fresh["id"], cantidad_compra)
-
-            cache.add_to_inventory_cache(interaction.user.id, {
-                "id": item_fresh["id"],
-                "nombre": item_fresh["nombre"],
-                "icono": item_fresh["icono"],
-                "utilizable": item_fresh["utilizable"],
-                "mensaje_uso": item_fresh["mensaje_uso"],
-                "rol_id": item_fresh["rol_id"],
-                "duracion": item_fresh.get("duracion", 0),
-                "limite_uso": item_fresh.get("limite_uso", 0),
-                "cantidad": cantidad_compra
-            })
-
-            # ── Reducir stock por las unidades compradas ───────────
-            if item_fresh["stock"] != -1:
-                for _ in range(self.unidades):
-                    await reduce_stock(item_fresh["id"])
+            item_fresh = purchase["item"]
+            precio_unitario = purchase["precio_unitario"]
+            total = purchase["total"]
+            cantidad_compra = purchase["cantidad_compra"]
 
             icono = item_fresh["icono"] if item_fresh["icono"] else "🔹"
             nombre_display = interaction.user.nick or interaction.user.display_name
@@ -475,21 +451,37 @@ class UseButton(discord.ui.Button):
                         ephemeral=True
                     )
 
-            await remove_from_inventory(interaction.user.id, item["nombre"])
-
+            role = None
             if item.get("rol_id"):
                 role = self.guild.get_role(int(item["rol_id"]))
+                if not role:
+                    return await interaction.followup.send(
+                        "❌ El rol configurado para este item no existe en el servidor.",
+                        ephemeral=True
+                    )
+                await interaction.user.add_roles(role)
+
+            removed = await remove_from_inventory(interaction.user.id, item["nombre"])
+            if not removed:
                 if role:
-                    await interaction.user.add_roles(role)
-                    duracion = item.get("duracion", 0)
-                    if duracion and duracion > 0:
-                        expira_en = time.time() + duracion
-                        await add_cargo_temporal(
-                            interaction.user.id,
-                            self.guild.id,
-                            int(item["rol_id"]),
-                            expira_en
-                        )
+                    try:
+                        await interaction.user.remove_roles(role)
+                    except Exception:
+                        pass
+                return await interaction.followup.send(
+                    f"❌ Ya no tienes **{item['nombre']}** en tu inventario.", ephemeral=True
+                )
+
+            if role:
+                duracion = item.get("duracion", 0)
+                if duracion and duracion > 0:
+                    expira_en = time.time() + duracion
+                    await add_cargo_temporal(
+                        interaction.user.id,
+                        self.guild.id,
+                        int(item["rol_id"]),
+                        expira_en
+                    )
 
             # ── Registrar uso diario si tiene límite ───
             if limite_uso and limite_uso > 0:

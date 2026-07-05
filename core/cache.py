@@ -9,7 +9,7 @@ _cache = {}
 _dirty = set()
 _last_activity = {}
 
-FLUSH_INTERVAL = 600   # 10 minutos — mini-juegos se persistirán en este ciclo
+FLUSH_INTERVAL = 120   # 2 minutos — reduce pérdida potencial ante reinicios
 CACHE_EXPIRE   = 7200  # 2 horas de inactividad
 MAX_BANK       = 200_000  # Límite máximo de almacenamiento en banco
 
@@ -241,6 +241,21 @@ def cleanup_cache():
     for uid in inactive:
         _inventory_cache.pop(uid, None)
         _collect_cooldowns.pop(uid, None)
+        if uid not in _dirty:
+            _cache.pop(uid, None)
+            _last_activity.pop(uid, None)
+
+    for uid, expira_en in list(_rob_cooldowns.items()):
+        if expira_en <= now:
+            _rob_cooldowns.pop(uid, None)
+
+    for key, expira_en in list(_game_cooldowns.items()):
+        if expira_en <= now:
+            _game_cooldowns.pop(key, None)
+
+    for uid, last in list(_top_cooldowns.items()):
+        if now - last >= 300:
+            _top_cooldowns.pop(uid, None)
 
 # ── VETERANO CONFIG ────────────────────────────────────
 _veterano_config = {}  # {rol_id: {"monto": int, "msj": str}}

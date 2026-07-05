@@ -249,6 +249,7 @@ class Economy(commands.Cog):
             )
 
         cache.set_top_cooldown(user_id)
+        await cache.flush_to_db()
 
         from core.database import pool
 
@@ -275,13 +276,8 @@ class Economy(commands.Cog):
         descripcion = ""
 
         for i, (uid, balance) in enumerate(resultados):
-            try:
-                member = ctx.guild.get_member(uid)
-                if not member:
-                    member = await ctx.guild.fetch_member(uid)
-                nombre = member.display_name
-            except Exception:
-                nombre = "Usuario desconocido"
+            member = ctx.guild.get_member(uid)
+            nombre = member.display_name if member else f"<@{uid}>"
             posicion     = medallas[i] if i < 3 else f"**#{i+1}**"
             descripcion += f"{posicion} {nombre} —— {COIN} **{balance}**\n"
 

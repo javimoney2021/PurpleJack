@@ -324,7 +324,7 @@ class Duels(commands.Cog):
         if time.time() - last_time < cooldown:
             remaining = cooldown - (time.time() - last_time)
             timestamp = int(ctx.message.created_at.timestamp()) + int(remaining)
-            await ctx.reply(f"🚀 La Arena de combate esta ocupada por Jugadores de otros universos Intenta <t:{timestamp}:R>")
+            return await ctx.reply(f"🚀 La Arena de combate esta ocupada por Jugadores de otros universos Intenta <t:{timestamp}:R>")
         _last_duel_times[ctx.guild.id] = time.time()
 
         if ctx.author.id == usuario.id:

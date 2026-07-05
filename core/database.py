@@ -1,3 +1,4 @@
+import asyncio
 import logging
 import asyncpg
 from settings import DATABASE_URL
@@ -6,6 +7,15 @@ from core import cache
 logger = logging.getLogger(__name__)
 
 pool = None
+_purchase_locks = {}
+
+
+def _get_purchase_lock(user_id):
+    lock = _purchase_locks.get(user_id)
+    if lock is None:
+        lock = asyncio.Lock()
+        _purchase_locks[user_id] = lock
+    return lock
 
 async def init_db():
     global pool
@@ -273,12 +283,21 @@ async def delete_item(item_id):
         cache.invalidate_inventory_cache(user_id)
     await load_items_to_cache()
 
-async def reduce_stock(item_id):
+async def reduce_stock(item_id, cantidad=1):
     async with pool.acquire() as conn:
-        await conn.execute(
-            "UPDATE items SET stock = stock - 1 WHERE id=$1 AND stock > 0", item_id
+        row = await conn.fetchrow(
+            """
+            UPDATE items
+            SET stock = stock - $2
+            WHERE id=$1 AND stock >= $2
+            RETURNING stock
+            """,
+            item_id, cantidad
         )
-    await load_items_to_cache()
+    if row:
+        await load_items_to_cache()
+        return True
+    return False
 
 async def add_stock(item_id, cantidad):
     async with pool.acquire() as conn:
@@ -292,20 +311,139 @@ async def add_stock(item_id, cantidad):
 
 async def add_to_inventory(user_id, item_id, cantidad=1):
     async with pool.acquire() as conn:
-        existing = await conn.fetchrow(
-            "SELECT cantidad FROM inventario WHERE user_id=$1 AND item_id=$2",
-            user_id, item_id
+        await conn.execute(
+            """
+            INSERT INTO inventario (user_id, item_id, cantidad)
+            VALUES ($1, $2, $3)
+            ON CONFLICT (user_id, item_id)
+            DO UPDATE SET cantidad = inventario.cantidad + EXCLUDED.cantidad
+            """,
+            user_id, item_id, cantidad
         )
-        if existing:
-            await conn.execute(
-                "UPDATE inventario SET cantidad=cantidad+$1 WHERE user_id=$2 AND item_id=$3",
-                cantidad, user_id, item_id
-            )
-        else:
-            await conn.execute(
-                "INSERT INTO inventario (user_id, item_id, cantidad) VALUES ($1, $2, $3)",
-                user_id, item_id, cantidad
-            )
+    cache.invalidate_inventory_cache(user_id)
+
+
+async def purchase_item(user_id, item_id, unidades=1, use_bank=False):
+    """
+    Compra de tienda en una sola operación: valida saldo, stock, límite por usuario,
+    actualiza inventario y persiste el saldo resultante.
+    """
+    if unidades <= 0:
+        return {"ok": False, "reason": "invalid_units"}
+
+    lock = _get_purchase_lock(user_id)
+    async with lock:
+        user = await get_user(user_id)
+
+        async with pool.acquire() as conn:
+            async with conn.transaction():
+                item = await conn.fetchrow(
+                    "SELECT * FROM items WHERE id=$1 FOR UPDATE",
+                    item_id
+                )
+                if not item:
+                    return {"ok": False, "reason": "not_found"}
+
+                item_data = dict(item)
+                stock = item_data["stock"]
+                if stock == 0:
+                    return {"ok": False, "reason": "out_of_stock", "item": item_data}
+                if stock != -1 and stock < unidades:
+                    return {
+                        "ok": False,
+                        "reason": "insufficient_stock",
+                        "item": item_data,
+                        "available": stock,
+                    }
+
+                inv_row = await conn.fetchrow(
+                    """
+                    SELECT cantidad FROM inventario
+                    WHERE user_id=$1 AND item_id=$2
+                    FOR UPDATE
+                    """,
+                    user_id, item_id
+                )
+                poseidos = inv_row["cantidad"] if inv_row else 0
+                limite = item_data.get("limite_por_usuario", 0) or 0
+                if limite > 0 and poseidos + unidades > limite:
+                    return {
+                        "ok": False,
+                        "reason": "limit",
+                        "item": item_data,
+                        "limit": limite,
+                        "owned": poseidos,
+                        "available": max(0, limite - poseidos),
+                    }
+
+                precio_unitario = item_data["precio"]
+                total = precio_unitario * unidades
+                balance = user["balance"]
+                bank = user["bank"]
+                if use_bank:
+                    if bank < total:
+                        return {
+                            "ok": False,
+                            "reason": "insufficient_bank",
+                            "item": item_data,
+                            "total": total,
+                            "precio_unitario": precio_unitario,
+                        }
+                    bank -= total
+                else:
+                    if balance < total:
+                        return {
+                            "ok": False,
+                            "reason": "insufficient_balance",
+                            "item": item_data,
+                            "total": total,
+                            "precio_unitario": precio_unitario,
+                        }
+                    balance -= total
+
+                cantidad_compra = item_data.get("cantidad", 1) * unidades
+                await conn.execute(
+                    """
+                    UPDATE users
+                    SET balance=$1, bank=$2, cooldown_work=$3, cooldown_crime=$4
+                    WHERE id=$5
+                    """,
+                    balance, bank, user["cooldown_work"], user["cooldown_crime"], user_id
+                )
+                await conn.execute(
+                    """
+                    INSERT INTO inventario (user_id, item_id, cantidad)
+                    VALUES ($1, $2, $3)
+                    ON CONFLICT (user_id, item_id)
+                    DO UPDATE SET cantidad = inventario.cantidad + EXCLUDED.cantidad
+                    """,
+                    user_id, item_id, cantidad_compra
+                )
+                if stock != -1:
+                    await conn.execute(
+                        "UPDATE items SET stock = stock - $1 WHERE id=$2",
+                        unidades, item_id
+                    )
+
+        cache.set_cache(user_id, {
+            "balance": balance,
+            "bank": bank,
+            "cooldown_work": user["cooldown_work"],
+            "cooldown_crime": user["cooldown_crime"],
+        })
+        cache.clear_dirty(user_id)
+        cache.invalidate_inventory_cache(user_id)
+        if stock != -1:
+            item_data["stock"] = stock - unidades
+            await load_items_to_cache()
+
+        return {
+            "ok": True,
+            "item": item_data,
+            "total": total,
+            "precio_unitario": precio_unitario,
+            "cantidad_compra": cantidad_compra,
+        }
 
 async def get_inventory_from_db(user_id):
     async with pool.acquire() as conn:
