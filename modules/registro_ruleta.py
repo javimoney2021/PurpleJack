@@ -5,7 +5,7 @@ from core.config import STAFF_ROLE
 
 # ── CONFIG ─────────────────────────────────────────────
 ROL_REGISTRO_ID   = 1507215915396239410
-CANAL_STAFF_ID    = 1502119147046305962
+CANAL_STAFF_ID    = 1523367841405993120
 CANAL_VOZ_ID      = 1507791449985646723
 
 # ── ESTADO GLOBAL (RAM) ────────────────────────────────
@@ -108,7 +108,7 @@ def embed_abierto(nombre_evento: str) -> discord.Embed:
 def embed_cerrado(nombre_evento: str) -> discord.Embed:
     embed = discord.Embed(
         title=f"{nombre_evento} — Registro Cerrado",
-        description="**Registro Cerrado, Evento Iniciado…Hasta la próxima vez.**",
+        description="**Registro Cerrado, El evento está por iniciar…!**",
         color=discord.Color.dark_gray()
     )
     return embed
