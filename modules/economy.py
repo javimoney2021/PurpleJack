@@ -27,7 +27,8 @@ def _add_collect_fields(embed: discord.Embed):
         return
 
     lineas_collect = [
-        f"<@&{rol_id}>: **{cfg['cantidad']}** {COIN}"
+        f"<@&{rol_id}>: **{cfg['cantidad']}** {COIN} "
+        f"({_format_cooldown(int(round(cfg['cooldown_horas'] * 3600)))})"
         for rol_id, cfg in collect_config.items()
     ]
     bloques_collect = []

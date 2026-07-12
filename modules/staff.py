@@ -120,16 +120,18 @@ class CleanOrphanCollectModal(discord.ui.Modal, title="Limpiar Collects Huérfan
         self.owner_id = owner_id
 
     async def on_submit(self, interaction: discord.Interaction):
+        await interaction.response.defer(ephemeral=True)
+
         if interaction.user.id != self.owner_id:
-            return await interaction.response.send_message(
+            return await interaction.followup.send(
                 "❌ Esta confirmación no te pertenece.", ephemeral=True
             )
         if self.confirmacion.value != "Limpiar":
-            return await interaction.response.send_message(
+            return await interaction.followup.send(
                 "❌ Confirmación incorrecta.", ephemeral=True
             )
         if interaction.guild is None:
-            return await interaction.response.send_message(
+            return await interaction.followup.send(
                 "❌ Este comando solo puede usarse dentro del servidor.", ephemeral=True
             )
 
@@ -139,8 +141,16 @@ class CleanOrphanCollectModal(discord.ui.Modal, title="Limpiar Collects Huérfan
             for role_id in cache.get_collect_config()
             if role_id not in existing_role_ids
         ]
-        deleted_count = await delete_orphan_collect_configs_db(orphan_role_ids)
-        await interaction.response.send_message(
+        try:
+            deleted_count = await delete_orphan_collect_configs_db(orphan_role_ids)
+        except Exception:
+            logger.exception("Error limpiando configuraciones collect huérfanas")
+            return await interaction.followup.send(
+                "❌ No se pudieron limpiar las configuraciones collect huérfanas.",
+                ephemeral=True,
+            )
+
+        await interaction.followup.send(
             f"✅ Se eliminaron **{deleted_count}** configuraciones collect de roles inexistentes.",
             ephemeral=True,
         )
