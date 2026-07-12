@@ -414,7 +414,7 @@ class UseButton(discord.ui.Button):
         super().__init__(
             style=discord.ButtonStyle.primary,
             label="Usar",
-            emoji="⚡",
+            emoji="💠",
             custom_id=f"use_{item['id']}"
         )
         self.item = item
@@ -496,8 +496,8 @@ class UseButton(discord.ui.Button):
                         if expirations:
                             expires_at = int(max(expirations))
                             message = (
-                                f"❌ Actualmente ya posees {conflicting_role.mention}. "
-                                f"Debes esperar <t:{expires_at}:R> para activar uno nuevo."
+                                f"❌ Actualmente ya posees {conflicting_role.mention} "
+                                f"<t:{expires_at}:R> Podrás activar uno nuevo."
                             )
                         else:
                             message = (
