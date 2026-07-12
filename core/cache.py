@@ -201,6 +201,18 @@ def upsert_collect_config(rol_id, cantidad, cooldown_horas):
 def delete_collect_config(rol_id):
     _collect_config.pop(rol_id, None)
 
+_restricted_item_role_ids = set()
+
+def get_restricted_item_role_ids():
+    return _restricted_item_role_ids
+
+def set_restricted_item_role_ids(role_ids):
+    global _restricted_item_role_ids
+    _restricted_item_role_ids = set(role_ids)
+
+def remove_restricted_item_role_id(role_id):
+    _restricted_item_role_ids.discard(role_id)
+
 # ── COLLECT COOLDOWNS POR USUARIO ──────────────────────
 _collect_cooldowns = {}
 

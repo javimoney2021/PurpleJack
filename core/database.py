@@ -84,6 +84,12 @@ async def init_db():
         """)
 
         await conn.execute("""
+        CREATE TABLE IF NOT EXISTS item_role_restrictions (
+            rol_id BIGINT PRIMARY KEY
+        )
+        """)
+
+        await conn.execute("""
         CREATE TABLE IF NOT EXISTS collect_config (
             rol_id BIGINT PRIMARY KEY,
             cantidad INTEGER NOT NULL,
@@ -572,6 +578,30 @@ async def delete_cargo_temporal(user_id, rol_id):
             user_id, rol_id
         )
     cache.remove_cargo_cache(user_id, rol_id)
+
+
+async def load_item_role_restrictions_to_cache():
+    async with pool.acquire() as conn:
+        rows = await conn.fetch("SELECT rol_id FROM item_role_restrictions")
+    cache.set_restricted_item_role_ids(row["rol_id"] for row in rows)
+
+
+async def set_item_role_restrictions_db(role_ids):
+    role_ids = list(set(role_ids))
+    async with pool.acquire() as conn:
+        async with conn.transaction():
+            await conn.execute("DELETE FROM item_role_restrictions")
+            await conn.executemany(
+                "INSERT INTO item_role_restrictions (rol_id) VALUES ($1)",
+                [(role_id,) for role_id in role_ids],
+            )
+    cache.set_restricted_item_role_ids(role_ids)
+
+
+async def remove_item_role_restriction_db(role_id):
+    async with pool.acquire() as conn:
+        await conn.execute("DELETE FROM item_role_restrictions WHERE rol_id=$1", role_id)
+    cache.remove_restricted_item_role_id(role_id)
 
 
 # ── COLLECT ────────────────────────────────────────────

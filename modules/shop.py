@@ -474,6 +474,38 @@ class UseButton(discord.ui.Button):
                             ephemeral=True
                         )
 
+                restricted_role_ids = cache.get_restricted_item_role_ids()
+                if role.id in restricted_role_ids:
+                    conflicting_role = next(
+                        (
+                            member_role
+                            for member_role in member.roles
+                            if member_role.id != role.id and member_role.id in restricted_role_ids
+                        ),
+                        None,
+                    )
+                    if conflicting_role is not None:
+                        now = time.time()
+                        expirations = [
+                            cargo["expira_en"]
+                            for cargo in cache.get_cargos_cache().get(interaction.user.id, [])
+                            if cargo.get("guild_id") == self.guild.id
+                            and cargo.get("rol_id") == conflicting_role.id
+                            and cargo.get("expira_en", 0) > now
+                        ]
+                        if expirations:
+                            expires_at = int(max(expirations))
+                            message = (
+                                f"❌ Actualmente ya posees {conflicting_role.mention}. "
+                                f"Debes esperar <t:{expires_at}:R> para activar uno nuevo."
+                            )
+                        else:
+                            message = (
+                                f"❌ Actualmente ya posees {conflicting_role.mention}. "
+                                "Debes retirar ese rol antes de activar uno nuevo."
+                            )
+                        return await interaction.followup.send(message, ephemeral=True)
+
                 try:
                     await member.add_roles(role, reason=f"Uso de item {item['nombre']} en Purple Jack")
                 except discord.Forbidden:

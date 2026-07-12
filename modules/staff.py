@@ -16,6 +16,7 @@ from core.database import (
     get_item_by_name, add_to_inventory, get_all_users_net_worth,
     get_all_inventarios, load_items_to_cache, add_stock,
     upsert_collect_config_db, delete_collect_config_db, delete_orphan_collect_configs_db,
+    set_item_role_restrictions_db, remove_item_role_restriction_db,
     save_game_config, save_rr_config, save_ruleta_config,
     save_rob_config, save_dados_config, clear_game_cooldowns
 )
@@ -1124,6 +1125,97 @@ class Staff(commands.Cog):
             return await interaction.response.send_message(f"❌ {rol.mention} no tiene collect configurado.", ephemeral=True)
         await delete_collect_config_db(rol.id)
         await interaction.response.send_message(f"✅ Collect de {rol.mention} eliminado.", ephemeral=False)
+
+    @app_commands.command(name="restringir_usar", description="Configura un grupo exclusivo de roles otorgados por items")
+    @app_commands.describe(
+        item_1="Primer item con rol",
+        item_2="Segundo item con rol",
+        item_3="Tercer item con rol. Opcional.",
+        item_4="Cuarto item con rol. Opcional.",
+        item_5="Quinto item con rol. Opcional.",
+    )
+    @is_staff()
+    async def restringir_usar(
+        self,
+        interaction: discord.Interaction,
+        item_1: str,
+        item_2: str,
+        item_3: str | None = None,
+        item_4: str | None = None,
+        item_5: str | None = None,
+    ):
+        selected_names = [
+            name.strip()
+            for name in (item_1, item_2, item_3, item_4, item_5)
+            if name
+        ]
+        if len({name.lower() for name in selected_names}) != len(selected_names):
+            return await interaction.response.send_message(
+                "❌ No puedes seleccionar el mismo item más de una vez.", ephemeral=True
+            )
+
+        items = []
+        for name in selected_names:
+            item = await get_item_by_name(name)
+            if not item:
+                return await interaction.response.send_message(
+                    f"❌ No se encontró el item **{name}**.", ephemeral=True
+                )
+            if not item.get("rol_id"):
+                return await interaction.response.send_message(
+                    f"❌ **{item['nombre']}** no otorga ningún rol.", ephemeral=True
+                )
+            role = interaction.guild.get_role(int(item["rol_id"]))
+            if role is None:
+                return await interaction.response.send_message(
+                    f"❌ El rol configurado para **{item['nombre']}** ya no existe.", ephemeral=True
+                )
+            items.append((item, role))
+
+        role_ids = [role.id for _, role in items]
+        if len(set(role_ids)) != len(role_ids):
+            return await interaction.response.send_message(
+                "❌ Los items seleccionados deben otorgar roles diferentes.", ephemeral=True
+            )
+
+        await interaction.response.defer(ephemeral=True)
+        await set_item_role_restrictions_db(role_ids)
+        roles = ", ".join(role.mention for _, role in items)
+        await interaction.followup.send(
+            f"✅ Grupo exclusivo configurado con: {roles}.", ephemeral=True
+        )
+
+    @app_commands.command(name="eliminar_restriccion", description="Quita un item del grupo exclusivo de roles")
+    @app_commands.describe(item="Item cuyo rol se eliminará de la restricción")
+    @is_staff()
+    async def eliminar_restriccion(self, interaction: discord.Interaction, item: str):
+        found = await get_item_by_name(item.strip())
+        if not found:
+            return await interaction.response.send_message(
+                f"❌ No se encontró el item **{item}**.", ephemeral=True
+            )
+        if not found.get("rol_id") or int(found["rol_id"]) not in cache.get_restricted_item_role_ids():
+            return await interaction.response.send_message(
+                f"❌ **{found['nombre']}** no pertenece al grupo exclusivo.", ephemeral=True
+            )
+
+        await remove_item_role_restriction_db(int(found["rol_id"]))
+        await interaction.response.send_message(
+            f"✅ La restricción de **{found['nombre']}** fue eliminada.", ephemeral=True
+        )
+
+    @restringir_usar.autocomplete("item_1")
+    @restringir_usar.autocomplete("item_2")
+    @restringir_usar.autocomplete("item_3")
+    @restringir_usar.autocomplete("item_4")
+    @restringir_usar.autocomplete("item_5")
+    @eliminar_restriccion.autocomplete("item")
+    async def restriccion_item_autocomplete(self, interaction: discord.Interaction, current: str):
+        return [
+            app_commands.Choice(name=item["nombre"], value=item["nombre"])
+            for item in cache.get_items_cache()
+            if current.lower() in item["nombre"].lower()
+        ][:25]
 
     @app_commands.command(name="collect_limpiar_huerfanos", description="Elimina collects de roles que ya no existen")
     @is_staff()
