@@ -278,7 +278,7 @@ class Economy(commands.Cog):
         for i, (uid, balance) in enumerate(resultados):
             member = ctx.guild.get_member(uid)
             nombre = member.display_name if member else f"<@{uid}>"
-            posicion     = medallas[i] if i < 3 else f"**#{i+1}**"
+            posicion     = medallas[i] if i < 3 else f"**{i+1}.**"
             descripcion += f"{posicion} {nombre} —— {COIN} **{balance}**\n"
 
         embed = discord.Embed(

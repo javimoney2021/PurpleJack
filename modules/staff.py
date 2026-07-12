@@ -74,6 +74,40 @@ class ResetAllModal(discord.ui.Modal, title="Confirmar Reset Global"):
 
 # ── ANUNCIO CONFIRM VIEW ───────────────────────────────
 
+class ResetExpLaboralGlobalModal(discord.ui.Modal, title="Confirmar Reset de XP Laboral"):
+    confirmacion = discord.ui.TextInput(
+        label='Escribe "Reset" para confirmar',
+        placeholder="Reset",
+        max_length=5,
+    )
+
+    def __init__(self, owner_id: int):
+        super().__init__()
+        self.owner_id = owner_id
+
+    async def on_submit(self, interaction: discord.Interaction):
+        if interaction.user.id != self.owner_id:
+            return await interaction.response.send_message(
+                "❌ Esta confirmación no te pertenece.", ephemeral=True
+            )
+        if self.confirmacion.value != "Reset":
+            return await interaction.response.send_message(
+                "❌ Confirmación incorrecta.", ephemeral=True
+            )
+
+        async with pool.acquire() as conn:
+            rows = await conn.fetch(
+                "UPDATE empleos_users SET exp_laboral=0 "
+                "WHERE exp_laboral <> 0 RETURNING user_id"
+            )
+
+        _EMPLEOS_CACHE.clear()
+        await interaction.response.send_message(
+            f"✅ Se reinició la XP Laboral de **{len(rows)}** usuarios.",
+            ephemeral=True,
+        )
+
+
 class AnuncioConfirmView(discord.ui.View):
     def __init__(self, user_id, channel, content, img_bytes=None, img_filename=None):
         super().__init__(timeout=60)
@@ -438,6 +472,56 @@ class Staff(commands.Cog):
         await interaction.followup.send(
             f"✅ Se otorgaron **{xp}** puntos de XP Laboral a {usuario.mention}.",
             ephemeral=False,
+        )
+
+    @app_commands.command(name="reset_exp_laboral", description="Reinicia la XP Laboral de un usuario o de todos")
+    @app_commands.describe(
+        alcance="Elige si se reinicia un usuario o todos los registros",
+        usuario="Usuario al que se le reiniciará la XP Laboral",
+    )
+    @app_commands.choices(alcance=[
+        app_commands.Choice(name="Usuario", value="usuario"),
+        app_commands.Choice(name="Todos", value="todos"),
+    ])
+    @is_staff()
+    async def reset_exp_laboral(
+        self,
+        interaction: discord.Interaction,
+        alcance: app_commands.Choice[str],
+        usuario: discord.Member | None = None,
+    ):
+        if alcance.value == "todos":
+            if usuario is not None:
+                return await interaction.response.send_message(
+                    "❌ No selecciones un usuario cuando el alcance sea **Todos**.",
+                    ephemeral=True,
+                )
+            return await interaction.response.send_modal(
+                ResetExpLaboralGlobalModal(interaction.user.id)
+            )
+
+        if usuario is None:
+            return await interaction.response.send_message(
+                "❌ Debes seleccionar un usuario cuando el alcance sea **Usuario**.",
+                ephemeral=True,
+            )
+
+        async with pool.acquire() as conn:
+            user_id = await conn.fetchval(
+                "UPDATE empleos_users SET exp_laboral=0 "
+                "WHERE user_id=$1 AND exp_laboral <> 0 RETURNING user_id",
+                usuario.id,
+            )
+
+        _EMPLEOS_CACHE.pop(usuario.id, None)
+        if user_id is None:
+            return await interaction.response.send_message(
+                f"ℹ️ {usuario.mention} no tiene XP Laboral para reiniciar.",
+                ephemeral=True,
+            )
+        await interaction.response.send_message(
+            f"✅ La XP Laboral de {usuario.mention} fue reiniciada a **0**.",
+            ephemeral=True,
         )
 
     @app_commands.command(name="despedir_todos", description="Limpia temporalmente todos los empleos registrados en DB y RAM")

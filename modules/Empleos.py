@@ -544,7 +544,7 @@ class Empleos(commands.Cog):
             return await ctx.send("❌ No posees un empleo activo.")
         data["ultimo_empleo"] = data.get("empleo_actual")
         data["progreso_requisito"] = data.get("progreso_permanencia", 0)
-        data["cooldown_renuncia"] = 0 if _es_coordinador(ctx.author) else time.time() + 900
+        data["cooldown_renuncia"] = 0 if _es_coordinador(ctx.author) else time.time() + 300
         data["empleo_actual"] = None
         data["dificultad"] = None
         data["fecha_contratacion"] = 0
@@ -552,7 +552,7 @@ class Empleos(commands.Cog):
         data["historial_reciente_de_jornadas"] = []
         data["despedido_inactividad"] = False
         await save_empleo_user(data)
-        await ctx.send("🛑 Has renunciado a tu empleo. Podrás aplicar a un nuevo trabajo dentro de 15 minutos.")
+        await ctx.send("🛑 Has renunciado a tu empleo. Podrás aplicar a un nuevo trabajo dentro de 5 minutos.")
 
     @commands.command(name="exp")
     async def exp(self, ctx):

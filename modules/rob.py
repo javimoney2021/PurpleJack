@@ -25,18 +25,65 @@ class Rob(commands.Cog):
     def __init__(self, bot):
         self.bot = bot
 
+    async def _get_top_target(self, ctx, position: int):
+        """Resuelve una posición del Top 15 al miembro correspondiente."""
+        await cache.flush_to_db()
+
+        from core.database import pool
+
+        async with pool.acquire() as conn:
+            rows = await conn.fetch(
+                "SELECT id, balance FROM users ORDER BY balance DESC LIMIT 15"
+            )
+
+        user_cache = cache.get_all_cache()
+        rankings = [
+            (row["id"], user_cache.get(row["id"], {}).get("balance", row["balance"]))
+            for row in rows
+        ]
+        rankings.sort(key=lambda entry: entry[1], reverse=True)
+
+        if position > len(rankings):
+            return None
+
+        target_id = rankings[position - 1][0]
+        member = ctx.guild.get_member(target_id)
+        if member is not None:
+            return member
+        try:
+            return await ctx.guild.fetch_member(target_id)
+        except (discord.NotFound, discord.HTTPException):
+            return None
+
     @commands.command()
-    async def rob(self, ctx, target: discord.Member = None):
+    async def rob(self, ctx, target_input: str = None):
         if not rob_config["activa"]:
             return await ctx.send(
                 "🔫 Las calles están llenas de Sheriffs y Veteranos, "
                 "está siendo imposible atracar a alguien."
             )
 
-        if target is None:
+        if target_input is None:
             return await ctx.send(
-                f"❌ {ctx.author.mention} Formato correcto: `!rob @usuario`"
+                f"❌ {ctx.author.mention} Formato correcto: `!rob @usuario` o `!rob <posición del top>`"
             )
+
+        if target_input.isdigit() and len(target_input) <= 2:
+            position = int(target_input)
+            if not 1 <= position <= 15:
+                return await ctx.send("❌ Indica una posición válida del **1** al **15**.")
+            target = await self._get_top_target(ctx, position)
+            if target is None:
+                return await ctx.send(
+                    f"❌ No se encontró un jugador disponible en la posición **{position}.**"
+                )
+        else:
+            try:
+                target = await commands.MemberConverter().convert(ctx, target_input)
+            except commands.BadArgument:
+                return await ctx.send(
+                    f"❌ No se pudo encontrar a ese usuario. Usa `!rob @usuario` o `!rob <posición del top>`."
+                )
 
         if target == ctx.author:
             return await ctx.send(
