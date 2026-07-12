@@ -15,7 +15,7 @@ from core.database import (
     add_item, edit_item, delete_item,
     get_item_by_name, add_to_inventory, get_all_users_net_worth,
     get_all_inventarios, load_items_to_cache, add_stock,
-    upsert_collect_config_db, delete_collect_config_db,
+    upsert_collect_config_db, delete_collect_config_db, delete_orphan_collect_configs_db,
     save_game_config, save_rr_config, save_ruleta_config,
     save_rob_config, save_dados_config, clear_game_cooldowns
 )
@@ -104,6 +104,44 @@ class ResetExpLaboralGlobalModal(discord.ui.Modal, title="Confirmar Reset de XP 
         _EMPLEOS_CACHE.clear()
         await interaction.response.send_message(
             f"✅ Se reinició la XP Laboral de **{len(rows)}** usuarios.",
+            ephemeral=True,
+        )
+
+
+class CleanOrphanCollectModal(discord.ui.Modal, title="Limpiar Collects Huérfanos"):
+    confirmacion = discord.ui.TextInput(
+        label='Escribe "Limpiar" para confirmar',
+        placeholder="Limpiar",
+        max_length=7,
+    )
+
+    def __init__(self, owner_id: int):
+        super().__init__()
+        self.owner_id = owner_id
+
+    async def on_submit(self, interaction: discord.Interaction):
+        if interaction.user.id != self.owner_id:
+            return await interaction.response.send_message(
+                "❌ Esta confirmación no te pertenece.", ephemeral=True
+            )
+        if self.confirmacion.value != "Limpiar":
+            return await interaction.response.send_message(
+                "❌ Confirmación incorrecta.", ephemeral=True
+            )
+        if interaction.guild is None:
+            return await interaction.response.send_message(
+                "❌ Este comando solo puede usarse dentro del servidor.", ephemeral=True
+            )
+
+        existing_role_ids = {role.id for role in interaction.guild.roles}
+        orphan_role_ids = [
+            role_id
+            for role_id in cache.get_collect_config()
+            if role_id not in existing_role_ids
+        ]
+        deleted_count = await delete_orphan_collect_configs_db(orphan_role_ids)
+        await interaction.response.send_message(
+            f"✅ Se eliminaron **{deleted_count}** configuraciones collect de roles inexistentes.",
             ephemeral=True,
         )
 
@@ -1076,6 +1114,20 @@ class Staff(commands.Cog):
             return await interaction.response.send_message(f"❌ {rol.mention} no tiene collect configurado.", ephemeral=True)
         await delete_collect_config_db(rol.id)
         await interaction.response.send_message(f"✅ Collect de {rol.mention} eliminado.", ephemeral=False)
+
+    @app_commands.command(name="collect_limpiar_huerfanos", description="Elimina collects de roles que ya no existen")
+    @is_staff()
+    async def collect_limpiar_huerfanos(self, interaction: discord.Interaction):
+        existing_role_ids = {role.id for role in interaction.guild.roles}
+        orphan_count = sum(
+            role_id not in existing_role_ids
+            for role_id in cache.get_collect_config()
+        )
+        if orphan_count == 0:
+            return await interaction.response.send_message(
+                "ℹ️ No hay configuraciones collect de roles inexistentes.", ephemeral=True
+            )
+        await interaction.response.send_modal(CleanOrphanCollectModal(interaction.user.id))
 
     @app_commands.command(name="work_edit", description="Edita configuración de !work")
     @app_commands.describe(minimo="Mínimo de coins", maximo="Máximo de coins", cooldown="Cooldown: ej 4h o 30m")

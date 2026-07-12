@@ -597,6 +597,29 @@ async def delete_collect_config_db(rol_id):
         await conn.execute("DELETE FROM collect_config WHERE rol_id=$1", rol_id)
     cache.delete_collect_config(rol_id)
 
+
+async def delete_orphan_collect_configs_db(role_ids):
+    """Elimina configuraciones collect huérfanas y sus cooldowns asociados."""
+    if not role_ids:
+        return 0
+
+    async with pool.acquire() as conn:
+        async with conn.transaction():
+            deleted = await conn.fetch(
+                "DELETE FROM collect_config WHERE rol_id = ANY($1::BIGINT[]) RETURNING rol_id",
+                role_ids,
+            )
+            if deleted:
+                await conn.execute(
+                    "DELETE FROM collect_cooldowns WHERE rol_id = ANY($1::BIGINT[])",
+                    role_ids,
+                )
+
+    for role_id in role_ids:
+        cache.delete_collect_config(role_id)
+    return len(deleted)
+
+
 async def load_collect_cooldowns_for_user(user_id):
     async with pool.acquire() as conn:
         rows = await conn.fetch(
