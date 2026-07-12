@@ -1,6 +1,7 @@
 from discord.ext import commands
 from discord import app_commands, ui, ButtonStyle, Interaction
 import discord
+import asyncio
 import time
 
 from core.database import get_user, update_balance, update_bank
@@ -9,6 +10,123 @@ from core.config import COIN, game_config, ruleta_config, rob_config, rr_config,
 from core.cache import MAX_BANK
 
 TOP_COOLDOWN = 300
+
+
+def _format_cooldown(seconds: int) -> str:
+    if seconds >= 3600:
+        return f"{seconds // 3600}h"
+    if seconds >= 60:
+        return f"{seconds // 60}m"
+    return f"{seconds}s"
+
+
+def _add_collect_fields(embed: discord.Embed):
+    collect_config = cache.get_collect_config()
+    if not collect_config:
+        embed.description = "No hay roles con collect activo actualmente."
+        return
+
+    lineas_collect = [
+        f"<@&{rol_id}>: **{cfg['cantidad']}** {COIN}"
+        for rol_id, cfg in collect_config.items()
+    ]
+    bloques_collect = []
+    bloque_actual = []
+    longitud_actual = 0
+    for linea in lineas_collect:
+        longitud_linea = len(linea) + (1 if bloque_actual else 0)
+        if bloque_actual and longitud_actual + longitud_linea > 1024:
+            bloques_collect.append("\n".join(bloque_actual))
+            bloque_actual = [linea]
+            longitud_actual = len(linea)
+        else:
+            bloque_actual.append(linea)
+            longitud_actual += longitud_linea
+    if bloque_actual:
+        bloques_collect.append("\n".join(bloque_actual))
+
+    for indice, bloque in enumerate(bloques_collect):
+        nombre_campo = (
+            "**Cargos con Collect Activo**"
+            if indice == 0
+            else "**Cargos con Collect Activo (continuación)**"
+        )
+        embed.add_field(name=nombre_campo, value=bloque, inline=False)
+
+
+def _build_cooldowns_embed(guild_id: int) -> discord.Embed:
+    from modules.duels import DEFAULT_DUEL_COOLDOWN, _duel_cooldowns
+    from modules.memo import MEMO_COOLDOWN
+
+    work_cd = _format_cooldown(game_config["work"]["cooldown"])
+    crime_cd = _format_cooldown(game_config["crime"]["cooldown"])
+    ruleta_cd = _format_cooldown(ruleta_config["cooldown"])
+    rob_cd = _format_cooldown(rob_config["cooldown"])
+    rr_cd = _format_cooldown(rr_config["cooldown"])
+    dados_cd = _format_cooldown(dados_config["cooldown"])
+    memo_cd = _format_cooldown(MEMO_COOLDOWN)
+    retar_cd = _format_cooldown(_duel_cooldowns.get(guild_id, DEFAULT_DUEL_COOLDOWN))
+
+    embed = discord.Embed(title="⏱️ Cooldowns de Juegos", color=discord.Color.purple())
+    embed.set_thumbnail(
+        url="https://raw.githubusercontent.com/javimoney2021/PurpleJack/main/Thumbs/CD.png"
+    )
+    embed.description = (
+        f"**!work**     — Cada {work_cd}\n"
+        f"**!crime**    — Cada {crime_cd}\n"
+        f"**!ruleta**   — Cada {ruleta_cd}\n"
+        f"**!rr**       — Cada {rr_cd}\n"
+        f"**!rob**      — Cada {rob_cd}\n"
+        f"**!dados**    — Cada {dados_cd}\n"
+        f"**!memo**     — Cada {memo_cd}\n"
+        f"**!retar**    — Cada {retar_cd}"
+    )
+    return embed
+
+
+def _build_collects_embed() -> discord.Embed:
+    embed = discord.Embed(title="💷 Roles con Collects Activos", color=discord.Color.blurple())
+    _add_collect_fields(embed)
+    return embed
+
+
+class CooldownsPanelView(ui.View):
+    def __init__(self):
+        super().__init__(timeout=40)
+        self.message: discord.Message | None = None
+
+    @ui.button(label="Cooldowns", style=ButtonStyle.green)
+    async def cooldowns(self, interaction: Interaction, button: ui.Button):
+        await interaction.response.send_message(
+            embed=_build_cooldowns_embed(interaction.guild_id or 0),
+            ephemeral=True,
+        )
+
+    @ui.button(label="Roles Collects", style=ButtonStyle.primary)
+    async def collects(self, interaction: Interaction, button: ui.Button):
+        await interaction.response.send_message(embed=_build_collects_embed(), ephemeral=True)
+
+    async def on_timeout(self):
+        if self.message is None:
+            return
+
+        expired_embed = discord.Embed(
+            title="*Consulta **!cd** para ver la info de cooldowns y collects.*",
+            color=discord.Color.purple(),
+        )
+        try:
+            await self.message.edit(embed=expired_embed, view=None)
+        except discord.HTTPException:
+            return
+
+        asyncio.create_task(self._delete_expired_message())
+
+    async def _delete_expired_message(self):
+        await asyncio.sleep(60)
+        try:
+            await self.message.delete()
+        except discord.HTTPException:
+            pass
 
 
 class FinanceView(ui.View):
@@ -172,9 +290,7 @@ class Economy(commands.Cog):
         await ctx.message.reply(embed=embed, view=FinanceView(ctx.author.id), delete_after=120)
 
     def format_cooldown(self, seconds: int) -> str:
-        if seconds >= 3600:
-            return f"{seconds // 3600}h"
-        return f"{seconds // 60}m"
+        return _format_cooldown(seconds)
 
     async def cog_command_error(self, ctx, error):
         if isinstance(error, commands.CommandOnCooldown):
@@ -194,67 +310,17 @@ class Economy(commands.Cog):
     @commands.cooldown(1, 30, commands.BucketType.user)
     async def cooldowns(self, ctx):
         embed = discord.Embed(
-            title="⏱️ Cooldowns Actuales",
+            title="**INFO:** CD y Collects Activos",
+            description=(
+                "Haz click en los botones de abajo para mostrar la información de los "
+                "tiempos de espera y Roles con Collects..."
+            ),
             color=discord.Color.purple(),
         )
-        embed.set_thumbnail(
-            url="https://raw.githubusercontent.com/javimoney2021/PurpleJack/main/Thumbs/CD.png"
-        )
-
-        work_cd   = self.format_cooldown(game_config["work"]["cooldown"])
-        crime_cd  = self.format_cooldown(game_config["crime"]["cooldown"])
-        ruleta_cd = self.format_cooldown(ruleta_config["cooldown"])
-        rob_cd    = self.format_cooldown(rob_config["cooldown"])
-        rr_cd     = self.format_cooldown(rr_config["cooldown"])
-        dados_cd  = self.format_cooldown(dados_config["cooldown"])
-
-        descripcion = (
-            f"**!work**     — Cada {work_cd}\n"
-            f"**!crime**    — Cada {crime_cd}\n"
-            f"**!ruleta**   — Cada {ruleta_cd}\n"
-            f"**!rr**       — Cada {rr_cd}\n"
-            f"**!rob**      — Cada {rob_cd}\n"
-            f"**!dados**    — Cada {dados_cd}\n"
-            f"**!collect**  — Configurado por Rol **(ver !collect)**"
-        )
-        embed.description = descripcion
-
-        collect_config = cache.get_collect_config()
-        if collect_config:
-            lineas_collect = []
-            for rol_id, cfg in collect_config.items():
-                horas = cfg["cooldown_horas"]
-                if horas >= 1 and horas == int(horas):
-                    tiempo = f"{int(horas)} hora" if horas == 1 else f"{int(horas)} horas"
-                else:
-                    minutos = int(round(horas * 60))
-                    tiempo  = f"{minutos} minuto" if minutos == 1 else f"{minutos} minutos"
-                lineas_collect.append(f"<@&{rol_id}>: **{cfg['cantidad']}** {COIN}")
-
-            bloques_collect = []
-            bloque_actual = []
-            longitud_actual = 0
-            for linea in lineas_collect:
-                longitud_linea = len(linea) + (1 if bloque_actual else 0)
-                if bloque_actual and longitud_actual + longitud_linea > 1024:
-                    bloques_collect.append("\n".join(bloque_actual))
-                    bloque_actual = [linea]
-                    longitud_actual = len(linea)
-                else:
-                    bloque_actual.append(linea)
-                    longitud_actual += longitud_linea
-            if bloque_actual:
-                bloques_collect.append("\n".join(bloque_actual))
-
-            for indice, bloque in enumerate(bloques_collect):
-                nombre_campo = (
-                    "**Cargos con Collect Activo**"
-                    if indice == 0
-                    else "**Cargos con Collect Activo (continuación)**"
-                )
-                embed.add_field(name=nombre_campo, value=bloque, inline=False)
-
-        await ctx.send(embed=embed, delete_after=30)
+        embed.set_footer(text=">> Cualquiera puede usar este panel <<")
+        view = CooldownsPanelView()
+        message = await ctx.send(embed=embed, view=view)
+        view.message = message
 
     @commands.command()
     async def top(self, ctx):
