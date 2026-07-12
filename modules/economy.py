@@ -230,13 +230,31 @@ class Economy(commands.Cog):
                     minutos = int(round(horas * 60))
                     tiempo  = f"{minutos} minuto" if minutos == 1 else f"{minutos} minutos"
                 lineas_collect.append(f"<@&{rol_id}>: **{cfg['cantidad']}** {COIN}")
-            embed.add_field(
-                name="**Cargos con Collect Activo**",
-                value="\n".join(lineas_collect),
-                inline=False,
-            )
 
-        await ctx.send(embed=embed, delete_after=15)
+            bloques_collect = []
+            bloque_actual = []
+            longitud_actual = 0
+            for linea in lineas_collect:
+                longitud_linea = len(linea) + (1 if bloque_actual else 0)
+                if bloque_actual and longitud_actual + longitud_linea > 1024:
+                    bloques_collect.append("\n".join(bloque_actual))
+                    bloque_actual = [linea]
+                    longitud_actual = len(linea)
+                else:
+                    bloque_actual.append(linea)
+                    longitud_actual += longitud_linea
+            if bloque_actual:
+                bloques_collect.append("\n".join(bloque_actual))
+
+            for indice, bloque in enumerate(bloques_collect):
+                nombre_campo = (
+                    "**Cargos con Collect Activo**"
+                    if indice == 0
+                    else "**Cargos con Collect Activo (continuación)**"
+                )
+                embed.add_field(name=nombre_campo, value=bloque, inline=False)
+
+        await ctx.send(embed=embed, delete_after=30)
 
     @commands.command()
     async def top(self, ctx):
