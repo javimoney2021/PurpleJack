@@ -77,12 +77,26 @@ EMPLEOS = {
     }
 }
 
+# ── OFICINA Y MAESTRÍAS ──────────────────────────────────
+OFICINA_XP_MINIMA = 30
+MAESTRIA_XP_COSTO = 150
+OFICINA_PANEL_SEGUNDOS = 60
+
+# Estos empleos se presentan desde la Oficina, pero su jornada se desarrollará
+# en una fase posterior. La clave permanece normalizada para la persistencia.
+EMPLEOS_MAESTRIA = {
+    "chantajista": {"nombre": "Chantajista", "maestrias_requeridas": 1},
+    "cazador": {"nombre": "Cazador", "maestrias_requeridas": 2},
+    "piromano": {"nombre": "Píromano", "maestrias_requeridas": 3},
+}
+
 # ── BONOS DE RACHA ──────────────────────────────────────
 RACHA_BONUS_XP    = 5     # XP extra al completar racha de 5 éxitos
 RACHA_BONUS_COINS = 0.10  # 10 % del pago como bono de coins por racha
 
 # ── STAFF BYPASS ─────────────────────────────────────────
 STAFF_BYPASS_ROL  = "Coordinador-ES"   # Rol con cooldowns liberados en empleos
+COOLDOWN_RENUNCIA_SEGUNDOS = 6 * 3600
 
 def _es_coordinador(member: discord.Member) -> bool:
     """True si el miembro posee el rol de bypass de cooldowns."""
@@ -136,6 +150,7 @@ async def init_empleos_tables():
             progreso_requisito DOUBLE PRECISION DEFAULT 0,
             despedido_inactividad BOOLEAN DEFAULT FALSE,
             exp_laboral INTEGER DEFAULT 0,
+            maestrias INTEGER DEFAULT 0,
             trabajos_exitosos INTEGER DEFAULT 0,
             trabajos_fallidos INTEGER DEFAULT 0,
             total_generado INTEGER DEFAULT 0,
@@ -147,6 +162,7 @@ async def init_empleos_tables():
         """)
         for column, definition in [
             ("exp_laboral", "INTEGER DEFAULT 0"),
+            ("maestrias", "INTEGER DEFAULT 0"),
             ("trabajos_exitosos", "INTEGER DEFAULT 0"),
             ("trabajos_fallidos", "INTEGER DEFAULT 0"),
             ("total_generado", "INTEGER DEFAULT 0"),
@@ -192,6 +208,7 @@ async def get_empleo_user(user_id, force_refresh=False):
             "progreso_requisito": 0,
             "despedido_inactividad": False,
             "exp_laboral": 0,
+            "maestrias": 0,
             "trabajos_exitosos": 0,
             "trabajos_fallidos": 0,
             "total_generado": 0,
@@ -222,11 +239,11 @@ async def save_empleo_user(data):
                 ultimo_trabajo, historial_reciente_de_jornadas,
                 cooldown_renuncia, progreso_permanencia,
                 ultimo_empleo, progreso_requisito, despedido_inactividad,
-                exp_laboral, trabajos_exitosos, trabajos_fallidos,
+                exp_laboral, maestrias, trabajos_exitosos, trabajos_fallidos,
                 total_generado, racha_exitos,
                 ingresos_empleo_actual, exitosos_empleo_actual, fallidos_empleo_actual
             )
-            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19)
+            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20)
             ON CONFLICT (user_id) DO UPDATE SET
                 empleo_actual=EXCLUDED.empleo_actual,
                 dificultad=EXCLUDED.dificultad,
@@ -239,6 +256,7 @@ async def save_empleo_user(data):
                 progreso_requisito=EXCLUDED.progreso_requisito,
                 despedido_inactividad=EXCLUDED.despedido_inactividad,
                 exp_laboral=EXCLUDED.exp_laboral,
+                maestrias=EXCLUDED.maestrias,
                 trabajos_exitosos=EXCLUDED.trabajos_exitosos,
                 trabajos_fallidos=EXCLUDED.trabajos_fallidos,
                 total_generado=EXCLUDED.total_generado,
@@ -250,7 +268,7 @@ async def save_empleo_user(data):
              data.get("ultimo_trabajo", 0), hist_json, data.get("cooldown_renuncia", 0),
              data.get("progreso_permanencia", 0), data.get("ultimo_empleo"),
              data.get("progreso_requisito", 0), data.get("despedido_inactividad", False),
-             data.get("exp_laboral", 0), data.get("trabajos_exitosos", 0), data.get("trabajos_fallidos", 0),
+             data.get("exp_laboral", 0), data.get("maestrias", 0), data.get("trabajos_exitosos", 0), data.get("trabajos_fallidos", 0),
              data.get("total_generado", 0), data.get("racha_exitos", 0),
              data.get("ingresos_empleo_actual", 0), data.get("exitosos_empleo_actual", 0), data.get("fallidos_empleo_actual", 0))
     _EMPLEOS_CACHE[data["user_id"]] = data
@@ -314,6 +332,7 @@ async def reset_empleo_user(user_id):
         "progreso_requisito": 0,
         "despedido_inactividad": False,
         "exp_laboral": 0,
+        "maestrias": 0,
         "trabajos_exitosos": 0,
         "trabajos_fallidos": 0,
         "total_generado": 0,
@@ -335,6 +354,7 @@ async def reset_empleo_user(user_id):
         "progreso_requisito": 0,
         "despedido_inactividad": False,
         "exp_laboral": 0,
+        "maestrias": 0,
         "trabajos_exitosos": 0,
         "trabajos_fallidos": 0,
         "total_generado": 0,
@@ -397,6 +417,90 @@ async def despedir_por_inactividad(user_id: int, data: dict):
     _EMPLEOS_CACHE[user_id] = data
 
 
+def nombre_empleo(empleo: str | None) -> str:
+    if not empleo:
+        return "Sin empleo"
+    empleo_normalizado = normalizar_empleo(empleo)
+    return EMPLEOS_MAESTRIA.get(empleo_normalizado, {}).get("nombre", empleo.title())
+
+
+def build_exp_embed(member: discord.Member, data: dict) -> discord.Embed:
+    """Construye el mismo resumen laboral que muestra el comando !exp."""
+    empleo = data.get("empleo_actual") or "Sin empleo"
+    embed = discord.Embed(
+        title=f"📊 Experiencia Laboral - {member.display_name}",
+        color=discord.Color.gold(),
+    )
+    embed.add_field(
+        name="Empleo actual",
+        value=nombre_empleo(empleo) if empleo != "Sin empleo" else empleo,
+        inline=False,
+    )
+    embed.add_field(name="XP Laboral", value=str(data.get("exp_laboral", 0)), inline=True)
+    embed.add_field(name="Trabajos exitosos", value=str(data.get("trabajos_exitosos", 0)), inline=True)
+    embed.add_field(name="Trabajos fallidos", value=str(data.get("trabajos_fallidos", 0)), inline=True)
+    embed.add_field(name="Total generado", value=f"{data.get('total_generado', 0)} {COIN}", inline=False)
+    embed.set_footer(text="Tu progreso laboral se actualiza al terminar cada jornada.")
+    embed.set_thumbnail(url="https://pub-a09b3609b6b34dfab5c7aa7742cd1a8a.r2.dev/Purple%20jack%20Harcode/exp%20thumb.png")
+    return embed
+
+
+def build_oficina_embed(member: discord.Member, data: dict) -> discord.Embed:
+    empleo = nombre_empleo(data.get("empleo_actual"))
+    nombre = member.nick or member.display_name
+    embed = discord.Embed(
+        title=f"{nombre} - {empleo}",
+        description="Gerencia tu actividad laboral realizando acciones y consultas en los botones abajo...",
+        color=discord.Color.green(),
+    )
+    embed.set_thumbnail(url=member.display_avatar.url)
+    embed.set_footer(text="Gestiona tu situación laboral.")
+    return embed
+
+
+def build_maestrias_embed(data: dict) -> discord.Embed:
+    embed = discord.Embed(
+        title="Especialización en Maestría",
+        description=(
+            "Realiza tu maestría para acceder a Empleos especializados.\n\n"
+            f"**Maestrías:** {data.get('maestrias', 0)}"
+        ),
+        color=discord.Color.green(),
+    )
+    return embed
+
+
+def build_empleos_maestria_embed() -> discord.Embed:
+    lineas = [
+        f"• **{info['nombre']}** - Requiere {info['maestrias_requeridas']} maestría(s)"
+        for info in EMPLEOS_MAESTRIA.values()
+    ]
+    return discord.Embed(
+        title="Empleos Disponibles",
+        description="\n".join(lineas),
+        color=discord.Color.green(),
+    )
+
+
+async def renunciar_empleo(member: discord.Member) -> tuple[bool, str]:
+    """Aplica la misma baja y cooldown que el comando !renunciar."""
+    data = await get_empleo_user(member.id)
+    if not data or not data.get("empleo_actual"):
+        return False, "❌ No posees un empleo activo."
+
+    data["ultimo_empleo"] = data.get("empleo_actual")
+    data["progreso_requisito"] = data.get("progreso_permanencia", 0)
+    data["cooldown_renuncia"] = 0 if _es_coordinador(member) else time.time() + COOLDOWN_RENUNCIA_SEGUNDOS
+    data["empleo_actual"] = None
+    data["dificultad"] = None
+    data["fecha_contratacion"] = 0
+    data["ultimo_trabajo"] = 0
+    data["historial_reciente_de_jornadas"] = []
+    data["despedido_inactividad"] = False
+    await save_empleo_user(data)
+    return True, "🛑 Has renunciado a tu empleo. Podrás aplicar a un nuevo trabajo dentro de 6 horas."
+
+
 class ConfirmarEmpleoView(ui.View):
     def __init__(self, bot, user_id, empleo):
         super().__init__(timeout=60)
@@ -422,21 +526,22 @@ class ConfirmarEmpleoView(ui.View):
             "progreso_requisito": 0,
             "despedido_inactividad": False,
             "exp_laboral": 0,
+            "maestrias": 0,
             "trabajos_exitosos": 0,
             "trabajos_fallidos": 0,
             "total_generado": 0,
             "racha_exitos": 0,
         }
         cooldown_until = data.get("cooldown_renuncia", 0)
-        if cooldown_until and time.time() < cooldown_until:
+        if cooldown_until and time.time() < cooldown_until and not _es_coordinador(interaction.user):
             return await interaction.response.send_message(
                 f"⏳ Podras Aplicar a otro empleo {format_relative_time(cooldown_until)} Regresa luego.",
                 ephemeral=True,
             )
 
-        if data.get("empleo_actual"):
+        if normalizar_empleo(data.get("empleo_actual") or "") == self.empleo:
             return await interaction.response.send_message(
-                f"❌ Ya posees un empleo como **{data['empleo_actual']}**. Usa `!renunciar` antes de aplicar a otro trabajo.",
+                f"❌ Ya trabajas como **{data['empleo_actual'].title()}**. Elige un empleo distinto.",
                 ephemeral=True
             )
 
@@ -482,6 +587,242 @@ class ConfirmarEmpleoView(ui.View):
             pass
 
 
+class OficinaBaseView(ui.View):
+    """Base para mantener la Oficina privada y con vencimiento uniforme."""
+
+    def __init__(self, owner_id: int, expires_at: float):
+        # Se conserva activa un margen adicional para poder informar el vencimiento.
+        super().__init__(timeout=180)
+        self.owner_id = owner_id
+        self.expires_at = expires_at
+
+    async def validar_interaccion(self, interaction: Interaction) -> bool:
+        if interaction.user.id != self.owner_id:
+            await interaction.response.send_message("❌ Este panel no es tuyo.", ephemeral=True)
+            return False
+        if time.time() >= self.expires_at:
+            await interaction.response.send_message(
+                "Panel Vencido consulta nuevamente. **!oficina**",
+                ephemeral=True,
+            )
+            return False
+        return True
+
+
+class AbrirOficinaView(ui.View):
+    def __init__(self, owner_id: int):
+        super().__init__(timeout=120)
+        self.owner_id = owner_id
+
+    @ui.button(label="Abrir Oficina", style=ButtonStyle.green)
+    async def abrir_oficina(self, interaction: Interaction, button: ui.Button):
+        if interaction.user.id != self.owner_id:
+            return await interaction.response.send_message("❌ Este panel no es tuyo.", ephemeral=True)
+
+        data = await get_empleo_user(self.owner_id, force_refresh=True)
+        if not data or data.get("exp_laboral", 0) < OFICINA_XP_MINIMA:
+            return await interaction.response.send_message(
+                "Para acceder a la oficina necesitas tener 30 de exp laboral, consulta **!exp** continua trabajando.",
+                ephemeral=True,
+            )
+
+        expires_at = time.time() + OFICINA_PANEL_SEGUNDOS
+        await interaction.response.send_message(
+            embed=build_oficina_embed(interaction.user, data),
+            view=OficinaView(self.owner_id, expires_at),
+            ephemeral=True,
+        )
+
+
+class OficinaView(OficinaBaseView):
+    @ui.button(label="Info General", style=ButtonStyle.blurple, row=0)
+    async def info_general(self, interaction: Interaction, button: ui.Button):
+        if not await self.validar_interaccion(interaction):
+            return
+        data = await get_empleo_user(self.owner_id, force_refresh=True)
+        await interaction.response.edit_message(
+            embed=build_exp_embed(interaction.user, data),
+            view=OficinaInfoView(self.owner_id, self.expires_at),
+        )
+
+    @ui.button(label="Maestría", style=ButtonStyle.green, row=0)
+    async def maestria(self, interaction: Interaction, button: ui.Button):
+        if not await self.validar_interaccion(interaction):
+            return
+        data = await get_empleo_user(self.owner_id, force_refresh=True)
+        await interaction.response.edit_message(
+            embed=build_maestrias_embed(data),
+            view=MaestriasView(self.owner_id, self.expires_at),
+        )
+
+    @ui.button(label="Renunciar", style=ButtonStyle.red, row=0)
+    async def renunciar(self, interaction: Interaction, button: ui.Button):
+        if not await self.validar_interaccion(interaction):
+            return
+        _, mensaje = await renunciar_empleo(interaction.user)
+        data = await get_empleo_user(self.owner_id, force_refresh=True)
+        await interaction.response.edit_message(
+            embed=build_oficina_embed(interaction.user, data),
+            view=OficinaView(self.owner_id, self.expires_at),
+        )
+        await interaction.followup.send(mensaje, ephemeral=True)
+
+
+class OficinaInfoView(OficinaBaseView):
+    @ui.button(label="Atrás", style=ButtonStyle.secondary)
+    async def atras(self, interaction: Interaction, button: ui.Button):
+        if not await self.validar_interaccion(interaction):
+            return
+        data = await get_empleo_user(self.owner_id, force_refresh=True)
+        await interaction.response.edit_message(
+            embed=build_oficina_embed(interaction.user, data),
+            view=OficinaView(self.owner_id, self.expires_at),
+        )
+
+
+class MaestriaModal(ui.Modal, title="Adquirir Maestrías"):
+    cantidad = ui.TextInput(
+        label="¿Cuántas maestrías deseas obtener?",
+        placeholder="150 XP laboral por maestría. Ej: 3",
+        max_length=4,
+    )
+
+    def __init__(self, owner_id: int, expires_at: float, panel_message):
+        super().__init__()
+        self.owner_id = owner_id
+        self.expires_at = expires_at
+        self.panel_message = panel_message
+
+    async def on_submit(self, interaction: Interaction):
+        if interaction.user.id != self.owner_id:
+            return await interaction.response.send_message("❌ Este panel no es tuyo.", ephemeral=True)
+        if time.time() >= self.expires_at:
+            return await interaction.response.send_message(
+                "Panel Vencido consulta nuevamente. **!oficina**",
+                ephemeral=True,
+            )
+
+        try:
+            cantidad = int(self.cantidad.value.strip())
+        except ValueError:
+            return await interaction.response.send_message(
+                "❌ Indica una cantidad válida de maestrías.",
+                ephemeral=True,
+            )
+
+        if cantidad <= 0:
+            return await interaction.response.send_message(
+                "❌ Debes adquirir al menos una maestría.",
+                ephemeral=True,
+            )
+
+        data = await get_empleo_user(self.owner_id, force_refresh=True)
+        costo = cantidad * MAESTRIA_XP_COSTO
+        if data.get("exp_laboral", 0) < costo:
+            return await interaction.response.send_message(
+                f"❌ Necesitas **{costo}** XP laboral para adquirir {cantidad} maestría(s).",
+                ephemeral=True,
+            )
+
+        data["exp_laboral"] -= costo
+        data["maestrias"] = data.get("maestrias", 0) + cantidad
+        await save_empleo_user(data)
+
+        await interaction.response.send_message(
+            f"✅ Adquiriste **{cantidad}** maestría(s) por **{costo}** XP laboral.",
+            ephemeral=True,
+        )
+        try:
+            await self.panel_message.edit(
+                embed=build_maestrias_embed(data),
+                view=MaestriasView(self.owner_id, self.expires_at),
+            )
+        except discord.HTTPException:
+            logger.warning("No se pudo actualizar el panel de maestrías de %s.", self.owner_id)
+
+
+class MaestriasView(OficinaBaseView):
+    @ui.button(label="Empleos de Maestrías", style=ButtonStyle.blurple, row=0)
+    async def empleos_maestrias(self, interaction: Interaction, button: ui.Button):
+        if not await self.validar_interaccion(interaction):
+            return
+        await interaction.response.edit_message(
+            embed=build_empleos_maestria_embed(),
+            view=EmpleosMaestriaView(self.owner_id, self.expires_at),
+        )
+
+    @ui.button(label="Realizar Maestría", style=ButtonStyle.green, row=0)
+    async def realizar_maestria(self, interaction: Interaction, button: ui.Button):
+        if not await self.validar_interaccion(interaction):
+            return
+        await interaction.response.send_modal(
+            MaestriaModal(self.owner_id, self.expires_at, interaction.message)
+        )
+
+    @ui.button(label="Atrás", style=ButtonStyle.secondary, row=1)
+    async def atras(self, interaction: Interaction, button: ui.Button):
+        if not await self.validar_interaccion(interaction):
+            return
+        data = await get_empleo_user(self.owner_id, force_refresh=True)
+        await interaction.response.edit_message(
+            embed=build_oficina_embed(interaction.user, data),
+            view=OficinaView(self.owner_id, self.expires_at),
+        )
+
+
+class EmpleosMaestriaSelect(ui.Select):
+    def __init__(self, owner_id: int, expires_at: float):
+        opciones = [
+            discord.SelectOption(
+                label=info["nombre"],
+                value=clave,
+                description=f"Requiere {info['maestrias_requeridas']} maestría(s)",
+            )
+            for clave, info in EMPLEOS_MAESTRIA.items()
+        ]
+        super().__init__(placeholder="Selecciona un empleo especializado", options=opciones)
+        self.owner_id = owner_id
+        self.expires_at = expires_at
+
+    async def callback(self, interaction: Interaction):
+        if interaction.user.id != self.owner_id:
+            return await interaction.response.send_message("❌ Este panel no es tuyo.", ephemeral=True)
+        if time.time() >= self.expires_at:
+            return await interaction.response.send_message(
+                "Panel Vencido consulta nuevamente. **!oficina**",
+                ephemeral=True,
+            )
+
+        empleo = self.values[0]
+        info = EMPLEOS_MAESTRIA[empleo]
+        data = await get_empleo_user(self.owner_id, force_refresh=True)
+        if data.get("maestrias", 0) < info["maestrias_requeridas"]:
+            return await interaction.response.send_message(
+                f"❌ **{info['nombre']}** requiere {info['maestrias_requeridas']} maestría(s).",
+                ephemeral=True,
+            )
+        await interaction.response.send_message(
+            f"🚧 **{info['nombre']}**: Trabajo Pendiente de desarrollo.",
+            ephemeral=True,
+        )
+
+
+class EmpleosMaestriaView(OficinaBaseView):
+    def __init__(self, owner_id: int, expires_at: float):
+        super().__init__(owner_id, expires_at)
+        self.add_item(EmpleosMaestriaSelect(owner_id, expires_at))
+
+    @ui.button(label="Atrás", style=ButtonStyle.secondary, row=1)
+    async def atras(self, interaction: Interaction, button: ui.Button):
+        if not await self.validar_interaccion(interaction):
+            return
+        data = await get_empleo_user(self.owner_id, force_refresh=True)
+        await interaction.response.edit_message(
+            embed=build_maestrias_embed(data),
+            view=MaestriasView(self.owner_id, self.expires_at),
+        )
+
+
 class Empleos(commands.Cog):
     def __init__(self, bot):
         self.bot = bot
@@ -520,8 +861,8 @@ class Empleos(commands.Cog):
         if cooldown_until and time.time() < cooldown_until and not _es_coordinador(ctx.author):
             return await ctx.send(f"⏳ Debes esperar {format_relative_time(cooldown_until)} para aplicar a un nuevo empleo.")
 
-        if data and data.get("empleo_actual"):
-            return await ctx.send(f"❌ Ya posees un empleo como **{data['empleo_actual'].title()}**. Usa `!renunciar` antes de aplicar a otro trabajo.")
+        if data and normalizar_empleo(data.get("empleo_actual") or "") == empleo:
+            return await ctx.send(f"❌ Ya trabajas como **{data['empleo_actual'].title()}**. Elige un empleo distinto.")
 
         info = EMPLEOS[empleo]
         if data and data.get("exp_laboral", 0) < info["xp_requisito"]:
@@ -539,34 +880,23 @@ class Empleos(commands.Cog):
 
     @commands.command(name="renunciar")
     async def renunciar(self, ctx):
-        data = await get_empleo_user(ctx.author.id)
-        if not data or not data.get("empleo_actual"):
-            return await ctx.send("❌ No posees un empleo activo.")
-        data["ultimo_empleo"] = data.get("empleo_actual")
-        data["progreso_requisito"] = data.get("progreso_permanencia", 0)
-        data["cooldown_renuncia"] = 0 if _es_coordinador(ctx.author) else time.time() + 300
-        data["empleo_actual"] = None
-        data["dificultad"] = None
-        data["fecha_contratacion"] = 0
-        data["ultimo_trabajo"] = 0
-        data["historial_reciente_de_jornadas"] = []
-        data["despedido_inactividad"] = False
-        await save_empleo_user(data)
-        await ctx.send("🛑 Has renunciado a tu empleo. Podrás aplicar a un nuevo trabajo dentro de 5 minutos.")
+        _, mensaje = await renunciar_empleo(ctx.author)
+        await ctx.send(mensaje)
 
     @commands.command(name="exp")
     async def exp(self, ctx):
         data = await get_empleo_user(ctx.author.id, force_refresh=True)
-        empleo = data.get("empleo_actual") or "Sin empleo"
-        embed = discord.Embed(title=f"📊 Experiencia Laboral - {ctx.author.display_name}", color=discord.Color.gold())
-        embed.add_field(name="Empleo actual", value=empleo.title() if empleo != "Sin empleo" else empleo, inline=False)
-        embed.add_field(name="XP Laboral", value=str(data.get("exp_laboral", 0)), inline=True)
-        embed.add_field(name="Trabajos exitosos", value=str(data.get("trabajos_exitosos", 0)), inline=True)
-        embed.add_field(name="Trabajos fallidos", value=str(data.get("trabajos_fallidos", 0)), inline=True)
-        embed.add_field(name="Total generado", value=f"{data.get('total_generado', 0)} {COIN}", inline=False)
-        embed.set_footer(text="Tu progreso laboral se actualiza al terminar cada jornada.")
-        embed.set_thumbnail(url="https://pub-a09b3609b6b34dfab5c7aa7742cd1a8a.r2.dev/Purple%20jack%20Harcode/exp%20thumb.png")
-        await ctx.send(embed=embed)
+        await ctx.send(embed=build_exp_embed(ctx.author, data))
+
+    @commands.command(name="oficina")
+    async def oficina(self, ctx):
+        data = await get_empleo_user(ctx.author.id, force_refresh=True)
+        if not data or data.get("exp_laboral", 0) < OFICINA_XP_MINIMA:
+            return await ctx.reply(
+                "Para acceder a la oficina necesitas tener 30 de exp laboral, consulta **!exp** continua trabajando.",
+                mention_author=False,
+            )
+        await ctx.reply(view=AbrirOficinaView(ctx.author.id), mention_author=False)
 
     @commands.command(name="trabajar")
     async def trabajar(self, ctx):
@@ -574,7 +904,9 @@ class Empleos(commands.Cog):
         if not data or not data.get("empleo_actual"):
             return await ctx.send(f"❌ {ctx.author.mention} No tienes un empleo activo. Consulta **!empleos.**")
 
-        empleo = data["empleo_actual"].lower()
+        empleo = normalizar_empleo(data["empleo_actual"])
+        if empleo in EMPLEOS_MAESTRIA:
+            return await ctx.send("🚧 Trabajo Pendiente de desarrollo.")
         info = EMPLEOS[empleo]
         now = time.time()
         bypass = _es_coordinador(ctx.author)

@@ -11,7 +11,7 @@ _last_activity = {}
 
 FLUSH_INTERVAL = 120   # 2 minutos — reduce pérdida potencial ante reinicios
 CACHE_EXPIRE   = 7200  # 2 horas de inactividad
-MAX_BANK       = 200_000  # Límite máximo de almacenamiento en banco
+MAX_BANK       = 150_000  # Límite máximo de almacenamiento en banco
 
 
 def touch_user(user_id):
