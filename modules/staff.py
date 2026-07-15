@@ -573,9 +573,9 @@ class Staff(commands.Cog):
             ephemeral=True,
         )
 
-    @app_commands.command(name="despedir_todos", description="Limpia temporalmente todos los empleos registrados en DB y RAM")
+    @app_commands.command(name="reset_empleos", description="Resetea Empleos y Exp de todos los usuarios de DB.")
     @is_staff()
-    async def despedir_todos(self, interaction: discord.Interaction):
+    async def reset_empleos(self, interaction: discord.Interaction):
         await interaction.response.defer(ephemeral=True)
         try:
             async with pool.acquire() as conn:

@@ -36,11 +36,13 @@ class Roulette(commands.Cog):
             )
 
         if apuesta is None or espacio is None:
-            return await ctx.send(
-                f"❌ {ctx.author.mention} Formato correcto: "
+            nick = ctx.author.nick or ctx.author.display_name
+            return await ctx.reply(
+                f"❌ **{nick}** Formato correcto: "
                 f"`!ruleta {{apuesta}} {{opción}}`\n"
                 f"Opciones: `black`, `red`, `par`, `impar`, "
-                f"o un número del `0` al `36`"
+                f"o un número del `0` al `36`",
+                mention_author=False,
             )
 
         espacio = espacio.lower().strip()

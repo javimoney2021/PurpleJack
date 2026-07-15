@@ -155,7 +155,11 @@ class Dados(commands.Cog):
     @commands.command(name="dados")
     async def dados(self, ctx, monto: int = None):
         if monto is None:
-            return await ctx.send(f"❌ {ctx.author.mention} Usa: `!dados {{monto}}`.")
+            nick = ctx.author.nick or ctx.author.display_name
+            return await ctx.reply(
+                f"❌ {nick} Usa: `!dados {{monto}}`.",
+                mention_author=False,
+            )
 
         if not dados_config["activa"]:
             return await ctx.send(

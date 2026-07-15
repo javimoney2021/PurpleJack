@@ -284,8 +284,9 @@ class RussianRoulette(commands.Cog):
             )
 
         if monto > rr_config["max_apuesta"]:
-            return await ctx.send(
-                f"❌ {ctx.author.mention} No puedes apostar más de **{rr_config['max_apuesta']} {COIN}**."
+            return await ctx.reply(
+                f"❌ No puedes apostar más de **{rr_config['max_apuesta']} {COIN}**.",
+                mention_author=False,
             )
 
         # get_user garantiza usuario en cache para las actualizaciones de los botones

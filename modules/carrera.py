@@ -11,7 +11,7 @@ JOIN_TIMEOUT  = 12
 MAX_PLAYERS   = 5
 GIF_URL       = "https://pub-a09b3609b6b34dfab5c7aa7742cd1a8a.r2.dev/Purple%20jack%20Harcode/carrera.gif"
 GIF_DURATION  = 12    # segundos que se muestra el gif antes del resultado
-RESULT_DELETE = 15   # segundos antes de borrar el embed final
+RESULT_DELETE = 60   # segundos antes de borrar el embed final
 
 # Nombre del bot de relleno
 BOT_NAME = "Jack"
@@ -145,7 +145,7 @@ async def run_race(message, real_players, monto, channel_id):
     )
     gif_embed.set_image(url=GIF_URL)
     pot = monto * len(all_names)
-    gif_embed.set_footer(text=f"Apuesta: {monto}PurpleCoins  •  Pozo total: {pot}PurpleCoins")
+    gif_embed.set_footer(text=f"Apuesta: {monto} • Pozo Total {pot}.")
 
     try:
         await message.edit(embed=gif_embed, view=None)

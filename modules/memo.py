@@ -11,6 +11,8 @@ AUTO_DELETE   = 80
 MAX_APUESTA   = 300
 HIDDEN_EMOJI  = "🟦"
 EMOJIS_PARES  = ["🎲", "🍪", "🍇", "🔪", "💎", "🍼", "👑", "🚀"]
+MEMO_WIN_THUMBNAIL = "https://pub-a09b3609b6b34dfab5c7aa7742cd1a8a.r2.dev/Purple%20jack%20Harcode/mvp.png"
+MEMO_LOSS_THUMBNAIL = "https://pub-a09b3609b6b34dfab5c7aa7742cd1a8a.r2.dev/Purple%20jack%20Harcode/perdi.png"
 
 # ── ESTADO GLOBAL ──────────────────────────────────────
 _active_memo: set[int] = set()   # {user_id}
@@ -113,7 +115,8 @@ class MemoView(discord.ui.View):
                             estado=(
                                 f"🏆 ¡Ganaste! Recibes **+{recompensa_total}** {COIN} en total "
                                 f"({ganancia_neta} de ganancia)."
-                            )
+                            ),
+                            thumbnail_url=MEMO_WIN_THUMBNAIL,
                         )
                         self.stop()
                         self._deshabilitar_todo()
@@ -153,7 +156,8 @@ class MemoView(discord.ui.View):
                         self._build_buttons()
                         self._deshabilitar_todo()
                         embed = self._build_embed(
-                            estado=f"💀 ¡Perdiste! Se descuentan **-{self.monto}** {COIN}"
+                            estado=f"💀 ¡Perdiste! Se descuentan **-{self.monto}** {COIN}",
+                            thumbnail_url=MEMO_LOSS_THUMBNAIL,
                         )
                         self.stop()
                         try:
@@ -182,7 +186,7 @@ class MemoView(discord.ui.View):
 
         return callback
 
-    def _build_embed(self, estado: str = None) -> discord.Embed:
+    def _build_embed(self, estado: str = None, thumbnail_url: str = None) -> discord.Embed:
         intentos_restantes = MAX_INTENTOS - self.intentos_fail
         corazones = "❤️" * intentos_restantes + "🖤" * self.intentos_fail
 
@@ -199,6 +203,8 @@ class MemoView(discord.ui.View):
             description=desc,
             color=discord.Color.blurple()
         )
+        if thumbnail_url:
+            embed.set_thumbnail(url=thumbnail_url)
         embed.set_footer(text=f"Apuesta: {self.monto} PurpleCoins  •  Solo tú puedes jugar")
         return embed
 
@@ -243,8 +249,10 @@ class Memo(commands.Cog):
             )
 
         if monto is None:
-            return await ctx.send(
-                f"❌ {ctx.author.mention} Formato correcto: `!memo {{monto}}`"
+            nick = ctx.author.nick or ctx.author.display_name
+            return await ctx.reply(
+                f"❌ **{nick}** Formato correcto: `!memo {{monto}}`",
+                mention_author=False,
             )
         if not _memo_config["activa"]:
             return await ctx.send("🔧 El sistema de Memo está desactivado. Intenta después.")

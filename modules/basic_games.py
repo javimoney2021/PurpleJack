@@ -67,7 +67,8 @@ class BasicGames(commands.Cog):
         _cache_mod.update_cached_cooldown(ctx.author.id, "work", now)
         _cache_mod.update_cached_balance(ctx.author.id, amount)
 
-        await ctx.message.reply(f"{ctx.author.mention} {msg}")
+        nick = ctx.author.nick or ctx.author.display_name
+        await ctx.message.reply(f"{nick} {msg}", mention_author=False)
 
     @commands.command()
     async def crime(self, ctx):
@@ -102,7 +103,8 @@ class BasicGames(commands.Cog):
         _cache_mod.update_cached_cooldown(ctx.author.id, "crime", now)
 
         # Actualizar RAM al instante — flush_loop persiste a DB cada 10 min
-        await ctx.message.reply(f"{ctx.author.mention} {msg}")
+        nick = ctx.author.nick or ctx.author.display_name
+        await ctx.message.reply(f"{nick} {msg}", mention_author=False)
 
 
 async def setup(bot):
