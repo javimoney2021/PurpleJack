@@ -6,7 +6,7 @@ import time
 
 from core.database import get_user, update_balance, update_bank
 from core import cache
-from core.config import COIN, game_config, ruleta_config, rob_config, rr_config, dados_config
+from core.config import COIN, game_config, ruleta_config, rob_config, rr_config, dados_config, memo_config
 from core.cache import MAX_BANK
 
 TOP_COOLDOWN = 300
@@ -57,7 +57,6 @@ def _add_collect_fields(embed: discord.Embed):
 
 def _build_cooldowns_embed(guild_id: int) -> discord.Embed:
     from modules.duels import DEFAULT_DUEL_COOLDOWN, _duel_cooldowns
-    from modules.memo import MEMO_COOLDOWN
 
     work_cd = _format_cooldown(game_config["work"]["cooldown"])
     crime_cd = _format_cooldown(game_config["crime"]["cooldown"])
@@ -65,7 +64,7 @@ def _build_cooldowns_embed(guild_id: int) -> discord.Embed:
     rob_cd = _format_cooldown(rob_config["cooldown"])
     rr_cd = _format_cooldown(rr_config["cooldown"])
     dados_cd = _format_cooldown(dados_config["cooldown"])
-    memo_cd = _format_cooldown(MEMO_COOLDOWN)
+    memo_cd = _format_cooldown(memo_config["cooldown"])
     retar_cd = _format_cooldown(_duel_cooldowns.get(guild_id, DEFAULT_DUEL_COOLDOWN))
 
     embed = discord.Embed(title="⏱️ Cooldowns de Juegos", color=discord.Color.purple())

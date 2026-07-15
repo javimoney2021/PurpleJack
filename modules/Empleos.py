@@ -517,6 +517,12 @@ class ConfirmarEmpleoView(ui.View):
         if interaction.user.id != self.user_id:
             return await interaction.response.send_message("❌ No es tu confirmación.", ephemeral=True)
 
+        try:
+            await interaction.response.defer(thinking=True)
+        except discord.NotFound:
+            logger.info("La confirmación de empleo de %s venció antes de ser procesada.", self.user_id)
+            return
+
         data = await get_empleo_user(self.user_id) or {
             "user_id": self.user_id,
             "empleo_actual": None,
@@ -538,20 +544,20 @@ class ConfirmarEmpleoView(ui.View):
         }
         cooldown_until = data.get("cooldown_renuncia", 0)
         if cooldown_until and time.time() < cooldown_until and not _es_coordinador(interaction.user):
-            return await interaction.response.send_message(
+            return await interaction.followup.send(
                 f"⏳ Podras Aplicar a otro empleo {format_relative_time(cooldown_until)} Regresa luego.",
                 ephemeral=True,
             )
 
         if normalizar_empleo(data.get("empleo_actual") or "") == self.empleo:
-            return await interaction.response.send_message(
+            return await interaction.followup.send(
                 f"❌ Ya trabajas como **{data['empleo_actual'].title()}**. Elige un empleo distinto.",
                 ephemeral=True
             )
 
         info = EMPLEOS[self.empleo]
         if data.get("exp_laboral", 0) < info["xp_requisito"]:
-            return await interaction.response.send_message(
+            return await interaction.followup.send(
                 f"❌ {interaction.user.mention} necesitas **{info['xp_requisito']}** puntos de Experiencia Laboral para aplicar a **{self.empleo.title()}**.",
                 ephemeral=True
             )
@@ -579,7 +585,7 @@ class ConfirmarEmpleoView(ui.View):
         )
         if xp_consumida:
             mensaje += f"\n📊 Se consumieron **{xp_consumida}** XP Laboral."
-        await interaction.response.send_message(mensaje, ephemeral=False)
+        await interaction.followup.send(mensaje, ephemeral=False)
         try:
             await interaction.message.delete(delay=1)
         except Exception:
