@@ -18,15 +18,15 @@ from core.database import (
     upsert_collect_config_db, delete_collect_config_db, delete_orphan_collect_configs_db,
     set_item_role_restrictions_db, remove_item_role_restriction_db,
     save_game_config, save_rr_config, save_ruleta_config,
-    save_rob_config, save_dados_config, clear_game_cooldowns
+    save_rob_config, save_dados_config, save_memo_config, clear_game_cooldowns
 )
 from core import cache
 from core.config import (
-    ruleta_config, rr_config, game_config, dados_config, COIN,
+    ruleta_config, rr_config, game_config, dados_config, memo_config, COIN,
     STAFF_ROLE, COORDINADOR_ROLE,
     STAFF_ROLE_ID, COORDINADOR_ROLE_ID
 )
-from modules.memo import _memo_config
+from modules.memo import _memo_cooldowns
 from modules.Empleos import _EMPLEOS_CACHE, get_empleo_user, save_empleo_user, get_all_empleos_activos
 
 
@@ -726,10 +726,49 @@ class Staff(commands.Cog):
     @is_staff()
     async def memo_alternar(self, interaction):
         await interaction.response.defer(ephemeral=False)
-        _memo_config["activa"] = not _memo_config["activa"]
-        estado = "✅ Activado" if _memo_config["activa"] else "🔴 Desactivado"
+        memo_config["activa"] = not memo_config["activa"]
+        await save_memo_config()
+        estado = "✅ Activado" if memo_config["activa"] else "🔴 Desactivado"
         await interaction.followup.send(
             f"🧠 Sistema de Memoria: **{estado}**",
+            ephemeral=False,
+        )
+
+    @app_commands.command(name="memo_edit", description="Edita la configuración del sistema de memoria")
+    @app_commands.describe(
+        max_apuesta="Apuesta máxima permitida",
+        cooldown="Cooldown (ej: 60s, 5m, 2h)",
+    )
+    @is_staff()
+    async def memo_edit(self, interaction: discord.Interaction, max_apuesta: int, cooldown: str):
+        if max_apuesta <= 0:
+            return await interaction.response.send_message(
+                "❌ La apuesta máxima debe ser mayor a 0.",
+                ephemeral=True,
+            )
+        try:
+            cooldown_segundos = self.parse_cooldown(cooldown)
+        except (TypeError, ValueError):
+            return await interaction.response.send_message(
+                "❌ Formato inválido. Usa ejemplos como: 60s, 5m, 2h.",
+                ephemeral=True,
+            )
+        if cooldown_segundos <= 0:
+            return await interaction.response.send_message(
+                "❌ El cooldown debe ser mayor a 0.",
+                ephemeral=True,
+            )
+
+        memo_config["max_apuesta"] = max_apuesta
+        memo_config["cooldown"] = cooldown_segundos
+        await save_memo_config()
+        _memo_cooldowns.clear()
+
+        await interaction.response.send_message(
+            "✅ Memo actualizado:\n"
+            f"• Máx apuesta: **{max_apuesta}** {COIN}\n"
+            f"• Cooldown: **{self.parse_cooldown_str(cooldown_segundos)}**\n"
+            "• Cooldowns activos reiniciados.",
             ephemeral=False,
         )
 

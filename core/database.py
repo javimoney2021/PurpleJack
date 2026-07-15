@@ -672,7 +672,7 @@ async def save_collect_cooldowns(user_id, cobros: dict):
 # ── GAME CONFIG ────────────────────────────────────────
 
 async def create_game_config_table():
-    from core.config import game_config, rr_config, ruleta_config, rob_config, dados_config
+    from core.config import game_config, rr_config, ruleta_config, rob_config, dados_config, memo_config
     async with pool.acquire() as conn:
         await conn.execute("""
         CREATE TABLE IF NOT EXISTS game_config (
@@ -793,6 +793,25 @@ async def create_game_config_table():
             dados_config["exito_prob"],
             dados_config["fallo_prob"],
             dados_config["activa"],
+        )
+
+        await conn.execute("""
+        CREATE TABLE IF NOT EXISTS memo_config_db (
+            id SERIAL PRIMARY KEY,
+            max_apuesta INTEGER NOT NULL,
+            cooldown INTEGER NOT NULL,
+            activa BOOLEAN DEFAULT TRUE
+        )
+        """)
+        memo_exists = await conn.fetchrow("SELECT * FROM memo_config_db LIMIT 1")
+        if not memo_exists:
+            await conn.execute("""
+            INSERT INTO memo_config_db (max_apuesta, cooldown, activa)
+            VALUES ($1, $2, $3)
+            """,
+            memo_config["max_apuesta"],
+            memo_config["cooldown"],
+            memo_config["activa"],
         )
 
         await conn.execute("""
@@ -977,6 +996,29 @@ async def load_dados_config():
         dados_config["exito_prob"]  = row["exito_prob"]
         dados_config["fallo_prob"]  = row["fallo_prob"]
         dados_config["activa"]      = row["activa"]
+
+
+async def save_memo_config():
+    from core.config import memo_config
+    async with pool.acquire() as conn:
+        await conn.execute("""
+        UPDATE memo_config_db SET max_apuesta=$1, cooldown=$2, activa=$3
+        """,
+        memo_config["max_apuesta"],
+        memo_config["cooldown"],
+        memo_config["activa"],
+        )
+
+
+async def load_memo_config():
+    from core.config import memo_config
+    async with pool.acquire() as conn:
+        row = await conn.fetchrow("SELECT * FROM memo_config_db LIMIT 1")
+        if not row:
+            return
+        memo_config["max_apuesta"] = row["max_apuesta"]
+        memo_config["cooldown"] = row["cooldown"]
+        memo_config["activa"] = row["activa"]
 
 async def get_nave_contenido():
     async with pool.acquire() as conn:

@@ -3,12 +3,11 @@ import asyncio
 import random
 from discord.ext import commands
 from core.database import get_user, update_balance
-from core.config import COIN
+from core.config import COIN, memo_config
 
 # ── CONFIG ─────────────────────────────────────────────
 MAX_INTENTOS  = 7
 AUTO_DELETE   = 80
-MAX_APUESTA   = 300
 HIDDEN_EMOJI  = "🟦"
 EMOJIS_PARES  = ["🎲", "🍪", "🍇", "🔪", "💎", "🍼", "👑", "🚀"]
 MEMO_WIN_THUMBNAIL = "https://pub-a09b3609b6b34dfab5c7aa7742cd1a8a.r2.dev/Purple%20jack%20Harcode/mvp.png"
@@ -16,9 +15,7 @@ MEMO_LOSS_THUMBNAIL = "https://pub-a09b3609b6b34dfab5c7aa7742cd1a8a.r2.dev/Purpl
 
 # ── ESTADO GLOBAL ──────────────────────────────────────
 _active_memo: set[int] = set()   # {user_id}
-_memo_config = {"activa": True}
 _memo_cooldowns: dict[int, float] = {}  # {user_id: expira_en}
-MEMO_COOLDOWN = 300  # segundos (5 minutos)
 
 
 # ── VIEW ───────────────────────────────────────────────
@@ -254,7 +251,7 @@ class Memo(commands.Cog):
                 f"❌ **{nick}** Formato correcto: `!memo {{monto}}`",
                 mention_author=False,
             )
-        if not _memo_config["activa"]:
+        if not memo_config["activa"]:
             return await ctx.send("🔧 El sistema de Memo está desactivado. Intenta después.")
 
         if monto <= 0:
@@ -265,9 +262,9 @@ class Memo(commands.Cog):
             return await ctx.send(
                 f"❌ {ctx.author.mention} Ya tienes una partida activa."
             )
-        if monto > MAX_APUESTA:
+        if monto > memo_config["max_apuesta"]:
             return await ctx.send(
-                f"❌ {ctx.author.mention} La apuesta máxima es **{MAX_APUESTA}** {COIN}."
+                f"❌ {ctx.author.mention} La apuesta máxima es **{memo_config['max_apuesta']}** {COIN}."
             )
 
         user_data = await get_user(user_id)
@@ -278,7 +275,7 @@ class Memo(commands.Cog):
             )
 
         # ── Aplicar cooldown individual ANTES de iniciar partida ──
-        _memo_cooldowns[user_id] = now + MEMO_COOLDOWN
+        _memo_cooldowns[user_id] = now + memo_config["cooldown"]
 
         # ── Generar tablero aleatorio ──────────────────────────────
         tablero = EMOJIS_PARES * 2

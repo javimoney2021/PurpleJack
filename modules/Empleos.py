@@ -16,8 +16,8 @@ logger = logging.getLogger("purplejack.empleos")
 
 EMPLEOS = {
     "limpiador": {
-        "salario_min": 500,
-        "salario_max": 700,
+        "salario_min": 1000,
+        "salario_max": 1500,
         "dificultad": "Fácil",
         "xp_requisito": 0,
         "xp_ganada": 2,
@@ -36,10 +36,10 @@ EMPLEOS = {
         ]
     },
     "ingeniero": {
-        "salario_min": 800,
-        "salario_max": 1200,
+        "salario_min": 1700,
+        "salario_max": 2300,
         "dificultad": "Media",
-        "xp_requisito": 20,
+        "xp_requisito": 30,
         "xp_ganada": 4,
         "duracion_horas": 3,
         "penalizacion": -700,
@@ -56,11 +56,11 @@ EMPLEOS = {
         ]
     },
     "plomero": {
-        "salario_min": 1300,
-        "salario_max": 1800,
+        "salario_min": 3000,
+        "salario_max": 3800,
         "dificultad": "Difícil",
-        "xp_requisito": 30,
-        "xp_ganada": 8,
+        "xp_requisito": 50,
+        "xp_ganada": 6,
         "duracion_horas": 3,
         "penalizacion": -900,
         "prob_fallo": 0.30,
@@ -557,6 +557,8 @@ class ConfirmarEmpleoView(ui.View):
             )
 
         now = time.time()
+        xp_consumida = info["xp_requisito"]
+        data["exp_laboral"] -= xp_consumida
         data.update({
             "empleo_actual": self.empleo,
             "dificultad": info['dificultad'],
@@ -571,10 +573,13 @@ class ConfirmarEmpleoView(ui.View):
             "fallidos_empleo_actual": 0,
         })
         await save_empleo_user(data)
-        await interaction.response.send_message(
-            f"🎉 {interaction.user.mention} ahora eres **{self.empleo.title()}**. Usa `!trabajar` para iniciar tu jornada de 3 horas.",
-            ephemeral=False
+        mensaje = (
+            f"🎉 {interaction.user.mention} ahora eres **{self.empleo.title()}**. "
+            "Usa `!trabajar` para iniciar tu jornada de 3 horas."
         )
+        if xp_consumida:
+            mensaje += f"\n📊 Se consumieron **{xp_consumida}** XP Laboral."
+        await interaction.response.send_message(mensaje, ephemeral=False)
         try:
             await interaction.message.delete(delay=1)
         except Exception:

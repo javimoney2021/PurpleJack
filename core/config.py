@@ -45,6 +45,12 @@ dados_config = {
     "activa": True
 }
 
+memo_config = {
+    "max_apuesta": 300,
+    "cooldown": 300,
+    "activa": True,
+}
+
 game_config = {
     "work": {
         "min": 100,
