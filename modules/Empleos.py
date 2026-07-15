@@ -80,7 +80,8 @@ EMPLEOS = {
 # ── OFICINA Y MAESTRÍAS ──────────────────────────────────
 OFICINA_XP_MINIMA = 30
 MAESTRIA_XP_COSTO = 150
-OFICINA_PANEL_SEGUNDOS = 60
+OFICINA_PANEL_SEGUNDOS = 300
+MAESTRIA_THUMBNAIL_URL = "https://pub-a09b3609b6b34dfab5c7aa7742cd1a8a.r2.dev/Purple%20jack%20Harcode/Maestria.png"
 
 # Estos empleos se presentan desde la Oficina, pero su jornada se desarrollará
 # en una fase posterior. La clave permanece normalizada para la persistencia.
@@ -467,6 +468,7 @@ def build_maestrias_embed(data: dict) -> discord.Embed:
         ),
         color=discord.Color.green(),
     )
+    embed.set_thumbnail(url=MAESTRIA_THUMBNAIL_URL)
     return embed
 
 
@@ -475,11 +477,13 @@ def build_empleos_maestria_embed() -> discord.Embed:
         f"• **{info['nombre']}** - Requiere {info['maestrias_requeridas']} maestría(s)"
         for info in EMPLEOS_MAESTRIA.values()
     ]
-    return discord.Embed(
+    embed = discord.Embed(
         title="Empleos Disponibles",
         description="\n".join(lineas),
         color=discord.Color.green(),
     )
+    embed.set_thumbnail(url=MAESTRIA_THUMBNAIL_URL)
+    return embed
 
 
 async def renunciar_empleo(member: discord.Member) -> tuple[bool, str]:
@@ -632,6 +636,10 @@ class AbrirOficinaView(ui.View):
             view=OficinaView(self.owner_id, expires_at),
             ephemeral=True,
         )
+        try:
+            await interaction.message.delete(delay=3)
+        except discord.HTTPException:
+            logger.warning("No se pudo eliminar el acceso temporal a Oficina de %s.", self.owner_id)
 
 
 class OficinaView(OficinaBaseView):
