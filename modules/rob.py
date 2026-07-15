@@ -142,9 +142,10 @@ class Rob(commands.Cog):
         else:
             penalizacion = int(target_user["balance"] * 0.08)
             await update_balance(author_id, -penalizacion)
+            target_nick = target.nick or target.display_name
             await ctx.message.reply(
                 f"🚔 Tu robo falló. Perdiste **{penalizacion:,}** {COIN} intentando "
-                f"robar a {target.mention}."
+                f"robar a {target_nick}."
             )
 
         set_rob_cooldown(author_id)
