@@ -1751,6 +1751,51 @@ class Staff(commands.Cog):
             f"✅ Protección Anti-Robo de {protect_rol.mention} eliminada.", ephemeral=False
         )
 
+    @app_commands.command(name="saboteador_config", description="Configura un Rol Saboteador Anti-Veterano")
+    @app_commands.describe(saboteador_rol="Rol que puede romper protecciones Veterano")
+    @is_staff()
+    async def saboteador_config(
+        self,
+        interaction: discord.Interaction,
+        saboteador_rol: discord.Role,
+    ):
+        if saboteador_rol.id in cache.get_saboteador_role_ids():
+            return await interaction.response.send_message(
+                f"❌ {saboteador_rol.mention} ya está configurado como Saboteador.",
+                ephemeral=True,
+            )
+
+        await interaction.response.defer(ephemeral=False)
+        from core.database import add_saboteador_role_db
+        await add_saboteador_role_db(saboteador_rol.id)
+        await interaction.followup.send(
+            f"😈 Rol Saboteador configurado: {saboteador_rol.mention}\n"
+            "• Puede romper la protección Veterano al usar `!rob`.",
+            ephemeral=False,
+        )
+
+    @app_commands.command(name="saboteador_eliminar", description="Elimina un Rol Saboteador")
+    @app_commands.describe(saboteador_rol="Rol al que se le quitará la capacidad Saboteador")
+    @is_staff()
+    async def saboteador_eliminar(
+        self,
+        interaction: discord.Interaction,
+        saboteador_rol: discord.Role,
+    ):
+        if saboteador_rol.id not in cache.get_saboteador_role_ids():
+            return await interaction.response.send_message(
+                f"❌ {saboteador_rol.mention} no está configurado como Saboteador.",
+                ephemeral=True,
+            )
+
+        await interaction.response.defer(ephemeral=False)
+        from core.database import delete_saboteador_role_db
+        await delete_saboteador_role_db(saboteador_rol.id)
+        await interaction.followup.send(
+            f"✅ Rol Saboteador eliminado: {saboteador_rol.mention}.",
+            ephemeral=False,
+        )
+
 
     @app_commands.command(name="despidos", description="Activa o desactiva el sistema de despidos por inactividad (24h sin trabajar)")
     @app_commands.describe(estado="Elige el estado del sistema de despidos")

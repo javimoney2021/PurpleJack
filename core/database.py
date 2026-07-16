@@ -133,6 +133,12 @@ async def init_db():
         )
         """)
 
+        await conn.execute("""
+        CREATE TABLE IF NOT EXISTS saboteador_config (
+            rol_id BIGINT PRIMARY KEY
+        )
+        """)
+
     logger.info("Base de datos conectada y tablas verificadas.")
 
 
@@ -1085,3 +1091,27 @@ async def delete_veterano_config_db(rol_id: int):
             "DELETE FROM veterano_config WHERE rol_id=$1", rol_id
         )
     cache.delete_veterano_config(rol_id)
+
+
+# ── SABOTEADOR CONFIG ──────────────────────────────────
+
+async def load_saboteador_config_to_cache():
+    async with pool.acquire() as conn:
+        rows = await conn.fetch("SELECT rol_id FROM saboteador_config")
+    cache.set_saboteador_role_ids(row["rol_id"] for row in rows)
+
+
+async def add_saboteador_role_db(rol_id: int):
+    async with pool.acquire() as conn:
+        await conn.execute("""
+            INSERT INTO saboteador_config (rol_id)
+            VALUES ($1)
+            ON CONFLICT (rol_id) DO NOTHING
+        """, rol_id)
+    cache.add_saboteador_role(rol_id)
+
+
+async def delete_saboteador_role_db(rol_id: int):
+    async with pool.acquire() as conn:
+        await conn.execute("DELETE FROM saboteador_config WHERE rol_id=$1", rol_id)
+    cache.delete_saboteador_role(rol_id)

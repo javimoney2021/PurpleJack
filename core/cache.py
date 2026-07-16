@@ -286,6 +286,23 @@ def delete_veterano_config(rol_id: int):
     _veterano_config.pop(rol_id, None)
 
 
+# ── SABOTEADOR CONFIG ──────────────────────────────────
+_saboteador_role_ids = set()
+
+def get_saboteador_role_ids() -> set[int]:
+    return _saboteador_role_ids
+
+def set_saboteador_role_ids(role_ids) -> None:
+    global _saboteador_role_ids
+    _saboteador_role_ids = set(role_ids)
+
+def add_saboteador_role(role_id: int) -> None:
+    _saboteador_role_ids.add(role_id)
+
+def delete_saboteador_role(role_id: int) -> None:
+    _saboteador_role_ids.discard(role_id)
+
+
 # ── FLUSH USUARIOS A DB ────────────────────────────────
 async def flush_to_db():
     """

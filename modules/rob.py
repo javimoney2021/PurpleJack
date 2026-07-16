@@ -8,6 +8,10 @@ from core.config import rob_config, COIN
 from core import cache
 from core.cache import get_rob_cooldown, set_rob_cooldown
 
+SABOTEADOR_EXITO_PROB = 0.70
+SABOTEADOR_ROBO_PORCENTAJE = 0.20
+SABOTEADOR_FALLO_PORCENTAJE = 0.15
+
 
 def _format_rob_cooldown(seconds: int) -> str:
     """Muestra solo las unidades significativas (omite '0h' si quedan minutos)."""
@@ -106,16 +110,27 @@ class Rob(commands.Cog):
         author_user = await get_user(author_id)
         target_user = await get_user(target_id)
 
-        # Verificar protección Veterano
+        # Un Saboteador solo activa sus reglas especiales al atacar a un Veterano.
+        robo_saboteador = False
         veterano_cfg = cache.get_veterano_config()
         if veterano_cfg:
             target_roles_ids = {r.id for r in target.roles}
-            for rol_id, cfg in veterano_cfg.items():
-                if rol_id in target_roles_ids:
-                    await update_bank(author_id, -cfg["monto"])
+            proteccion_veterano = next(
+                (cfg for rol_id, cfg in veterano_cfg.items() if rol_id in target_roles_ids),
+                None,
+            )
+            if proteccion_veterano:
+                attacker_role_ids = {r.id for r in ctx.author.roles}
+                es_saboteador = bool(
+                    attacker_role_ids & cache.get_saboteador_role_ids()
+                )
+                if es_saboteador:
+                    robo_saboteador = True
+                else:
+                    await update_bank(author_id, -proteccion_veterano["monto"])
                     set_rob_cooldown(author_id)
                     await ctx.send(
-                        f"🖐️ Lo siento tanto {ctx.author.mention} {cfg['msj']}"
+                        f"🖐️ Lo siento tanto {ctx.author.mention} {proteccion_veterano['msj']}"
                     )
                     return
 
@@ -127,26 +142,45 @@ class Rob(commands.Cog):
                 f"Atrévete a por los más grandes."
             )
 
-        # Porcentajes dinámicos sobre el balance del target
-        # Éxito: 15% — Fallo: 8% (hardcoded)
-        success = random.random() <= rob_config["exito_prob"]
-
-        if success:
-            monto_robo = int(target_user["balance"] * 0.15)
-            await update_balance(author_id, monto_robo)
-            await update_balance(target_id, -monto_robo)
-            await ctx.message.reply(
-                f"✅ Robo exitoso. Le sacaste **{monto_robo:,}** {COIN} a {target.mention} "
-                f"sin que se diera cuenta."
-            )
-        else:
-            penalizacion = int(target_user["balance"] * 0.08)
-            await update_balance(author_id, -penalizacion)
+        if robo_saboteador:
             target_nick = target.nick or target.display_name
-            await ctx.message.reply(
-                f"🚔 Tu robo falló. Perdiste **{penalizacion:,}** {COIN} intentando "
-                f"robar a {target_nick}."
-            )
+            success = random.random() <= SABOTEADOR_EXITO_PROB
+            if success:
+                monto_robo = int(target_user["balance"] * SABOTEADOR_ROBO_PORCENTAJE)
+                await update_balance(author_id, monto_robo)
+                await update_balance(target_id, -monto_robo)
+                await ctx.message.reply(
+                    f"😈 Logras romper la Protección del **Veterano** de {target_nick} "
+                    f"y le sacas **{monto_robo:,}** {COIN}.",
+                    mention_author=False,
+                )
+            else:
+                penalizacion = int(target_user["balance"] * SABOTEADOR_FALLO_PORCENTAJE)
+                await update_balance(author_id, -penalizacion)
+                await ctx.message.reply(
+                    f"☠️ Ese **Veterano** de {target_nick} al parecer está en Ultra... "
+                    f"Fallas el robo y pierdes **{penalizacion:,}** {COIN}.",
+                    mention_author=False,
+                )
+        else:
+            # Robo normal: probabilidad configurable, porcentajes económicos fijos.
+            success = random.random() <= rob_config["exito_prob"]
+            if success:
+                monto_robo = int(target_user["balance"] * 0.15)
+                await update_balance(author_id, monto_robo)
+                await update_balance(target_id, -monto_robo)
+                await ctx.message.reply(
+                    f"✅ Robo exitoso. Le sacaste **{monto_robo:,}** {COIN} a {target.mention} "
+                    f"sin que se diera cuenta."
+                )
+            else:
+                penalizacion = int(target_user["balance"] * 0.08)
+                await update_balance(author_id, -penalizacion)
+                target_nick = target.nick or target.display_name
+                await ctx.message.reply(
+                    f"🚔 Tu robo falló. Perdiste **{penalizacion:,}** {COIN} intentando "
+                    f"robar a {target_nick}."
+                )
 
         set_rob_cooldown(author_id)
 

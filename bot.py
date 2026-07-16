@@ -56,7 +56,7 @@ from core.database import (
     init_db, load_items_to_cache, load_cargos_to_cache,
     load_collect_config_to_cache, delete_cargo_temporal,
     create_game_config_table, load_game_config, load_dados_config, load_memo_config,
-    load_veterano_config_to_cache, load_item_role_restrictions_to_cache,
+    load_veterano_config_to_cache, load_saboteador_config_to_cache, load_item_role_restrictions_to_cache,
     save_collect_cooldowns
 )
 from core import cache
@@ -216,6 +216,7 @@ def run_bot():
         await load_item_role_restrictions_to_cache()
         await load_collect_config_to_cache()
         await load_veterano_config_to_cache()
+        await load_saboteador_config_to_cache()
         await load_modules()
         try:
             await bot.start(TOKEN)
