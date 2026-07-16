@@ -38,6 +38,7 @@ class AcceptDuelView(discord.ui.View):
             await self.message.delete()
         except discord.HTTPException:
             pass
+        _last_duel_times.pop(self.ctx.guild.id, None)
         try:
             await self.ctx.send(
                 f"⚔️ {self.ctx.author.mention} **Reto anulado (Sin Respuesta)** Intenta retar a otra persona.",
@@ -124,10 +125,11 @@ class AcceptDuelView(discord.ui.View):
         
         # Resetear cooldown para que otros puedan retar
         self.ctx.command.reset_cooldown(self.ctx)
+        _last_duel_times.pop(self.ctx.guild.id, None)
         
-        # Auto-eliminar mensaje de reto en 3 segundos
+        # Auto-eliminar el embed de rechazo en 30 segundos
         async def delete_message():
-            await asyncio.sleep(3)
+            await asyncio.sleep(30)
             try:
                 await self.message.delete()
             except discord.HTTPException:
