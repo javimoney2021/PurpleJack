@@ -10,6 +10,7 @@ from core.config import COIN, game_config, ruleta_config, rob_config, rr_config,
 from core.cache import MAX_BANK
 
 TOP_COOLDOWN = 300
+EVENTO_THUMBNAIL_URL = "https://pub-a09b3609b6b34dfab5c7aa7742cd1a8a.r2.dev/Purple%20jack%20Harcode/PurpleThumb.png"
 
 
 def _format_cooldown(seconds: int) -> str:
@@ -18,6 +19,19 @@ def _format_cooldown(seconds: int) -> str:
     if seconds >= 60:
         return f"{seconds // 60}m"
     return f"{seconds}s"
+
+
+async def _finalizar_consulta_evento(message: discord.Message) -> None:
+    await asyncio.sleep(60)
+    try:
+        await message.edit(
+            embed=discord.Embed(
+                title="**🔰 Consulta del Evento PurpleCoins Finalizada...**",
+                color=discord.Color.purple(),
+            )
+        )
+    except (discord.NotFound, discord.HTTPException):
+        pass
 
 
 def _add_collect_fields(embed: discord.Embed):
@@ -382,14 +396,12 @@ class Economy(commands.Cog):
             )
 
         resultados = cache.get_evento_top(10)
-        medallas = ["🥇", "🥈", "🥉"]
-
         if resultados:
             lineas = []
             for indice, (user_id, puntos) in enumerate(resultados):
                 member = ctx.guild.get_member(user_id) if ctx.guild else None
                 nombre = (member.nick or member.display_name) if member else f"Usuario {user_id}"
-                posicion = medallas[indice] if indice < 3 else f"**{indice + 1}.**"
+                posicion = "🌟" if indice < 4 else f"**{indice + 1}.**"
                 lineas.append(f"{posicion} {nombre} —— {COIN} **{puntos}**")
             descripcion = "\n".join(lineas)
         else:
@@ -401,7 +413,9 @@ class Economy(commands.Cog):
             color=discord.Color.gold(),
         )
         embed.set_footer(text="Tu banco debe de poseer el limite max para ganar.")
-        await ctx.send(embed=embed, delete_after=60)
+        embed.set_thumbnail(url=EVENTO_THUMBNAIL_URL)
+        message = await ctx.send(embed=embed)
+        asyncio.create_task(_finalizar_consulta_evento(message))
 
     @app_commands.command(name="ayuda_nave", description="Muestra la guía de la Nave-Sus")
     async def ayuda_nave(self, interaction: discord.Interaction):

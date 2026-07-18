@@ -31,6 +31,8 @@ from core.config import (
 from modules.memo import _memo_cooldowns
 from modules.Empleos import _EMPLEOS_CACHE, get_empleo_user, save_empleo_user, get_all_empleos_activos
 
+EVENTO_THUMBNAIL_URL = "https://pub-a09b3609b6b34dfab5c7aa7742cd1a8a.r2.dev/Purple%20jack%20Harcode/PurpleThumb.png"
+
 
 # ── ANUNCIOS (RAM only) ────────────────────────────────
 _pending_announcements = {}
@@ -521,12 +523,10 @@ class Staff(commands.Cog):
 
             resultados = cache.get_evento_top(10)
             bancos = await get_evento_bank_balances([user_id for user_id, _ in resultados])
-            medallas = ["🥇", "🥈", "🥉"]
-
             if resultados:
                 lineas = []
                 for indice, (user_id, puntos) in enumerate(resultados):
-                    posicion = medallas[indice] if indice < 3 else f"**{indice + 1}.**"
+                    posicion = "🌟" if indice < 4 else f"**{indice + 1}.**"
                     banco_lleno = bancos.get(user_id, 0) >= cache.MAX_BANK
                     check = " ✅" if banco_lleno else ""
                     lineas.append(f"{posicion} <@{user_id}> —— {COIN} **{puntos}**{check}")
@@ -540,6 +540,7 @@ class Staff(commands.Cog):
                 color=discord.Color.blue(),
             )
             embed.set_footer(text="Tu banco debe de poseer el limite max para ganar.")
+            embed.set_thumbnail(url=EVENTO_THUMBNAIL_URL)
             await canal_resultados.send(embed=embed)
             await interaction.followup.send(
                 f"✅ Evento cerrado y resultados publicados en {canal_resultados.mention}.",
