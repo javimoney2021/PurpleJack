@@ -148,7 +148,7 @@ class Rob(commands.Cog):
             if success:
                 monto_robo = int(target_user["balance"] * SABOTEADOR_ROBO_PORCENTAJE)
                 await update_balance(author_id, monto_robo)
-                await update_balance(target_id, -monto_robo)
+                await update_balance(target_id, -monto_robo, track_event=False)
                 await ctx.message.reply(
                     f"😈 Logras romper la Protección del **Veterano** de {target_nick} "
                     f"y le sacas **{monto_robo:,}** {COIN}.",
@@ -168,7 +168,7 @@ class Rob(commands.Cog):
             if success:
                 monto_robo = int(target_user["balance"] * 0.15)
                 await update_balance(author_id, monto_robo)
-                await update_balance(target_id, -monto_robo)
+                await update_balance(target_id, -monto_robo, track_event=False)
                 await ctx.message.reply(
                     f"✅ Robo exitoso. Le sacaste **{monto_robo:,}** {COIN} a {target.mention} "
                     f"sin que se diera cuenta."
