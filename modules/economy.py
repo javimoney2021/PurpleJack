@@ -12,6 +12,7 @@ from core.cache import MAX_BANK
 TOP_COOLDOWN = 300
 EVENTO_THUMBNAIL_URL = "https://pub-a09b3609b6b34dfab5c7aa7742cd1a8a.r2.dev/Purple%20jack%20Harcode/PurpleThumb.png"
 EVENTO_TASA_DEPOSITO = 30
+EVENTO_TOP_ICON = "<:ygoldstar:1004555717610590258>"
 
 
 def _format_cooldown(seconds: int) -> str:
@@ -420,7 +421,7 @@ class Economy(commands.Cog):
             for indice, (user_id, puntos) in enumerate(resultados):
                 member = ctx.guild.get_member(user_id) if ctx.guild else None
                 nombre = (member.nick or member.display_name) if member else f"Usuario {user_id}"
-                posicion = COIN if indice < 4 else f"**{indice + 1}.**"
+                posicion = EVENTO_TOP_ICON if indice < 4 else f"**{indice + 1}.**"
                 lineas.append(f"{posicion} {nombre} —— {COIN} **{puntos}**")
             descripcion = "\n".join(lineas)
         else:
@@ -431,7 +432,7 @@ class Economy(commands.Cog):
             description=descripcion,
             color=discord.Color.gold(),
         )
-        embed.set_footer(text="Tu banco debe de poseer el limite max para ganar.")
+        embed.set_footer(text="Retiros del banco y collects no suman puntos.")
         embed.set_thumbnail(url=EVENTO_THUMBNAIL_URL)
         message = await ctx.send(embed=embed)
         asyncio.create_task(_finalizar_consulta_evento(message))

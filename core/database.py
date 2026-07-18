@@ -232,17 +232,6 @@ async def flush_evento_puntos():
     cache.clear_evento_dirty_if_unchanged(snapshot)
 
 
-async def get_evento_bank_balances(user_ids):
-    if not user_ids:
-        return {}
-    async with pool.acquire() as conn:
-        rows = await conn.fetch(
-            "SELECT id, bank FROM users WHERE id = ANY($1::BIGINT[])",
-            list(user_ids),
-        )
-    return {row["id"]: row["bank"] for row in rows}
-
-
 # ── USUARIOS ───────────────────────────────────────────
 
 async def get_user(user_id):

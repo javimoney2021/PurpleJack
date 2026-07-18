@@ -20,7 +20,7 @@ from core.database import (
     save_game_config, save_rr_config, save_ruleta_config,
     save_rob_config, save_dados_config, save_memo_config, clear_game_cooldowns,
     activar_evento as activar_evento_db, cerrar_evento as cerrar_evento_db,
-    flush_evento_puntos, get_evento_bank_balances
+    flush_evento_puntos
 )
 from core import cache
 from core.config import (
@@ -32,6 +32,7 @@ from modules.memo import _memo_cooldowns
 from modules.Empleos import _EMPLEOS_CACHE, get_empleo_user, save_empleo_user, get_all_empleos_activos
 
 EVENTO_THUMBNAIL_URL = "https://pub-a09b3609b6b34dfab5c7aa7742cd1a8a.r2.dev/Purple%20jack%20Harcode/PurpleThumb.png"
+EVENTO_TOP_ICON = "<:ygoldstar:1004555717610590258>"
 
 
 # ── ANUNCIOS (RAM only) ────────────────────────────────
@@ -522,14 +523,11 @@ class Staff(commands.Cog):
             await cache.flush_to_db()
 
             resultados = cache.get_evento_top(10)
-            bancos = await get_evento_bank_balances([user_id for user_id, _ in resultados])
             if resultados:
                 lineas = []
                 for indice, (user_id, puntos) in enumerate(resultados):
-                    posicion = COIN if indice < 4 else f"**{indice + 1}.**"
-                    banco_lleno = bancos.get(user_id, 0) >= cache.MAX_BANK
-                    check = " ✅" if banco_lleno else ""
-                    lineas.append(f"{posicion} <@{user_id}> —— {COIN} **{puntos}**{check}")
+                    posicion = EVENTO_TOP_ICON if indice < 4 else f"**{indice + 1}.**"
+                    lineas.append(f"{posicion} <@{user_id}> —— {COIN} **{puntos}**")
                 descripcion = "\n".join(lineas)
             else:
                 descripcion = "No se registraron ingresos durante el evento."
@@ -539,7 +537,7 @@ class Staff(commands.Cog):
                 description=descripcion,
                 color=discord.Color.blue(),
             )
-            embed.set_footer(text="Tu banco debe de poseer el limite max para ganar.")
+            embed.set_footer(text="Retiros del banco y collects no suman puntos.")
             embed.set_thumbnail(url=EVENTO_THUMBNAIL_URL)
             await canal_resultados.send(embed=embed)
             await interaction.followup.send(
