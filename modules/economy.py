@@ -390,10 +390,27 @@ class Economy(commands.Cog):
     @commands.command(name="evento")
     async def evento(self, ctx):
         if not cache.is_evento_activo():
-            return await ctx.reply(
-                "❌ No hay un evento de Purple Coins activo actualmente.",
-                delete_after=15,
+            resultados_anteriores = cache.get_evento_top(4)
+            if not resultados_anteriores:
+                return await ctx.reply(
+                    "❌ No hay un evento de Purple Coins activo actualmente.",
+                    delete_after=15,
+                )
+
+            lineas = []
+            for user_id, puntos in resultados_anteriores:
+                member = ctx.guild.get_member(user_id) if ctx.guild else None
+                nombre = (member.nick or member.display_name) if member else f"Usuario {user_id}"
+                lineas.append(f"{COIN} {nombre} —— {COIN} **{puntos}**")
+
+            embed = discord.Embed(
+                title="Ultimos Ganadores del Evento",
+                description="\n".join(lineas),
+                color=discord.Color.purple(),
             )
+            embed.set_footer(text="No hay Evento Activo, Espera el Proximo Anuncio...")
+            embed.set_thumbnail(url=EVENTO_THUMBNAIL_URL)
+            return await ctx.send(embed=embed, delete_after=60)
 
         resultados = cache.get_evento_top(10)
         if resultados:
