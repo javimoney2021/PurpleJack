@@ -526,7 +526,7 @@ class Staff(commands.Cog):
             if resultados:
                 lineas = []
                 for indice, (user_id, puntos) in enumerate(resultados):
-                    posicion = "🌟" if indice < 4 else f"**{indice + 1}.**"
+                    posicion = COIN if indice < 4 else f"**{indice + 1}.**"
                     banco_lleno = bancos.get(user_id, 0) >= cache.MAX_BANK
                     check = " ✅" if banco_lleno else ""
                     lineas.append(f"{posicion} <@{user_id}> —— {COIN} **{puntos}**{check}")

@@ -401,7 +401,7 @@ class Economy(commands.Cog):
             for indice, (user_id, puntos) in enumerate(resultados):
                 member = ctx.guild.get_member(user_id) if ctx.guild else None
                 nombre = (member.nick or member.display_name) if member else f"Usuario {user_id}"
-                posicion = "🌟" if indice < 4 else f"**{indice + 1}.**"
+                posicion = COIN if indice < 4 else f"**{indice + 1}.**"
                 lineas.append(f"{posicion} {nombre} —— {COIN} **{puntos}**")
             descripcion = "\n".join(lineas)
         else:
