@@ -14,11 +14,13 @@ from core.database import (
     get_user, update_balance, update_bank, pool,
     add_item, edit_item, delete_item,
     get_item_by_name, add_to_inventory, get_all_users_net_worth,
-    get_all_inventarios, load_items_to_cache, add_stock,
+    get_all_inventarios, load_items_to_cache, add_stock, remove_inventory_quantity,
     upsert_collect_config_db, delete_collect_config_db, delete_orphan_collect_configs_db,
     set_item_role_restrictions_db, remove_item_role_restriction_db,
     save_game_config, save_rr_config, save_ruleta_config,
-    save_rob_config, save_dados_config, save_memo_config, clear_game_cooldowns
+    save_rob_config, save_dados_config, save_memo_config, clear_game_cooldowns,
+    activar_evento as activar_evento_db, cerrar_evento as cerrar_evento_db,
+    flush_evento_puntos, get_evento_bank_balances
 )
 from core import cache
 from core.config import (
@@ -71,6 +73,9 @@ class ResetAllModal(discord.ui.Modal, title="Confirmar Reset Global"):
             await conn.execute("UPDATE users SET balance=0, bank=0")
         cache._cache.clear()
         cache._dirty.clear()
+        if cache.is_evento_activo():
+            cache.clear_evento_puntos()
+            await flush_evento_puntos()
         await interaction.response.send_message("✅ Reset global completado.", ephemeral=False)
 
 # ── ANUNCIO CONFIRM VIEW ───────────────────────────────
@@ -483,6 +488,68 @@ class Staff(commands.Cog):
         await interaction.followup.send(
             f"✅ Se removieron **{cantidad}** {COIN} del **{destino.name}** de {usuario.mention}.", ephemeral=False
         )
+
+    @app_commands.command(name="activar_evento", description="Inicia el ranking de Purple Coins del evento")
+    @is_staff()
+    async def activar_evento(self, interaction: discord.Interaction):
+        if cache.is_evento_activo():
+            return await interaction.response.send_message(
+                "❌ Ya hay un evento de Purple Coins activo.", ephemeral=True
+            )
+
+        await interaction.response.defer(ephemeral=True)
+        await activar_evento_db()
+        await interaction.followup.send(
+            "✅ Evento activado. Desde ahora se registran los cambios de balance para `!evento`.",
+            ephemeral=True,
+        )
+
+    @app_commands.command(name="cerrar_evento", description="Cierra el evento y publica sus resultados")
+    @app_commands.describe(canal_resultados="Canal donde se publicará el Top 10 final")
+    @is_staff()
+    async def cerrar_evento(self, interaction: discord.Interaction, canal_resultados: discord.TextChannel):
+        if not cache.is_evento_activo():
+            return await interaction.response.send_message(
+                "❌ No hay un evento de Purple Coins activo.", ephemeral=True
+            )
+
+        await interaction.response.defer(ephemeral=True)
+        try:
+            await cerrar_evento_db()
+            await flush_evento_puntos()
+            await cache.flush_to_db()
+
+            resultados = cache.get_evento_top(10)
+            bancos = await get_evento_bank_balances([user_id for user_id, _ in resultados])
+            medallas = ["🥇", "🥈", "🥉"]
+
+            if resultados:
+                lineas = []
+                for indice, (user_id, puntos) in enumerate(resultados):
+                    posicion = medallas[indice] if indice < 3 else f"**{indice + 1}.**"
+                    banco_lleno = bancos.get(user_id, 0) >= cache.MAX_BANK
+                    check = " ✅" if banco_lleno else ""
+                    lineas.append(f"{posicion} <@{user_id}> —— {COIN} **{puntos}**{check}")
+                descripcion = "\n".join(lineas)
+            else:
+                descripcion = "No se registraron ingresos durante el evento."
+
+            embed = discord.Embed(
+                title="TOP PURPLE COINS",
+                description=descripcion,
+                color=discord.Color.blue(),
+            )
+            embed.set_footer(text="Tu banco debe de poseer el limite max para ganar.")
+            await canal_resultados.send(embed=embed)
+            await interaction.followup.send(
+                f"✅ Evento cerrado y resultados publicados en {canal_resultados.mention}.",
+                ephemeral=True,
+            )
+        except Exception:
+            logger.exception("Error cerrando el evento de Purple Coins")
+            await interaction.followup.send(
+                "❌ No se pudieron publicar los resultados del evento.", ephemeral=True
+            )
 
     @app_commands.command(name="add_xp_laboral", description="Otorga XP Laboral a un usuario de empleos")
     @app_commands.describe(usuario="Usuario al que asignar XP", xp="Cantidad de XP a otorgar")
@@ -1077,6 +1144,50 @@ class Staff(commands.Cog):
 
     @dropar_item.autocomplete("item")
     async def dropar_item_autocomplete(self, interaction: discord.Interaction, current: str):
+        items = cache.get_items_cache()
+        return [
+            app_commands.Choice(name=i["nombre"], value=i["nombre"])
+            for i in items
+            if current.lower() in i["nombre"].lower()
+        ][:25]
+
+    @app_commands.command(name="remover_item", description="Remueve un item del inventario de un usuario")
+    @app_commands.describe(
+        usuario="Selecciona el usuario afectado",
+        item="Selecciona el item a remover",
+        cantidad="Cantidad a remover",
+    )
+    @is_staff()
+    async def remover_item(self, interaction, usuario: discord.Member, item: str, cantidad: int):
+        if cantidad <= 0:
+            return await interaction.response.send_message(
+                "❌ La cantidad debe ser mayor a 0.", ephemeral=True
+            )
+
+        await interaction.response.defer(ephemeral=False)
+        found = await get_item_by_name(item.strip())
+        if not found:
+            return await interaction.followup.send(
+                f"❌ Item **{item}** no encontrado.", ephemeral=True
+            )
+
+        result = await remove_inventory_quantity(usuario.id, found["id"], cantidad)
+        if not result["ok"]:
+            disponible = result.get("available", 0)
+            return await interaction.followup.send(
+                f"❌ {usuario.mention} solo posee **{disponible}x** de **{found['nombre']}**.",
+                ephemeral=True,
+            )
+
+        icono = found["icono"] if found["icono"] else "🔹"
+        await interaction.followup.send(
+            f"✅ Se han removido {cantidad}x {icono} {found['nombre']} del inventario de {usuario.mention}.\n"
+            f"• Cantidad restante: **{result['remaining']}**",
+            ephemeral=False,
+        )
+
+    @remover_item.autocomplete("item")
+    async def remover_item_autocomplete(self, interaction: discord.Interaction, current: str):
         items = cache.get_items_cache()
         return [
             app_commands.Choice(name=i["nombre"], value=i["nombre"])

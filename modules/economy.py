@@ -373,6 +373,36 @@ class Economy(commands.Cog):
         embed.set_footer(text="Solo se muestra el Top 15 de los más ricos.")
         await ctx.send(embed=embed, delete_after=60)
 
+    @commands.command(name="evento")
+    async def evento(self, ctx):
+        if not cache.is_evento_activo():
+            return await ctx.reply(
+                "❌ No hay un evento de Purple Coins activo actualmente.",
+                delete_after=15,
+            )
+
+        resultados = cache.get_evento_top(10)
+        medallas = ["🥇", "🥈", "🥉"]
+
+        if resultados:
+            lineas = []
+            for indice, (user_id, puntos) in enumerate(resultados):
+                member = ctx.guild.get_member(user_id) if ctx.guild else None
+                nombre = (member.nick or member.display_name) if member else f"Usuario {user_id}"
+                posicion = medallas[indice] if indice < 3 else f"**{indice + 1}.**"
+                lineas.append(f"{posicion} {nombre} —— {COIN} **{puntos}**")
+            descripcion = "\n".join(lineas)
+        else:
+            descripcion = "Aún no se registran ingresos en este evento."
+
+        embed = discord.Embed(
+            title="TOP EVENTO PURPLE COINS",
+            description=descripcion,
+            color=discord.Color.gold(),
+        )
+        embed.set_footer(text="Tu banco debe de poseer el limite max para ganar.")
+        await ctx.send(embed=embed, delete_after=60)
+
     @app_commands.command(name="ayuda_nave", description="Muestra la guía de la Nave-Sus")
     async def ayuda_nave(self, interaction: discord.Interaction):
         from core.database import get_nave_contenido

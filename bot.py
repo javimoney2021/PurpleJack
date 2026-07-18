@@ -57,7 +57,7 @@ from core.database import (
     load_collect_config_to_cache, delete_cargo_temporal,
     create_game_config_table, load_game_config, load_dados_config, load_memo_config,
     load_veterano_config_to_cache, load_saboteador_config_to_cache, load_item_role_restrictions_to_cache,
-    save_collect_cooldowns
+    save_collect_cooldowns, load_evento_to_cache, flush_evento_puntos
 )
 from core import cache
 from core.config import AYUDA_CHANNEL_ID
@@ -71,6 +71,7 @@ async def get_prefix(bot, message):
     return ["! ", "!"]
 
 bot = commands.Bot(command_prefix=get_prefix, intents=intents, help_command=None)
+evento_flush_task = None
 
 
 async def load_modules():
@@ -89,6 +90,7 @@ async def load_modules():
     await bot.load_extension("modules.carrera")
     await bot.load_extension("modules.registro_ruleta")
     await bot.load_extension("modules.memo")
+    await bot.load_extension("modules.adivinar")
 
 
 async def check_cargos_loop():
@@ -138,6 +140,7 @@ async def on_command_error(ctx, error):
 
 async def shutdown():
     logger.warning("Apagando bot — flusheando caché a DB...")
+    await flush_evento_puntos()
     await cache.flush_to_db()
     # ── Persistir cooldowns de collect pendientes en cache ──
     all_cooldowns = cache.get_all_collect_cooldowns()
@@ -154,6 +157,7 @@ AUTHORIZED_GUILD_ID = 980073134411644939
 
 @bot.event
 async def on_ready():
+    global evento_flush_task
     logger.info(f"Bot conectado como {bot.user}")
     logger.info("Caché iniciada | Flush cada 5 minutos")
     logger.info(f"Servidores activos: {len(bot.guilds)}")
@@ -183,6 +187,9 @@ async def on_ready():
 
     asyncio.create_task(cache.flush_loop())
     asyncio.create_task(check_cargos_loop())
+    if evento_flush_task is None or evento_flush_task.done():
+        evento_flush_task = asyncio.create_task(cache.evento_flush_loop())
+        logger.info("Task de evento iniciada | Flush de ranking cada 10 minutos")
     logger.info("Task de cargos temporales iniciada | Revisión cada 5 minutos")
     logger.info("\n⫷ 𝙋𝙐𝙍𝙋𝙇𝙀𝙅𝘼𝘾𝙆 𝙀𝙉 𝙇𝙄𝙉𝙀𝘼 ⫸\n")
 
@@ -217,10 +224,12 @@ def run_bot():
         await load_collect_config_to_cache()
         await load_veterano_config_to_cache()
         await load_saboteador_config_to_cache()
+        await load_evento_to_cache()
         await load_modules()
         try:
             await bot.start(TOKEN)
         finally:
+            await flush_evento_puntos()
             await cache.flush_to_db()
             logger.info("Flush final completado al cerrar.")
 

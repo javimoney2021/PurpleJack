@@ -1,5 +1,6 @@
 import asyncio
 import logging
+import time
 import asyncpg
 from settings import DATABASE_URL
 from core import cache
@@ -139,7 +140,107 @@ async def init_db():
         )
         """)
 
+        await conn.execute("""
+        CREATE TABLE IF NOT EXISTS evento_estado (
+            id SMALLINT PRIMARY KEY CHECK (id = 1),
+            activo BOOLEAN NOT NULL DEFAULT FALSE,
+            iniciado_en DOUBLE PRECISION NOT NULL DEFAULT 0
+        )
+        """)
+        await conn.execute("""
+        INSERT INTO evento_estado (id, activo, iniciado_en)
+        VALUES (1, FALSE, 0)
+        ON CONFLICT (id) DO NOTHING
+        """)
+        await conn.execute("""
+        CREATE TABLE IF NOT EXISTS evento_puntos (
+            user_id BIGINT PRIMARY KEY,
+            puntos BIGINT NOT NULL DEFAULT 0
+        )
+        """)
+
     logger.info("Base de datos conectada y tablas verificadas.")
+
+
+# ── EVENTO PURPLE COINS ───────────────────────────────
+
+async def load_evento_to_cache():
+    """Restaura el estado y los puntos del evento al iniciar el bot."""
+    async with pool.acquire() as conn:
+        estado = await conn.fetchrow(
+            "SELECT activo, iniciado_en FROM evento_estado WHERE id=1"
+        )
+        puntos = await conn.fetch("SELECT user_id, puntos FROM evento_puntos WHERE puntos > 0")
+
+    cache.restore_evento(
+        bool(estado["activo"]) if estado else False,
+        float(estado["iniciado_en"]) if estado else 0,
+        {row["user_id"]: row["puntos"] for row in puntos},
+    )
+
+
+async def activar_evento():
+    """Inicia un evento nuevo y elimina de forma atómica el ranking anterior."""
+    iniciado_en = time.time()
+    async with pool.acquire() as conn:
+        async with conn.transaction():
+            await conn.execute("DELETE FROM evento_puntos")
+            await conn.execute(
+                "UPDATE evento_estado SET activo=TRUE, iniciado_en=$1 WHERE id=1",
+                iniciado_en,
+            )
+    cache.start_evento(iniciado_en)
+    return iniciado_en
+
+
+async def cerrar_evento():
+    """Detiene el conteo antes de persistir el cierre para no registrar cambios tardíos."""
+    cache.stop_evento()
+    try:
+        async with pool.acquire() as conn:
+            await conn.execute("UPDATE evento_estado SET activo=FALSE WHERE id=1")
+    except Exception:
+        cache.resume_evento()
+        raise
+
+
+async def flush_evento_puntos():
+    """Guarda el snapshot pendiente sin perder cambios producidos durante el flush."""
+    snapshot = cache.get_evento_dirty_snapshot()
+    if not snapshot:
+        return
+
+    positivos = [(user_id, puntos) for user_id, puntos in snapshot.items() if puntos > 0]
+    eliminados = [user_id for user_id, puntos in snapshot.items() if puntos <= 0]
+
+    async with pool.acquire() as conn:
+        async with conn.transaction():
+            if positivos:
+                await conn.executemany(
+                    """
+                    INSERT INTO evento_puntos (user_id, puntos)
+                    VALUES ($1, $2)
+                    ON CONFLICT (user_id) DO UPDATE SET puntos=EXCLUDED.puntos
+                    """,
+                    positivos,
+                )
+            if eliminados:
+                await conn.execute(
+                    "DELETE FROM evento_puntos WHERE user_id = ANY($1::BIGINT[])",
+                    eliminados,
+                )
+    cache.clear_evento_dirty_if_unchanged(snapshot)
+
+
+async def get_evento_bank_balances(user_ids):
+    if not user_ids:
+        return {}
+    async with pool.acquire() as conn:
+        rows = await conn.fetch(
+            "SELECT id, bank FROM users WHERE id = ANY($1::BIGINT[])",
+            list(user_ids),
+        )
+    return {row["id"]: row["bank"] for row in rows}
 
 
 # ── USUARIOS ───────────────────────────────────────────
@@ -443,6 +544,8 @@ async def purchase_item(user_id, item_id, unidades=1, use_bank=False):
             "cooldown_work": user["cooldown_work"],
             "cooldown_crime": user["cooldown_crime"],
         })
+        if not use_bank:
+            cache.record_evento_balance_delta(user_id, balance - user["balance"])
         cache.clear_dirty(user_id)
         cache.invalidate_inventory_cache(user_id)
         if stock != -1:
@@ -497,6 +600,49 @@ async def remove_from_inventory(user_id, item_nombre):
             )
     cache.remove_from_inventory_cache(user_id, item_nombre)
     return True
+
+
+async def remove_inventory_quantity(user_id: int, item_id: int, cantidad: int):
+    """Retira una cantidad exacta de un inventario y persiste el cambio de inmediato."""
+    if cantidad <= 0:
+        return {"ok": False, "reason": "invalid_quantity"}
+
+    async with pool.acquire() as conn:
+        async with conn.transaction():
+            row = await conn.fetchrow(
+                """
+                SELECT cantidad FROM inventario
+                WHERE user_id=$1 AND item_id=$2
+                FOR UPDATE
+                """,
+                user_id,
+                item_id,
+            )
+            disponible = row["cantidad"] if row else 0
+            if disponible < cantidad:
+                return {
+                    "ok": False,
+                    "reason": "insufficient_quantity",
+                    "available": disponible,
+                }
+
+            restante = disponible - cantidad
+            if restante:
+                await conn.execute(
+                    "UPDATE inventario SET cantidad=$1 WHERE user_id=$2 AND item_id=$3",
+                    restante,
+                    user_id,
+                    item_id,
+                )
+            else:
+                await conn.execute(
+                    "DELETE FROM inventario WHERE user_id=$1 AND item_id=$2",
+                    user_id,
+                    item_id,
+                )
+
+    cache.invalidate_inventory_cache(user_id)
+    return {"ok": True, "remaining": restante}
 
 
 async def get_usos_diarios(user_id: int, item_id: int) -> int:
