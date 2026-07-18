@@ -290,44 +290,45 @@ async def flush_user_to_db(user_id):
 
 # ── ESCRITURAS INMEDIATAS (shop, collect, rob, duels) ──
 
-async def update_balance(user_id, amount):
+async def update_balance(user_id, amount, track_event=True):
     """Actualiza balance en RAM y persiste a DB de inmediato."""
     await get_user(user_id)
-    cache.update_cached_balance(user_id, amount)
+    cache.update_cached_balance(user_id, amount, track_event=track_event)
     await flush_user_to_db(user_id)
 
 
-async def update_bank(user_id, amount):
+async def update_bank(user_id, amount, track_event=True):
     """
     Actualiza banco en RAM y persiste a DB de inmediato.
     Si amount es positivo y el banco supera MAX_BANK, el excedente
     se redirige al balance automáticamente. Garantiza flush en ambos casos.
     """
     await get_user(user_id)
-    cache.update_cached_bank(user_id, amount)
+    aplicado_banco = cache.update_cached_bank(user_id, amount, track_event=track_event)
     await flush_user_to_db(user_id)
+    return aplicado_banco
 
 
 # ── ESCRITURAS EN RAM (mini-juegos: ruleta, rr, dados) ─
 
-async def cache_balance(user_id, amount):
+async def cache_balance(user_id, amount, track_event=True):
     """
     Actualiza balance solo en RAM.
     La persistencia ocurre en el flush_loop (cada 10 min).
     Usar en mini-juegos donde no hay transferencia entre usuarios.
     """
     await get_user(user_id)  # garantiza fila en DB y usuario en caché
-    cache.update_cached_balance(user_id, amount)
+    cache.update_cached_balance(user_id, amount, track_event=track_event)
 
 
-async def cache_bank(user_id, amount):
+async def cache_bank(user_id, amount, track_event=True):
     """
     Actualiza banco solo en RAM respetando MAX_BANK.
     El excedente se redirige al balance automáticamente.
     La persistencia ocurre en el flush_loop (cada 10 min).
     """
     await get_user(user_id)
-    cache.update_cached_bank(user_id, amount)
+    return cache.update_cached_bank(user_id, amount, track_event=track_event)
 
 
 async def update_cooldown(user_id, command, timestamp):

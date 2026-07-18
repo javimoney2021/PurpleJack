@@ -11,6 +11,7 @@ from core.cache import MAX_BANK
 
 TOP_COOLDOWN = 300
 EVENTO_THUMBNAIL_URL = "https://pub-a09b3609b6b34dfab5c7aa7742cd1a8a.r2.dev/Purple%20jack%20Harcode/PurpleThumb.png"
+EVENTO_TASA_DEPOSITO = 30
 
 
 def _format_cooldown(seconds: int) -> str:
@@ -216,11 +217,12 @@ class DepositModal(ui.Modal, title="Depositar al Banco"):
             aplicado_banco    = min(amount, espacio_disponible)
             excedente_balance = amount - aplicado_banco
 
-            # update_balance / update_bank hacen flush inmediato a DB
-            # update_bank internamente aplica el mismo cálculo vía cache,
-            # por lo que el resultado es siempre consistente.
-            await update_balance(self.user_id, -amount)
-            await update_bank(self.user_id, amount)
+            # El depósito no descuenta el total del evento: solo el 30 % de
+            # lo que realmente pudo entrar al banco.
+            await update_balance(self.user_id, -amount, track_event=False)
+            aplicado_banco = await update_bank(self.user_id, amount, track_event=False)
+            descuento_evento = aplicado_banco * EVENTO_TASA_DEPOSITO // 100
+            cache.record_evento_balance_delta(self.user_id, -descuento_evento)
 
             # Refrescar datos para actualizar el embed
             user = await get_user(self.user_id)
@@ -271,7 +273,7 @@ class WithdrawModal(ui.Modal, title="Retirar del Banco"):
                 )
 
             await update_bank(self.user_id, -amount)
-            await update_balance(self.user_id, amount)
+            await update_balance(self.user_id, amount, track_event=False)
 
             user = await get_user(self.user_id)
             embed = self.message.embeds[0]

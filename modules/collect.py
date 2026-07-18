@@ -78,7 +78,7 @@ class Collect(commands.Cog):
                 espacio_disponible = max(0, MAX_BANK - banco_actual)
                 aplicado_banco    = min(total_ganado, espacio_disponible)
                 excedente_balance = total_ganado - aplicado_banco
-                cache.update_cached_bank(user_id, total_ganado)
+                cache.update_cached_bank(user_id, total_ganado, track_event=False)
 
             # Construir y enviar embed de inmediato
             nick = ctx.author.nick or ctx.author.display_name

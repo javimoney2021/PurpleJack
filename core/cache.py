@@ -111,13 +111,14 @@ def mark_dirty(user_id):
     _dirty.add(user_id)
     touch_user(user_id)
 
-def update_cached_balance(user_id, amount):
+def update_cached_balance(user_id, amount, track_event=True):
     if user_id in _cache:
         _cache[user_id]["balance"] += amount
-        record_evento_balance_delta(user_id, amount)
+        if track_event:
+            record_evento_balance_delta(user_id, amount)
         mark_dirty(user_id)
 
-def update_cached_bank(user_id, amount):
+def update_cached_bank(user_id, amount, track_event=True):
     """
     Actualiza banco en caché respetando MAX_BANK.
     Si amount es positivo y supera el límite, el excedente se aplica
@@ -143,7 +144,8 @@ def update_cached_bank(user_id, amount):
 
     if excedente_balance > 0:
         _cache[user_id]["balance"] += excedente_balance
-        record_evento_balance_delta(user_id, excedente_balance)
+        if track_event:
+            record_evento_balance_delta(user_id, excedente_balance)
 
     mark_dirty(user_id)
     return aplicado_banco

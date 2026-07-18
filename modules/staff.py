@@ -451,9 +451,9 @@ class Staff(commands.Cog):
             return await interaction.response.send_message("❌ La cantidad debe ser mayor a 0.", ephemeral=False)
         await interaction.response.defer(ephemeral=False)
         if destino.value == "balance":
-            await update_balance(usuario.id, cantidad)
+            await update_balance(usuario.id, cantidad, track_event=False)
         else:
-            await update_bank(usuario.id, cantidad)
+            await update_bank(usuario.id, cantidad, track_event=False)
         async with pool.acquire() as conn:
             data = cache.get_cached(usuario.id)
             if data:
