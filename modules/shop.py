@@ -595,8 +595,8 @@ class UseButton(discord.ui.Button):
                 if special_log_channel:
                     try:
                         await special_log_channel.send(
-                            f"<@&{STAFF_ROLE_ID}> ✨ **{nombre_log}** usó {icono} **{item['nombre']}**",
-                            allowed_mentions=discord.AllowedMentions(roles=True),
+                            f"<@&{STAFF_ROLE_ID}> ✨ {interaction.user.mention} usó {icono} **{item['nombre']}**",
+                            allowed_mentions=discord.AllowedMentions(roles=True, users=True),
                         )
                     except discord.HTTPException as error:
                         logger.warning(
