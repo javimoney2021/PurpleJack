@@ -15,6 +15,7 @@ from core.database import (
     add_item, edit_item, delete_item,
     get_item_by_name, add_to_inventory, get_all_users_net_worth,
     get_all_inventarios, load_items_to_cache, add_stock, remove_inventory_quantity,
+    set_item_log_uso_channel,
     upsert_collect_config_db, delete_collect_config_db, delete_orphan_collect_configs_db,
     set_item_role_restrictions_db, remove_item_role_restriction_db,
     save_game_config, save_rr_config, save_ruleta_config,
@@ -37,7 +38,7 @@ EVENTO_TOP_ICON = "<:ygoldstar:1004555717610590258>"
 
 # ── ANUNCIOS (RAM only) ────────────────────────────────
 _pending_announcements = {}
-# {user_id: {"channel": channel_obj, "expires": float, "content": str|None}}
+# {user_id: {"channel": channel_obj, "source_channel_id": int, "expires": float, "content": str|None}}
 
 # ── NAVE EDIT (RAM only) ───────────────────────────────
 _pending_nave = {}
@@ -1090,6 +1091,73 @@ class Staff(commands.Cog):
             if current.lower() in i["nombre"].lower()
         ][:25]
 
+    @app_commands.command(name="configurar_log_item", description="Configura el log de uso especial para un item")
+    @app_commands.describe(
+        item="Item cuyo uso se registrará también en un canal especial",
+        canal="Canal donde se mencionará al staff al usar el item",
+    )
+    @is_staff()
+    async def configurar_log_item(
+        self,
+        interaction: discord.Interaction,
+        item: str,
+        canal: discord.TextChannel,
+    ):
+        found = await get_item_by_name(item.strip())
+        if not found:
+            return await interaction.response.send_message(
+                f"❌ Item **{item}** no encontrado.", ephemeral=True
+            )
+
+        await set_item_log_uso_channel(found["id"], canal.id)
+        icono = found["icono"] if found["icono"] else "🔹"
+        await interaction.response.send_message(
+            f"✅ El uso de {icono} **{found['nombre']}** también se registrará en {canal.mention} "
+            "mencionando al staff.",
+            ephemeral=True,
+        )
+
+    @configurar_log_item.autocomplete("item")
+    async def configurar_log_item_autocomplete(
+        self, interaction: discord.Interaction, current: str
+    ):
+        return [
+            app_commands.Choice(name=item["nombre"], value=item["nombre"])
+            for item in cache.get_items_cache()
+            if current.lower() in item["nombre"].lower()
+        ][:25]
+
+    @app_commands.command(name="eliminar_log_item", description="Quita el log de uso especial de un item")
+    @app_commands.describe(item="Item al que se le quitará el canal especial")
+    @is_staff()
+    async def eliminar_log_item(self, interaction: discord.Interaction, item: str):
+        found = await get_item_by_name(item.strip())
+        if not found:
+            return await interaction.response.send_message(
+                f"❌ Item **{item}** no encontrado.", ephemeral=True
+            )
+        if found.get("log_uso_channel_id") is None:
+            return await interaction.response.send_message(
+                f"❌ **{found['nombre']}** no tiene un log de uso especial configurado.",
+                ephemeral=True,
+            )
+
+        await set_item_log_uso_channel(found["id"], None)
+        await interaction.response.send_message(
+            f"✅ El log de uso especial de **{found['nombre']}** fue eliminado.",
+            ephemeral=True,
+        )
+
+    @eliminar_log_item.autocomplete("item")
+    async def eliminar_log_item_autocomplete(
+        self, interaction: discord.Interaction, current: str
+    ):
+        return [
+            app_commands.Choice(name=item["nombre"], value=item["nombre"])
+            for item in cache.get_items_cache()
+            if current.lower() in item["nombre"].lower()
+        ][:25]
+
     @app_commands.command(name="eliminar_item", description="Elimina un item de la tienda")
     @app_commands.describe(item="Selecciona el item a eliminar")
     @is_staff()
@@ -1639,6 +1707,7 @@ class Staff(commands.Cog):
             user_id = interaction.user.id
             _pending_announcements[user_id] = {
                 "channel": canal,
+                "source_channel_id": interaction.channel_id,
                 "expires": time.time() + 300,
                 "content": None
             }
@@ -1751,6 +1820,8 @@ class Staff(commands.Cog):
             return
         if time.time() > entry["expires"]:
             _pending_announcements.pop(user_id, None)
+            return
+        if message.channel.id != entry["source_channel_id"]:
             return
 
         content = message.content

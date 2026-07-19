@@ -7,7 +7,7 @@ from core.database import (
     get_inventory, remove_from_inventory, add_cargo_temporal
 )
 from core import cache
-from core.config import COIN, LOG_CHANNEL_ID, TARJETA_CREDITO_ROL_ID
+from core.config import COIN, LOG_CHANNEL_ID, TARJETA_CREDITO_ROL_ID, STAFF_ROLE_ID
 import time
 import re
 
@@ -581,11 +581,35 @@ class UseButton(discord.ui.Button):
 
             # ── Log de uso ──────────────────────────
             log_channel = self.bot.get_channel(LOG_CHANNEL_ID)
+            nombre_log = interaction.user.nick or interaction.user.display_name
             if log_channel:
-                nombre_log = interaction.user.nick or interaction.user.display_name
                 await log_channel.send(
                     f"✨ **{nombre_log}** usó {icono} **{item['nombre']}**"
                 )
+
+            # El canal especial es adicional y solo se usa al consumir el item.
+            item_config = await get_item_by_name(item["nombre"])
+            log_uso_channel_id = (item_config or item).get("log_uso_channel_id")
+            if log_uso_channel_id and log_uso_channel_id != LOG_CHANNEL_ID:
+                special_log_channel = self.bot.get_channel(log_uso_channel_id)
+                if special_log_channel:
+                    try:
+                        await special_log_channel.send(
+                            f"<@&{STAFF_ROLE_ID}> ✨ **{nombre_log}** usó {icono} **{item['nombre']}**",
+                            allowed_mentions=discord.AllowedMentions(roles=True),
+                        )
+                    except discord.HTTPException as error:
+                        logger.warning(
+                            "No se pudo enviar el log especial de uso para item %s: %s",
+                            item["id"],
+                            error,
+                        )
+                else:
+                    logger.warning(
+                        "Canal de log especial no encontrado para item %s: %s",
+                        item["id"],
+                        log_uso_channel_id,
+                    )
 
         except Exception as e:
             logger.error(f"ERROR UseButton callback: {e}")

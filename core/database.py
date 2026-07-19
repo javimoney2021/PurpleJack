@@ -49,7 +49,8 @@ async def init_db():
             rol_id BIGINT DEFAULT NULL,
             duracion INTEGER DEFAULT 0,
             limite_por_usuario INTEGER DEFAULT 0,
-            limite_uso INTEGER DEFAULT 0
+            limite_uso INTEGER DEFAULT 0,
+            log_uso_channel_id BIGINT DEFAULT NULL
         )
         """)
 
@@ -60,6 +61,7 @@ async def init_db():
             ("duracion",             "INTEGER DEFAULT 0"),
             ("limite_por_usuario",   "INTEGER DEFAULT 0"),
             ("limite_uso",           "INTEGER DEFAULT 0"),
+            ("log_uso_channel_id",   "BIGINT DEFAULT NULL"),
         ]:
             await conn.execute(
                 f"ALTER TABLE items ADD COLUMN IF NOT EXISTS {col} {definition}"
@@ -376,6 +378,16 @@ async def edit_item(item_id, nombre=None, precio=None, stock=None, descripcion=N
             await conn.execute("UPDATE items SET mensaje_uso=$1 WHERE id=$2", mensaje_uso, item_id)
     await load_items_to_cache()
 
+
+async def set_item_log_uso_channel(item_id, channel_id):
+    async with pool.acquire() as conn:
+        await conn.execute(
+            "UPDATE items SET log_uso_channel_id=$1 WHERE id=$2",
+            channel_id,
+            item_id,
+        )
+    await load_items_to_cache()
+
 async def delete_item(item_id):
     async with pool.acquire() as conn:
         await conn.execute("DELETE FROM items WHERE id=$1", item_id)
@@ -554,7 +566,8 @@ async def get_inventory_from_db(user_id):
     async with pool.acquire() as conn:
         rows = await conn.fetch("""
             SELECT i.id, i.nombre, i.icono, i.utilizable, i.mensaje_uso,
-                   i.rol_id, i.duracion, i.limite_uso, inv.cantidad
+                   i.rol_id, i.duracion, i.limite_uso, i.log_uso_channel_id,
+                   inv.cantidad
             FROM inventario inv
             JOIN items i ON inv.item_id = i.id
             WHERE inv.user_id = $1
