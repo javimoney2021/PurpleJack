@@ -11,6 +11,7 @@ from core.cache import get_rob_cooldown, set_rob_cooldown
 SABOTEADOR_EXITO_PROB = 0.70
 SABOTEADOR_ROBO_PORCENTAJE = 0.20
 SABOTEADOR_FALLO_PORCENTAJE = 0.15
+EVENT_ROB_VICTIM_PENALTY_PERCENT = 30
 
 
 def _format_rob_cooldown(seconds: int) -> str:
@@ -23,6 +24,11 @@ def _format_rob_cooldown(seconds: int) -> str:
     if minutos > 0:
         return f"{minutos}m {segs}s"
     return f"{segs}s"
+
+
+def _apply_event_victim_penalty(user_id: int, stolen_amount: int) -> None:
+    penalty = stolen_amount * EVENT_ROB_VICTIM_PENALTY_PERCENT // 100
+    cache.record_evento_balance_delta(user_id, -penalty)
 
 
 class Rob(commands.Cog):
@@ -149,6 +155,7 @@ class Rob(commands.Cog):
                 monto_robo = int(target_user["balance"] * SABOTEADOR_ROBO_PORCENTAJE)
                 await update_balance(author_id, monto_robo)
                 await update_balance(target_id, -monto_robo, track_event=False)
+                _apply_event_victim_penalty(target_id, monto_robo)
                 await ctx.message.reply(
                     f"😈 Logras romper la Protección del **Veterano** de {target_nick} "
                     f"y le sacas **{monto_robo:,}** {COIN}.",
@@ -169,6 +176,7 @@ class Rob(commands.Cog):
                 monto_robo = int(target_user["balance"] * 0.15)
                 await update_balance(author_id, monto_robo)
                 await update_balance(target_id, -monto_robo, track_event=False)
+                _apply_event_victim_penalty(target_id, monto_robo)
                 await ctx.message.reply(
                     f"✅ Robo exitoso. Le sacaste **{monto_robo:,}** {COIN} a {target.mention} "
                     f"sin que se diera cuenta."

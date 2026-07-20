@@ -105,6 +105,7 @@ def build_jack_confirmation_embed(author, monto):
         description=(
             f"{author.mention} ha convocado una carrera por **{monto}** {COIN}\n\n"
             f"**Inscritos (1/{MAX_PLAYERS}):**\n🏎️ {author.display_name}\n\n"
+            "**Sin participantes inscritos!**\n"
             "⚠️ Correr contra una maquina puede ser peligroso, deseas continuar?"
         ),
         color=discord.Color.blurple(),
