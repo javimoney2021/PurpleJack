@@ -305,7 +305,7 @@ class Carrera(commands.Cog):
             return await ctx.send(f"❌ {ctx.author.mention} El monto debe ser mayor a 0.")
 
         if monto > MAX_BET:
-            return await ctx.send(f"No puedes apostar mas de {MAX_BET} {COIN}")
+            return await ctx.message.reply(f"No puedes apostar mas de {MAX_BET} {COIN}")
 
         if ctx.channel.id in _active_races:
             return await ctx.send(f"❌ {ctx.author.mention} Ya hay una carrera activa en este canal.")
