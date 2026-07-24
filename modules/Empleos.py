@@ -116,6 +116,42 @@ def _log_trabajar_error(empleo: str, error: Exception, usuario: str = "?", conte
         f"Usuario: {usuario} | {linea}"
     )
 
+
+async def _notificar_error_interaccion(interaction: Interaction):
+    """Da una respuesta válida a Discord cuando un tablero falla de forma inesperada."""
+    try:
+        if interaction.response.is_done():
+            await interaction.followup.send(
+                "❌ Ocurrió un error en la jornada. Consulta **!trabajar** nuevamente.",
+                ephemeral=True,
+            )
+        else:
+            await interaction.response.send_message(
+                "❌ Ocurrió un error en la jornada. Consulta **!trabajar** nuevamente.",
+                ephemeral=True,
+            )
+    except (discord.HTTPException, discord.NotFound):
+        pass
+
+
+async def _caducar_tablero(view: ui.View):
+    """Deshabilita un tablero vencido sin alterar pagos ni cooldowns."""
+    view.terminado = True
+    for child in view.children:
+        child.disabled = True
+
+    if not getattr(view, "message", None):
+        return
+
+    try:
+        embed = view.build_embed()
+        embed.color = discord.Color.dark_grey()
+        embed.set_footer(text="Jornada caducada. Consulta !trabajar para iniciar otra.")
+        await view.message.edit(embed=embed, view=view)
+    except (discord.HTTPException, discord.NotFound):
+        pass
+
+
 # ── CONFIG DESPIDOS ─────────────────────────────────────
 _despidos_config = {"activo": False}
 
@@ -302,6 +338,19 @@ async def get_all_empleos_activos():
             data["historial_reciente_de_jornadas"] = []
         result.append(data)
     return result
+
+
+async def get_all_experiencia_laboral():
+    """Devuelve el ranking completo de EXP laboral directamente desde la DB."""
+    if not pool:
+        return []
+    async with pool.acquire() as conn:
+        rows = await conn.fetch("""
+            SELECT user_id, empleo_actual, exp_laboral
+            FROM empleos_users
+            ORDER BY exp_laboral DESC, user_id ASC
+        """)
+    return [dict(row) for row in rows]
 
 
 async def limpiar_progreso(user_id):
@@ -968,6 +1017,7 @@ class LimpiadorView(ui.View):
         self.message = None
         self.puntos = 0
         self.terminado = False
+        self._interaction_lock = asyncio.Lock()
         self._generar_tablero()
         self._build_buttons()
 
@@ -993,22 +1043,27 @@ class LimpiadorView(ui.View):
         async def callback(interaction: Interaction):
             if interaction.user.id != self.author.id:
                 return await interaction.response.send_message("❌ Este tablero no es tuyo.", ephemeral=True)
-            if self.terminado:
+            if self._interaction_lock.locked():
                 return await interaction.response.defer()
-            if self.revelados[idx]:
-                return await interaction.response.send_message("✅ Esa casilla ya está descubierta.", ephemeral=True)
-            self.revelados[idx] = True
-            self.puntos += 1
-            if self.tablero[idx] == "🗑️":
-                self.basura -= 1
-            else:
-                self.celdas_erroneas.add(idx)
-            terminar_ahora = self.basura == 0
-            if terminar_ahora:
-                self.terminado = True
-                self.stop()
-            self._build_buttons()
-            await interaction.response.edit_message(embed=self.build_embed(), view=self)
+
+            terminar_ahora = False
+            async with self._interaction_lock:
+                if self.terminado:
+                    return await interaction.response.send_message("⌛ Esta jornada ya finalizó.", ephemeral=True)
+                if self.revelados[idx]:
+                    return await interaction.response.send_message("✅ Esa casilla ya está descubierta.", ephemeral=True)
+                self.revelados[idx] = True
+                self.puntos += 1
+                if self.tablero[idx] == "🗑️":
+                    self.basura -= 1
+                else:
+                    self.celdas_erroneas.add(idx)
+                terminar_ahora = self.basura == 0
+                if terminar_ahora:
+                    self.terminado = True
+                    self.stop()
+                self._build_buttons()
+                await interaction.response.edit_message(embed=self.build_embed(), view=self)
             if terminar_ahora:
                 await self._terminar(interaction, exito=True)
         return callback
@@ -1059,9 +1114,11 @@ class LimpiadorView(ui.View):
 
     async def on_error(self, interaction: Interaction, error: Exception, item):
         _log_trabajar_error("Limpiador", error, interaction.user.name, f"on_error — Item: {item}")
+        await _notificar_error_interaccion(interaction)
 
     async def on_timeout(self):
         logger.warning(f"[TRABAJAR/LIMPIADOR] on_timeout — Usuario: {self.author.name}")
+        await _caducar_tablero(self)
 
     async def _cleanup(self):
         await asyncio.sleep(180)
@@ -1086,6 +1143,7 @@ class IngenieroView(ui.View):
         self.bloqueado = False
         self.erroneas = set()
         self.terminado = False
+        self._interaction_lock = asyncio.Lock()
         self._generar_tablero()
         self._build_buttons()
 
@@ -1115,37 +1173,45 @@ class IngenieroView(ui.View):
         async def callback(interaction: Interaction):
             if interaction.user.id != self.author.id:
                 return await interaction.response.send_message("❌ Este tablero no es tuyo.", ephemeral=True)
-            if self.bloqueado or self.terminado or self.revelados[idx] or idx in self.seleccion:
-                return
-            self.seleccion.append(idx)
-            self._build_buttons()
-            await interaction.response.edit_message(embed=self.build_embed(), view=self)
-            if len(self.seleccion) == 2:
-                self.bloqueado = True
-                i1, i2 = self.seleccion
-                if self.tablero[i1] == self.tablero[i2]:
-                    self.revelados[i1] = True
-                    self.revelados[i2] = True
-                    self.pares += 1
-                    self.seleccion = []
-                    self.bloqueado = False
-                    self._build_buttons()
-                    await interaction.edit_original_response(embed=self.build_embed(), view=self)
-                    if self.pares == 4:
-                        self.terminado = True
-                        self.stop()
-                        await self._terminar(interaction, exito=True)
-                    return
+            if self._interaction_lock.locked():
+                return await interaction.response.defer()
 
-                self.erroneas = {i1, i2}
+            terminar_ahora = False
+            async with self._interaction_lock:
+                if self.bloqueado or self.terminado or self.revelados[idx] or idx in self.seleccion:
+                    return await interaction.response.defer()
+                self.seleccion.append(idx)
                 self._build_buttons()
-                await interaction.edit_original_response(embed=self.build_embed(), view=self)
-                await asyncio.sleep(2)
-                self.erroneas.clear()
-                self.seleccion = []
-                self.bloqueado = False
-                self._build_buttons()
-                await interaction.edit_original_response(embed=self.build_embed(), view=self)
+                await interaction.response.edit_message(embed=self.build_embed(), view=self)
+                if len(self.seleccion) == 2:
+                    self.bloqueado = True
+                    i1, i2 = self.seleccion
+                    if self.tablero[i1] == self.tablero[i2]:
+                        self.revelados[i1] = True
+                        self.revelados[i2] = True
+                        self.pares += 1
+                        self.seleccion = []
+                        self.bloqueado = False
+                        self._build_buttons()
+                        await interaction.edit_original_response(embed=self.build_embed(), view=self)
+                        if self.pares == 4:
+                            self.terminado = True
+                            self.stop()
+                            terminar_ahora = True
+                    else:
+                        self.erroneas = {i1, i2}
+                        self._build_buttons()
+                        await interaction.edit_original_response(embed=self.build_embed(), view=self)
+                        await asyncio.sleep(2)
+                        if self.terminado:
+                            return
+                        self.erroneas.clear()
+                        self.seleccion = []
+                        self.bloqueado = False
+                        self._build_buttons()
+                        await interaction.edit_original_response(embed=self.build_embed(), view=self)
+            if terminar_ahora:
+                await self._terminar(interaction, exito=True)
         return callback
 
     def build_embed(self):
@@ -1193,9 +1259,11 @@ class IngenieroView(ui.View):
 
     async def on_error(self, interaction: Interaction, error: Exception, item):
         _log_trabajar_error("Ingeniero", error, interaction.user.name, f"on_error — Item: {item}")
+        await _notificar_error_interaccion(interaction)
 
     async def on_timeout(self):
         logger.warning(f"[TRABAJAR/INGENIERO] on_timeout — Usuario: {self.author.name}")
+        await _caducar_tablero(self)
 
 
 class PlomeroView(ui.View):
@@ -1211,6 +1279,7 @@ class PlomeroView(ui.View):
         self.hallazgos = 0
         self.max_intentos = 6
         self.terminado = False
+        self._interaction_lock = asyncio.Lock()
         self._generar_tablero()
         self._build_buttons()
 
@@ -1234,25 +1303,29 @@ class PlomeroView(ui.View):
         async def callback(interaction: Interaction):
             if interaction.user.id != self.author.id:
                 return await interaction.response.send_message("❌ Este tablero no es tuyo.", ephemeral=True)
-            if self.terminado:
+            if self._interaction_lock.locked():
                 return await interaction.response.defer()
-            if self.revelados[idx]:
-                return await interaction.response.send_message("✅ Esa casilla ya está abierta.", ephemeral=True)
-            self.revelados[idx] = True
-            if self.tablero[idx] == "💣":
-                self.hallazgos += 1
-            else:
-                self.intentos += 1
+
             terminar_exito = None
-            if self.hallazgos >= 3:
-                terminar_exito = True
-            elif self.intentos >= self.max_intentos:
-                terminar_exito = False
-            if terminar_exito is not None:
-                self.terminado = True
-                self.stop()
-            self._build_buttons()
-            await interaction.response.edit_message(embed=self.build_embed(), view=self)
+            async with self._interaction_lock:
+                if self.terminado:
+                    return await interaction.response.send_message("⌛ Esta jornada ya finalizó.", ephemeral=True)
+                if self.revelados[idx]:
+                    return await interaction.response.send_message("✅ Esa casilla ya está abierta.", ephemeral=True)
+                self.revelados[idx] = True
+                if self.tablero[idx] == "💣":
+                    self.hallazgos += 1
+                else:
+                    self.intentos += 1
+                if self.hallazgos >= 3:
+                    terminar_exito = True
+                elif self.intentos >= self.max_intentos:
+                    terminar_exito = False
+                if terminar_exito is not None:
+                    self.terminado = True
+                    self.stop()
+                self._build_buttons()
+                await interaction.response.edit_message(embed=self.build_embed(), view=self)
             if terminar_exito is not None:
                 await self._terminar(interaction, exito=terminar_exito)
         return callback
@@ -1304,9 +1377,11 @@ class PlomeroView(ui.View):
 
     async def on_error(self, interaction: Interaction, error: Exception, item):
         _log_trabajar_error("Plomero", error, interaction.user.name, f"on_error — Item: {item}")
+        await _notificar_error_interaccion(interaction)
 
     async def on_timeout(self):
         logger.warning(f"[TRABAJAR/PLOMERO] on_timeout — Usuario: {self.author.name}")
+        await _caducar_tablero(self)
 
 
 async def setup(bot):

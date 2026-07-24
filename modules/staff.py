@@ -30,7 +30,10 @@ from core.config import (
     STAFF_ROLE_ID, COORDINADOR_ROLE_ID
 )
 from modules.memo import _memo_cooldowns
-from modules.Empleos import _EMPLEOS_CACHE, get_empleo_user, save_empleo_user, get_all_empleos_activos
+from modules.Empleos import (
+    _EMPLEOS_CACHE, get_empleo_user, save_empleo_user,
+    get_all_empleos_activos, get_all_experiencia_laboral,
+)
 
 EVENTO_THUMBNAIL_URL = "https://pub-a09b3609b6b34dfab5c7aa7742cd1a8a.r2.dev/Purple%20jack%20Harcode/PurpleThumb.png"
 EVENTO_TOP_ICON = "<:ygoldstar:1004555717610590258>"
@@ -326,6 +329,72 @@ class SaldosPaginationView(discord.ui.View):
         await interaction.response.edit_message(embed=create_economia_menu_embed(), view=EconomiaView(self.author_id))
 
 
+class ExperienciaLaboralPaginationView(discord.ui.View):
+    PAGE_SIZE = 10
+
+    def __init__(self, author_id: int, guild: discord.Guild, rows: list[dict]):
+        super().__init__(timeout=300)
+        self.author_id = author_id
+        self.guild = guild
+        self.rows = rows
+        self.page = 0
+        self.message = None
+        self._actualizar_botones()
+
+    def _actualizar_botones(self):
+        total_pages = max(1, ceil(len(self.rows) / self.PAGE_SIZE))
+        self.anterior.disabled = self.page == 0
+        self.siguiente.disabled = self.page >= total_pages - 1
+
+    def get_embed(self):
+        self._actualizar_botones()
+        total_pages = max(1, ceil(len(self.rows) / self.PAGE_SIZE))
+        start = self.page * self.PAGE_SIZE
+        page_rows = self.rows[start:start + self.PAGE_SIZE]
+
+        embed = discord.Embed(title="⭐ EXP Laboral", color=discord.Color.blurple())
+        if not page_rows:
+            embed.description = "No hay registros de experiencia laboral actualmente."
+        else:
+            lines = ["Pos | Usuario               | Empleo       | EXP"]
+            lines.append("----+-----------------------+--------------+-----")
+            for position, row in enumerate(page_rows, start=start + 1):
+                member = self.guild.get_member(row["user_id"])
+                nick = member.nick or member.display_name if member else f"ID {row['user_id']}"
+                nick = nick.replace("`", "'")[:20]
+                empleo = (row.get("empleo_actual") or "Sin empleo").title().replace("`", "'")[:12]
+                lines.append(f"{position:>3} | {nick:<21} | {empleo:<12} | {row.get('exp_laboral', 0):>3}")
+            embed.description = f"```\n{'\n'.join(lines)}\n```"
+
+        embed.set_footer(text=f"Página {self.page + 1}/{total_pages} • {len(self.rows)} registros")
+        return embed
+
+    async def interaction_check(self, interaction: discord.Interaction) -> bool:
+        if interaction.user.id == self.author_id:
+            return True
+        await interaction.response.send_message("❌ Solo quien ejecutó el comando puede usar estos botones.", ephemeral=True)
+        return False
+
+    @discord.ui.button(label="Anterior", style=discord.ButtonStyle.secondary)
+    async def anterior(self, interaction: discord.Interaction, button: discord.ui.Button):
+        self.page -= 1
+        await interaction.response.edit_message(embed=self.get_embed(), view=self)
+
+    @discord.ui.button(label="Siguiente", style=discord.ButtonStyle.secondary)
+    async def siguiente(self, interaction: discord.Interaction, button: discord.ui.Button):
+        self.page += 1
+        await interaction.response.edit_message(embed=self.get_embed(), view=self)
+
+    async def on_timeout(self):
+        for child in self.children:
+            child.disabled = True
+        if self.message:
+            try:
+                await self.message.edit(view=self)
+            except (discord.HTTPException, discord.NotFound):
+                pass
+
+
 class EconomiaView(discord.ui.View):
     def __init__(self, author_id):
         super().__init__(timeout=180)
@@ -589,6 +658,14 @@ class Staff(commands.Cog):
             f"✅ Se otorgaron **{xp}** puntos de XP Laboral a {usuario.mention}.",
             ephemeral=False,
         )
+
+    @app_commands.command(name="ver_exp_laboral", description="Consulta la EXP laboral de todos los usuarios")
+    @is_staff()
+    async def ver_exp_laboral(self, interaction: discord.Interaction):
+        await interaction.response.defer(ephemeral=True)
+        rows = await get_all_experiencia_laboral()
+        view = ExperienciaLaboralPaginationView(interaction.user.id, interaction.guild, rows)
+        view.message = await interaction.edit_original_response(embed=view.get_embed(), view=view)
 
     @app_commands.command(name="reset_exp_laboral", description="Reinicia la XP Laboral de un usuario o de todos")
     @app_commands.describe(
@@ -1030,7 +1107,9 @@ class Staff(commands.Cog):
         nuevo_nombre="Nuevo nombre. Vacío = sin cambio. Opcional.",
         nuevo_precio="Nuevo precio. Vacío = sin cambio. Opcional.",
         nueva_desc="Nueva descripción corta. Vacío = sin cambio. Opcional.",
-        nuevo_mensaje_uso="Nuevo mensaje al usar el item. Vacío = sin cambio. Opcional."
+        nuevo_mensaje_uso="Nuevo mensaje al usar el item. Vacío = sin cambio. Opcional.",
+        cantidad_por_user="Límite de compras por usuario. 0 = ilimitado. Opcional.",
+        limite_uso="Máximo de usos diarios por usuario. 0 = ilimitado. Opcional."
     )
     @is_staff()
     async def editar_item(self, interaction,
@@ -1038,7 +1117,9 @@ class Staff(commands.Cog):
                           nuevo_nombre: str = "",
                           nuevo_precio: int = None,
                           nueva_desc: str = "",
-                          nuevo_mensaje_uso: str = ""):
+                          nuevo_mensaje_uso: str = "",
+                          cantidad_por_user: int = None,
+                          limite_uso: int = None):
 
         await interaction.response.defer()
 
@@ -1049,7 +1130,19 @@ class Staff(commands.Cog):
                     f"❌ Item **{item}** no encontrado.", ephemeral=True
                 )
 
-            if not any([nuevo_nombre, nuevo_precio is not None, nueva_desc, nuevo_mensaje_uso]):
+            if cantidad_por_user is not None and cantidad_por_user < 0:
+                return await interaction.followup.send(
+                    "❌ La cantidad por usuario no puede ser negativa.", ephemeral=True
+                )
+            if limite_uso is not None and limite_uso < 0:
+                return await interaction.followup.send(
+                    "❌ El límite de uso no puede ser negativo.", ephemeral=True
+                )
+
+            if not any([
+                nuevo_nombre, nuevo_precio is not None, nueva_desc, nuevo_mensaje_uso,
+                cantidad_por_user is not None, limite_uso is not None,
+            ]):
                 return await interaction.followup.send(
                     "❌ Debes cambiar al menos un campo.", ephemeral=True
                 )
@@ -1059,7 +1152,11 @@ class Staff(commands.Cog):
             desc = nueva_desc.strip() or None
             msg_uso = nuevo_mensaje_uso.strip() if nuevo_mensaje_uso.strip() else None
 
-            await edit_item(found["id"], nombre=nombre, precio=precio, descripcion=desc, mensaje_uso=msg_uso)
+            await edit_item(
+                found["id"], nombre=nombre, precio=precio, descripcion=desc,
+                mensaje_uso=msg_uso, limite_por_usuario=cantidad_por_user,
+                limite_uso=limite_uso,
+            )
 
             cambios = []
             if nombre:
@@ -1070,6 +1167,16 @@ class Staff(commands.Cog):
                 cambios.append(f"• Descripción: **{desc}**")
             if msg_uso is not None:
                 cambios.append(f"• Mensaje de uso: **{msg_uso}**")
+            if cantidad_por_user is not None:
+                limite_anterior = found.get("limite_por_usuario", 0) or 0
+                limite_nuevo = cantidad_por_user if cantidad_por_user > 0 else "∞"
+                limite_anterior = limite_anterior if limite_anterior > 0 else "∞"
+                cambios.append(f"• Límite por usuario: **{limite_anterior}** → **{limite_nuevo}**")
+            if limite_uso is not None:
+                usos_anteriores = found.get("limite_uso", 0) or 0
+                usos_nuevos = limite_uso if limite_uso > 0 else "∞"
+                usos_anteriores = usos_anteriores if usos_anteriores > 0 else "∞"
+                cambios.append(f"• Usos por día: **{usos_anteriores}** → **{usos_nuevos}**")
 
             icono = found["icono"] if found["icono"] else "🔹"
             await interaction.followup.send(
