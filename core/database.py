@@ -1319,6 +1319,153 @@ async def remove_inventory_quantity(user_id: int, item_id: int, cantidad: int):
     return {"ok": True, "remaining": restante}
 
 
+async def consume_inventory_item(
+    user_id: int,
+    item_id: int,
+    *,
+    daily_limit: int = 0,
+    guild_id: int | None = None,
+    role_id: int | None = None,
+    role_duration: int = 0,
+):
+    """
+    Consume una unidad y registra límite/rol temporal en una sola transacción.
+    Debe invocarse únicamente después de verificar la entrega del rol en Discord.
+    """
+    from datetime import date
+
+    today = date.today()
+    expires_at = None
+    async with pool.acquire() as conn:
+        async with conn.transaction():
+            row = await conn.fetchrow(
+                """
+                SELECT cantidad FROM inventario
+                WHERE user_id=$1 AND item_id=$2
+                FOR UPDATE
+                """,
+                user_id,
+                item_id,
+            )
+            if not row or row["cantidad"] <= 0:
+                return {"ok": False, "reason": "not_owned"}
+
+            if daily_limit > 0:
+                await conn.execute(
+                    """
+                    INSERT INTO item_uso_diario (user_id, item_id, fecha, usos)
+                    VALUES ($1, $2, $3, 0)
+                    ON CONFLICT (user_id, item_id, fecha) DO NOTHING
+                    """,
+                    user_id,
+                    item_id,
+                    today,
+                )
+                usage = await conn.fetchrow(
+                    """
+                    SELECT usos FROM item_uso_diario
+                    WHERE user_id=$1 AND item_id=$2 AND fecha=$3
+                    FOR UPDATE
+                    """,
+                    user_id,
+                    item_id,
+                    today,
+                )
+                uses_today = usage["usos"] if usage else 0
+                if uses_today >= daily_limit:
+                    return {
+                        "ok": False,
+                        "reason": "daily_limit",
+                        "uses": uses_today,
+                    }
+
+            remaining = row["cantidad"] - 1
+            if remaining:
+                await conn.execute(
+                    """
+                    UPDATE inventario SET cantidad=$1
+                    WHERE user_id=$2 AND item_id=$3
+                    """,
+                    remaining,
+                    user_id,
+                    item_id,
+                )
+            else:
+                await conn.execute(
+                    "DELETE FROM inventario WHERE user_id=$1 AND item_id=$2",
+                    user_id,
+                    item_id,
+                )
+
+            if daily_limit > 0:
+                await conn.execute(
+                    """
+                    UPDATE item_uso_diario SET usos=usos+1
+                    WHERE user_id=$1 AND item_id=$2 AND fecha=$3
+                    """,
+                    user_id,
+                    item_id,
+                    today,
+                )
+
+            if guild_id is not None and role_id is not None:
+                existing_rows = await conn.fetch(
+                    """
+                    SELECT id, expira_en FROM cargos_temporales
+                    WHERE user_id=$1 AND guild_id=$2 AND rol_id=$3
+                    FOR UPDATE
+                    """,
+                    user_id,
+                    guild_id,
+                    role_id,
+                )
+                await conn.execute(
+                    """
+                    DELETE FROM cargos_temporales
+                    WHERE user_id=$1 AND guild_id=$2 AND rol_id=$3
+                    """,
+                    user_id,
+                    guild_id,
+                    role_id,
+                )
+
+                if role_duration > 0:
+                    now = time.time()
+                    previous_expiry = max(
+                        (record["expira_en"] for record in existing_rows),
+                        default=0,
+                    )
+                    expires_at = max(now, previous_expiry) + role_duration
+                    await conn.execute(
+                        """
+                        INSERT INTO cargos_temporales
+                            (user_id, guild_id, rol_id, expira_en)
+                        VALUES ($1, $2, $3, $4)
+                        """,
+                        user_id,
+                        guild_id,
+                        role_id,
+                        expires_at,
+                    )
+
+    cache.invalidate_inventory_cache(user_id)
+    if guild_id is not None and role_id is not None:
+        if expires_at is not None:
+            cache.upsert_cargo_cache(
+                user_id,
+                guild_id,
+                role_id,
+                expires_at,
+            )
+        else:
+            cache.remove_cargo_cache(user_id, role_id, guild_id)
+    return {
+        "ok": True,
+        "remaining": remaining,
+        "expires_at": expires_at,
+    }
+
+
 async def get_usos_diarios(user_id: int, item_id: int) -> int:
     from datetime import date
     today = date.today()
@@ -1374,7 +1521,12 @@ async def load_cargos_to_cache():
     now = time.time()
     async with pool.acquire() as conn:
         rows = await conn.fetch(
-            "SELECT user_id, guild_id, rol_id, expira_en FROM cargos_temporales WHERE expira_en > $1",
+            """
+            SELECT user_id, guild_id, rol_id, MAX(expira_en) AS expira_en
+            FROM cargos_temporales
+            WHERE expira_en > $1
+            GROUP BY user_id, guild_id, rol_id
+            """,
             now
         )
     data = {}
@@ -1391,19 +1543,62 @@ async def load_cargos_to_cache():
 
 async def add_cargo_temporal(user_id, guild_id, rol_id, expira_en):
     async with pool.acquire() as conn:
-        await conn.execute("""
-            INSERT INTO cargos_temporales (user_id, guild_id, rol_id, expira_en)
-            VALUES ($1, $2, $3, $4)
-        """, user_id, guild_id, rol_id, expira_en)
-    cache.add_cargo_cache(user_id, guild_id, rol_id, expira_en)
+        async with conn.transaction():
+            rows = await conn.fetch(
+                """
+                SELECT id, expira_en FROM cargos_temporales
+                WHERE user_id=$1 AND guild_id=$2 AND rol_id=$3
+                FOR UPDATE
+                """,
+                user_id,
+                guild_id,
+                rol_id,
+            )
+            expira_en = max(
+                expira_en,
+                max((row["expira_en"] for row in rows), default=0),
+            )
+            await conn.execute(
+                """
+                DELETE FROM cargos_temporales
+                WHERE user_id=$1 AND guild_id=$2 AND rol_id=$3
+                """,
+                user_id,
+                guild_id,
+                rol_id,
+            )
+            await conn.execute(
+                """
+                INSERT INTO cargos_temporales
+                    (user_id, guild_id, rol_id, expira_en)
+                VALUES ($1, $2, $3, $4)
+                """,
+                user_id,
+                guild_id,
+                rol_id,
+                expira_en,
+            )
+    cache.upsert_cargo_cache(user_id, guild_id, rol_id, expira_en)
 
-async def delete_cargo_temporal(user_id, rol_id):
+async def delete_cargo_temporal(user_id, rol_id, guild_id=None):
     async with pool.acquire() as conn:
-        await conn.execute(
-            "DELETE FROM cargos_temporales WHERE user_id=$1 AND rol_id=$2",
-            user_id, rol_id
-        )
-    cache.remove_cargo_cache(user_id, rol_id)
+        if guild_id is None:
+            await conn.execute(
+                "DELETE FROM cargos_temporales WHERE user_id=$1 AND rol_id=$2",
+                user_id,
+                rol_id,
+            )
+        else:
+            await conn.execute(
+                """
+                DELETE FROM cargos_temporales
+                WHERE user_id=$1 AND rol_id=$2 AND guild_id=$3
+                """,
+                user_id,
+                rol_id,
+                guild_id,
+            )
+    cache.remove_cargo_cache(user_id, rol_id, guild_id)
 
 
 async def load_item_role_restrictions_to_cache():

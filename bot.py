@@ -108,20 +108,37 @@ async def check_cargos_loop():
                     vencidos.append((user_id, cargo["guild_id"], cargo["rol_id"]))
 
         for user_id, guild_id, rol_id in vencidos:
-            try:
-                guild = bot.get_guild(guild_id)
-                if not guild:
-                    continue
-                member = guild.get_member(user_id)
-                if not member:
-                    member = await guild.fetch_member(user_id)
-                role = guild.get_role(rol_id)
-                if role and role in member.roles:
-                    await member.remove_roles(role)
-            except Exception as e:
-                logger.warning(f"Error removiendo cargo {rol_id} a {user_id}: {e}")
-            finally:
-                await delete_cargo_temporal(user_id, rol_id)
+            role_lock = cache.get_role_assignment_lock(
+                user_id,
+                guild_id,
+                rol_id,
+            )
+            async with role_lock:
+                try:
+                    latest = next(
+                        (
+                            cargo
+                            for cargo in cache.get_cargos_cache().get(user_id, [])
+                            if cargo["guild_id"] == guild_id
+                            and cargo["rol_id"] == rol_id
+                        ),
+                        None,
+                    )
+                    if latest and latest["expira_en"] > time.time():
+                        continue
+
+                    guild = bot.get_guild(guild_id)
+                    if not guild:
+                        continue
+                    member = guild.get_member(user_id)
+                    if not member:
+                        member = await guild.fetch_member(user_id)
+                    role = guild.get_role(rol_id)
+                    if role and role in member.roles:
+                        await member.remove_roles(role)
+                    await delete_cargo_temporal(user_id, rol_id, guild_id)
+                except Exception as e:
+                    logger.warning(f"Error removiendo cargo {rol_id} a {user_id}: {e}")
 
         if vencidos:
             logger.info(f"Cargos temporales vencidos removidos: {len(vencidos)}")

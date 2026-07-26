@@ -4,7 +4,7 @@ import logging
 import asyncio
 from core.database import (
     update_bank, get_all_items, get_item_by_name, purchase_item,
-    get_inventory, remove_from_inventory, add_cargo_temporal
+    get_inventory, consume_inventory_item
 )
 from core import cache
 from core.config import COIN, LOG_CHANNEL_ID, TARJETA_CREDITO_ROL_ID, STAFF_ROLE_ID
@@ -18,6 +18,16 @@ ITEMS_PER_PAGE = 5
 PURPLE = 0x9B59B6
 SHOP_EXPIRE_SECONDS = 150
 SHOP_EXPIRED_MESSAGE = "Tienda Caducó, consulte la tienda nuevamente"
+_item_use_locks = {}
+
+
+def _get_item_use_lock(user_id: int, item_id: int) -> asyncio.Lock:
+    key = (user_id, item_id)
+    lock = _item_use_locks.get(key)
+    if lock is None:
+        lock = asyncio.Lock()
+        _item_use_locks[key] = lock
+    return lock
 
 
 # ── CONFIRMACION DE COMPRA ─────────────────────────────
@@ -428,9 +438,26 @@ class UseButton(discord.ui.Button):
                 "❌ Este panel no fue generado por ti.", ephemeral=True
             )
 
-        await interaction.response.defer(ephemeral=True)
+        use_lock = _get_item_use_lock(
+            interaction.user.id,
+            self.item["id"],
+        )
+        if use_lock.locked():
+            return await interaction.response.send_message(
+                f"⏳ Ya estoy procesando el uso de **{self.item['nombre']}**. "
+                "Espera la confirmación antes de intentarlo otra vez.",
+                ephemeral=True,
+            )
 
+        await use_lock.acquire()
+        role = None
+        member = None
+        assigned_new_role = False
+        consumed = False
+        role_lock = None
+        role_lock_acquired = False
         try:
+            await interaction.response.defer(ephemeral=True)
             items = await get_inventory(interaction.user.id)
             item = next((i for i in items if i["id"] == self.item["id"]), None)
 
@@ -456,23 +483,73 @@ class UseButton(discord.ui.Button):
                 role = self.guild.get_role(int(item["rol_id"]))
                 if not role:
                     return await interaction.followup.send(
-                        "❌ El rol configurado para este item no existe en el servidor.",
+                        f"❌ El rol configurado para **{item['nombre']}** ya no existe. "
+                        "El item no fue consumido; avisa al Staff.",
                         ephemeral=True
                     )
 
-                member = self.guild.get_member(interaction.user.id)
-                if member is None:
+                role_lock = cache.get_role_assignment_lock(
+                    interaction.user.id,
+                    self.guild.id,
+                    role.id,
+                )
+                await role_lock.acquire()
+                role_lock_acquired = True
+
+                if role.is_default() or role.managed:
+                    return await interaction.followup.send(
+                        f"❌ Discord no permite asignar el rol configurado para "
+                        f"**{item['nombre']}**. El item no fue consumido; avisa al Staff.",
+                        ephemeral=True,
+                    )
+
+                bot_member = self.guild.me
+                if bot_member is None and self.bot.user is not None:
                     try:
-                        member = await self.guild.fetch_member(interaction.user.id)
-                    except Exception as e:
-                        logger.warning(
-                            f"No se pudo obtener member para usar item {item['nombre']} "
-                            f"({interaction.user.id}): {e}"
-                        )
-                        return await interaction.followup.send(
-                            "❌ No pude verificar tu miembro en el servidor. El item no fue consumido.",
-                            ephemeral=True
-                        )
+                        bot_member = await self.guild.fetch_member(self.bot.user.id)
+                    except discord.HTTPException:
+                        bot_member = None
+                if (
+                    bot_member is None
+                    or not bot_member.guild_permissions.manage_roles
+                    or role.position >= bot_member.top_role.position
+                ):
+                    return await interaction.followup.send(
+                        f"❌ No puedo otorgar {role.mention} por permisos o jerarquía. "
+                        f"**{item['nombre']} no fue consumido.** Avisa al Staff.",
+                        ephemeral=True,
+                    )
+
+                try:
+                    member = await self.guild.fetch_member(interaction.user.id)
+                except discord.HTTPException as e:
+                    logger.warning(
+                        "No se pudo refrescar el miembro %s para usar item %s: %s",
+                        interaction.user.id,
+                        item["id"],
+                        e,
+                    )
+                    return await interaction.followup.send(
+                        f"❌ No pude verificar tu cuenta en el servidor. "
+                        f"**{item['nombre']} no fue consumido.** Intenta usarlo nuevamente.",
+                        ephemeral=True,
+                    )
+
+                role_was_present = role.id in {r.id for r in member.roles}
+                duration = item.get("duracion", 0) or 0
+                active_role_expirations = [
+                    cargo["expira_en"]
+                    for cargo in cache.get_cargos_cache().get(interaction.user.id, [])
+                    if cargo.get("guild_id") == self.guild.id
+                    and cargo.get("rol_id") == role.id
+                    and cargo.get("expira_en", 0) > time.time()
+                ]
+                if role_was_present and not active_role_expirations:
+                    return await interaction.followup.send(
+                        f"ℹ️ Ya posees {role.mention}. "
+                        f"**{item['nombre']} no fue consumido.**",
+                        ephemeral=True,
+                    )
 
                 restricted_role_ids = cache.get_restricted_item_role_ids()
                 if role.id in restricted_role_ids:
@@ -506,63 +583,127 @@ class UseButton(discord.ui.Button):
                             )
                         return await interaction.followup.send(message, ephemeral=True)
 
-                try:
-                    await member.add_roles(role, reason=f"Uso de item {item['nombre']} en Purple Jack")
-                except discord.Forbidden:
-                    return await interaction.followup.send(
-                        "❌ No tengo permisos o jerarquía suficiente para otorgar ese rol. El item no fue consumido.",
-                        ephemeral=True
-                    )
-                except discord.HTTPException as e:
-                    logger.warning(
-                        f"Discord no pudo asignar rol {role.id} por item {item['nombre']} "
-                        f"a {interaction.user.id}: {e}"
-                    )
-                    return await interaction.followup.send(
-                        "❌ Discord no confirmó la entrega del rol. El item no fue consumido.",
-                        ephemeral=True
-                    )
-
-                try:
-                    member_check = await self.guild.fetch_member(interaction.user.id)
-                except Exception:
-                    member_check = member
-
-                if role.id not in {r.id for r in member_check.roles}:
-                    return await interaction.followup.send(
-                        "❌ No se pudo confirmar que el rol fue entregado. El item no fue consumido.",
-                        ephemeral=True
-                    )
-
-            removed = await remove_from_inventory(interaction.user.id, item["nombre"])
-            if not removed:
-                if role:
+                if not role_was_present:
                     try:
-                        await interaction.user.remove_roles(role)
-                    except Exception:
-                        pass
-                return await interaction.followup.send(
-                    f"❌ Ya no tienes **{item['nombre']}** en tu inventario.", ephemeral=True
-                )
+                        await member.add_roles(
+                            role,
+                            reason=f"Uso de item {item['nombre']} en Purple Jack",
+                        )
+                        assigned_new_role = True
+                    except discord.Forbidden:
+                        return await interaction.followup.send(
+                            f"❌ No tengo permisos o jerarquía para otorgar {role.mention}. "
+                            f"**{item['nombre']} no fue consumido.** Avisa al Staff.",
+                            ephemeral=True,
+                        )
+                    except discord.HTTPException as e:
+                        logger.warning(
+                            "Discord no pudo asignar rol %s por item %s a %s: %s",
+                            role.id,
+                            item["id"],
+                            interaction.user.id,
+                            e,
+                        )
+                        return await interaction.followup.send(
+                            f"❌ Discord no confirmó la entrega de {role.mention}. "
+                            f"**{item['nombre']} no fue consumido.** Intenta usarlo nuevamente.",
+                            ephemeral=True,
+                        )
 
-            if role:
-                duracion = item.get("duracion", 0)
-                if duracion and duracion > 0:
-                    expira_en = time.time() + duracion
-                    await add_cargo_temporal(
+                member_check = None
+                verification_error = None
+                for attempt in range(3):
+                    try:
+                        member_check = await self.guild.fetch_member(
+                            interaction.user.id
+                        )
+                        if role.id in {r.id for r in member_check.roles}:
+                            break
+                    except discord.HTTPException as error:
+                        verification_error = error
+                    if attempt < 2:
+                        await asyncio.sleep(0.75)
+
+                if (
+                    member_check is None
+                    or role.id not in {r.id for r in member_check.roles}
+                ):
+                    if assigned_new_role:
+                        try:
+                            await member.remove_roles(
+                                role,
+                                reason=(
+                                    f"Rollback: no se verificó uso de item "
+                                    f"{item['nombre']}"
+                                ),
+                            )
+                        except discord.HTTPException as rollback_error:
+                            logger.error(
+                                "No se pudo revertir rol %s de %s tras fallo de "
+                                "verificación: %s",
+                                role.id,
+                                interaction.user.id,
+                                rollback_error,
+                            )
+                    logger.warning(
+                        "Rol %s no verificable para usuario %s tras item %s: %s",
+                        role.id,
                         interaction.user.id,
-                        self.guild.id,
-                        int(item["rol_id"]),
-                        expira_en
+                        item["id"],
+                        verification_error,
+                    )
+                    return await interaction.followup.send(
+                        f"❌ No pude verificar fidedignamente la entrega de {role.mention}. "
+                        f"**{item['nombre']} no fue consumido.** Intenta utilizarlo nuevamente.",
+                        ephemeral=True,
                     )
 
-            # ── Registrar uso diario si tiene límite ───
-            if limite_uso and limite_uso > 0:
-                from core.database import registrar_uso_diario
-                await registrar_uso_diario(interaction.user.id, item["id"])
+            duration = item.get("duracion", 0) or 0
+            consumption = await consume_inventory_item(
+                interaction.user.id,
+                item["id"],
+                daily_limit=limite_uso or 0,
+                guild_id=self.guild.id if role else None,
+                role_id=role.id if role else None,
+                role_duration=duration if role else 0,
+            )
+            if not consumption["ok"]:
+                if role and assigned_new_role:
+                    try:
+                        await member.remove_roles(
+                            role,
+                            reason=(
+                                f"Rollback: no se consumió item {item['nombre']}"
+                            ),
+                        )
+                    except discord.HTTPException as rollback_error:
+                        logger.error(
+                            "No se pudo revertir rol %s de %s tras fallo de "
+                            "consumo: %s",
+                            role.id,
+                            interaction.user.id,
+                            rollback_error,
+                        )
+                if consumption["reason"] == "daily_limit":
+                    return await interaction.followup.send(
+                        f"⏳ Alcanzaste el límite diario de **{item['nombre']}**. "
+                        "El item no fue consumido.",
+                        ephemeral=True,
+                    )
+                return await interaction.followup.send(
+                    f"❌ Ya no tienes **{item['nombre']}** disponible en tu inventario. "
+                    "El rol no fue activado por este uso.",
+                    ephemeral=True,
+                )
+            consumed = True
 
             icono = item["icono"] if item["icono"] else "🔹"
             mensaje = item["mensaje_uso"] if item["mensaje_uso"] else f"Usaste {icono} **{item['nombre']}**."
+            if role and consumption.get("expires_at"):
+                mensaje += (
+                    f"\n{role.mention} activo hasta "
+                    f"<t:{int(consumption['expires_at'])}:F>."
+                )
 
             await interaction.followup.send(
                 content=f"{interaction.user.mention} {mensaje}",
@@ -611,12 +752,44 @@ class UseButton(discord.ui.Button):
                         log_uso_channel_id,
                     )
 
-        except Exception as e:
-            logger.error(f"ERROR UseButton callback: {e}")
+        except Exception:
+            logger.exception(
+                "ERROR usando item %s para usuario %s",
+                self.item["id"],
+                interaction.user.id,
+            )
+            if role and assigned_new_role and not consumed and member:
+                try:
+                    await member.remove_roles(
+                        role,
+                        reason=f"Rollback por error usando item {self.item['nombre']}",
+                    )
+                except discord.HTTPException as rollback_error:
+                    logger.error(
+                        "No se pudo revertir rol %s de %s: %s",
+                        role.id,
+                        interaction.user.id,
+                        rollback_error,
+                    )
             try:
-                await interaction.followup.send("❌ Error al usar el item.", ephemeral=True)
+                if consumed:
+                    await interaction.followup.send(
+                        f"✅ **{self.item['nombre']} fue utilizado correctamente**, "
+                        "pero no pude actualizar el panel del inventario.",
+                        ephemeral=True,
+                    )
+                else:
+                    await interaction.followup.send(
+                        f"❌ Ocurrió un error al usar **{self.item['nombre']}**. "
+                        "El item no fue consumido; intenta utilizarlo nuevamente.",
+                        ephemeral=True,
+                    )
             except Exception:
                 pass
+        finally:
+            if role_lock_acquired:
+                role_lock.release()
+            use_lock.release()
 
 
 # ── INVENTARIO LAYOUT ──────────────────────────────────

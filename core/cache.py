@@ -240,6 +240,16 @@ def invalidate_inventory_cache(user_id):
 
 # ── CARGOS TEMPORALES ──────────────────────────────────
 _cargos_cache = {}
+_role_assignment_locks = {}
+
+
+def get_role_assignment_lock(user_id, guild_id, rol_id):
+    key = (user_id, guild_id, rol_id)
+    lock = _role_assignment_locks.get(key)
+    if lock is None:
+        lock = asyncio.Lock()
+        _role_assignment_locks[key] = lock
+    return lock
 
 def get_cargos_cache():
     return _cargos_cache
@@ -257,11 +267,34 @@ def add_cargo_cache(user_id, guild_id, rol_id, expira_en):
         "expira_en": expira_en,
     })
 
-def remove_cargo_cache(user_id, rol_id):
+
+def upsert_cargo_cache(user_id, guild_id, rol_id, expira_en):
+    """Mantiene una sola expiración vigente por usuario, servidor y rol."""
+    if user_id not in _cargos_cache:
+        _cargos_cache[user_id] = []
+    _cargos_cache[user_id] = [
+        cargo
+        for cargo in _cargos_cache[user_id]
+        if not (
+            cargo["guild_id"] == guild_id
+            and cargo["rol_id"] == rol_id
+        )
+    ]
+    _cargos_cache[user_id].append({
+        "rol_id": rol_id,
+        "guild_id": guild_id,
+        "expira_en": expira_en,
+    })
+
+
+def remove_cargo_cache(user_id, rol_id, guild_id=None):
     if user_id in _cargos_cache:
         _cargos_cache[user_id] = [
             c for c in _cargos_cache[user_id]
-            if c["rol_id"] != rol_id
+            if not (
+                c["rol_id"] == rol_id
+                and (guild_id is None or c["guild_id"] == guild_id)
+            )
         ]
         if not _cargos_cache[user_id]:
             del _cargos_cache[user_id]
