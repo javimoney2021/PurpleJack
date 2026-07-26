@@ -9,7 +9,7 @@ import discord
 from discord import ButtonStyle, Interaction, ui
 from discord.ext import commands
 
-from core.config import COIN
+from core.config import COIN, COORDINADOR_ROLE_ID
 from core.database import pool, update_bank
 
 logger = logging.getLogger("purplejack.empleos")
@@ -83,12 +83,27 @@ MAESTRIA_XP_COSTO = 150
 OFICINA_PANEL_SEGUNDOS = 300
 MAESTRIA_THUMBNAIL_URL = "https://pub-a09b3609b6b34dfab5c7aa7742cd1a8a.r2.dev/Purple%20jack%20Harcode/Maestria.png"
 
-# Estos empleos se presentan desde la Oficina, pero su jornada se desarrollará
-# en una fase posterior. La clave permanece normalizada para la persistencia.
 EMPLEOS_MAESTRIA = {
-    "chantajista": {"nombre": "Chantajista", "maestrias_requeridas": 1},
-    "cazador": {"nombre": "Cazador", "maestrias_requeridas": 2},
-    "piromano": {"nombre": "Píromano", "maestrias_requeridas": 3},
+    "chantajista": {
+        "nombre": "Chantajista",
+        "maestrias_requeridas": 1,
+        "dificultad": "Maestría",
+        "salario_min": 5000,
+        "salario_max": 5000,
+        "xp_ganada": 15,
+        "duracion_horas": 3,
+        "desarrollado": True,
+    },
+    "cazador": {
+        "nombre": "Cazador",
+        "maestrias_requeridas": 2,
+        "desarrollado": False,
+    },
+    "piromano": {
+        "nombre": "Píromano",
+        "maestrias_requeridas": 3,
+        "desarrollado": False,
+    },
 }
 
 # ── BONOS DE RACHA ──────────────────────────────────────
@@ -101,7 +116,10 @@ COOLDOWN_RENUNCIA_SEGUNDOS = 6 * 3600
 
 def _es_coordinador(member: discord.Member) -> bool:
     """True si el miembro posee el rol de bypass de cooldowns."""
-    return any(r.name == STAFF_BYPASS_ROL for r in member.roles)
+    return any(
+        r.id == COORDINADOR_ROLE_ID or r.name == STAFF_BYPASS_ROL
+        for r in member.roles
+    )
 
 
 # ── DEBUG DE INTERACCIONES ───────────────────────────────
@@ -156,6 +174,16 @@ async def _caducar_tablero(view: ui.View):
 _despidos_config = {"activo": False}
 
 _EMPLEOS_CACHE = {}
+_CONFIRMACION_EMPLEO_LOCKS = {}
+_JORNADAS_CHANTAJISTA_ACTIVAS = set()
+
+
+def _get_confirmacion_empleo_lock(user_id: int) -> asyncio.Lock:
+    lock = _CONFIRMACION_EMPLEO_LOCKS.get(user_id)
+    if lock is None:
+        lock = asyncio.Lock()
+        _CONFIRMACION_EMPLEO_LOCKS[user_id] = lock
+    return lock
 
 
 def format_relative_time(unix_ts: float) -> str:
@@ -537,13 +565,17 @@ def build_empleos_maestria_embed() -> discord.Embed:
 
 async def renunciar_empleo(member: discord.Member) -> tuple[bool, str]:
     """Aplica la misma baja y cooldown que el comando !renunciar."""
+    if member.id in _JORNADAS_CHANTAJISTA_ACTIVAS:
+        return False, "⌛ Finaliza primero tu jornada de Chantajista."
+
     data = await get_empleo_user(member.id)
     if not data or not data.get("empleo_actual"):
         return False, "❌ No posees un empleo activo."
 
+    bypass = _es_coordinador(member)
     data["ultimo_empleo"] = data.get("empleo_actual")
     data["progreso_requisito"] = data.get("progreso_permanencia", 0)
-    data["cooldown_renuncia"] = 0 if _es_coordinador(member) else time.time() + COOLDOWN_RENUNCIA_SEGUNDOS
+    data["cooldown_renuncia"] = 0 if bypass else time.time() + COOLDOWN_RENUNCIA_SEGUNDOS
     data["empleo_actual"] = None
     data["dificultad"] = None
     data["fecha_contratacion"] = 0
@@ -551,6 +583,8 @@ async def renunciar_empleo(member: discord.Member) -> tuple[bool, str]:
     data["historial_reciente_de_jornadas"] = []
     data["despedido_inactividad"] = False
     await save_empleo_user(data)
+    if bypass:
+        return True, "🛑 Has renunciado a tu empleo. Puedes aplicar inmediatamente a un nuevo trabajo."
     return True, "🛑 Has renunciado a tu empleo. Podrás aplicar a un nuevo trabajo dentro de 6 horas."
 
 
@@ -560,11 +594,18 @@ class ConfirmarEmpleoView(ui.View):
         self.bot = bot
         self.user_id = user_id
         self.empleo = empleo
+        self.procesado = False
+        self._interaction_lock = _get_confirmacion_empleo_lock(user_id)
 
     @ui.button(label="Aceptar empleo", style=ButtonStyle.green)
     async def aceptar(self, interaction: Interaction, button: ui.Button):
         if interaction.user.id != self.user_id:
             return await interaction.response.send_message("❌ No es tu confirmación.", ephemeral=True)
+        if self._interaction_lock.locked() or self.procesado:
+            return await interaction.response.send_message(
+                "⌛ Esta solicitud ya se está procesando.",
+                ephemeral=True,
+            )
 
         try:
             await interaction.response.defer(thinking=True)
@@ -572,64 +613,77 @@ class ConfirmarEmpleoView(ui.View):
             logger.info("La confirmación de empleo de %s venció antes de ser procesada.", self.user_id)
             return
 
-        data = await get_empleo_user(self.user_id) or {
-            "user_id": self.user_id,
-            "empleo_actual": None,
-            "dificultad": None,
-            "fecha_contratacion": 0,
-            "ultimo_trabajo": 0,
-            "historial_reciente_de_jornadas": [],
-            "cooldown_renuncia": 0,
-            "progreso_permanencia": 0,
-            "ultimo_empleo": None,
-            "progreso_requisito": 0,
-            "despedido_inactividad": False,
-            "exp_laboral": 0,
-            "maestrias": 0,
-            "trabajos_exitosos": 0,
-            "trabajos_fallidos": 0,
-            "total_generado": 0,
-            "racha_exitos": 0,
-        }
-        cooldown_until = data.get("cooldown_renuncia", 0)
-        if cooldown_until and time.time() < cooldown_until and not _es_coordinador(interaction.user):
-            return await interaction.followup.send(
-                f"⏳ Podras Aplicar a otro empleo {format_relative_time(cooldown_until)} Regresa luego.",
-                ephemeral=True,
-            )
+        async with self._interaction_lock:
+            if self.user_id in _JORNADAS_CHANTAJISTA_ACTIVAS:
+                return await interaction.followup.send(
+                    "⌛ Finaliza primero tu jornada de Chantajista.",
+                    ephemeral=True,
+                )
+            data = await get_empleo_user(self.user_id, force_refresh=True)
+            if not data:
+                return await interaction.followup.send(
+                    "❌ No fue posible consultar tu información laboral. Inténtalo nuevamente.",
+                    ephemeral=True,
+                )
+            bypass = _es_coordinador(interaction.user)
+            cooldown_until = data.get("cooldown_renuncia", 0)
+            if cooldown_until and time.time() < cooldown_until and not bypass:
+                return await interaction.followup.send(
+                    f"⏳ Podras Aplicar a otro empleo {format_relative_time(cooldown_until)} Regresa luego.",
+                    ephemeral=True,
+                )
 
-        if normalizar_empleo(data.get("empleo_actual") or "") == self.empleo:
-            return await interaction.followup.send(
-                f"❌ Ya trabajas como **{data['empleo_actual'].title()}**. Elige un empleo distinto.",
-                ephemeral=True
-            )
+            if normalizar_empleo(data.get("empleo_actual") or "") == self.empleo:
+                return await interaction.followup.send(
+                    f"❌ Ya trabajas como **{data['empleo_actual'].title()}**. Elige un empleo distinto.",
+                    ephemeral=True,
+                )
 
-        info = EMPLEOS[self.empleo]
-        if data.get("exp_laboral", 0) < info["xp_requisito"]:
-            return await interaction.followup.send(
-                f"❌ {interaction.user.mention} necesitas **{info['xp_requisito']}** puntos de Experiencia Laboral para aplicar a **{self.empleo.title()}**.",
-                ephemeral=True
-            )
+            es_maestria = self.empleo in EMPLEOS_MAESTRIA
+            info = EMPLEOS_MAESTRIA[self.empleo] if es_maestria else EMPLEOS[self.empleo]
+            if es_maestria:
+                if not info.get("desarrollado", False):
+                    return await interaction.followup.send(
+                        f"🚧 **{info['nombre']}**: Trabajo Pendiente de desarrollo.",
+                        ephemeral=True,
+                    )
+                requeridas = info["maestrias_requeridas"]
+                if data.get("maestrias", 0) < requeridas and not bypass:
+                    return await interaction.followup.send(
+                        f"❌ **{info['nombre']}** requiere {requeridas} maestría(s).",
+                        ephemeral=True,
+                    )
+                xp_consumida = 0
+            else:
+                xp_requerida = info["xp_requisito"]
+                if data.get("exp_laboral", 0) < xp_requerida and not bypass:
+                    return await interaction.followup.send(
+                        f"❌ {interaction.user.mention} necesitas **{xp_requerida}** puntos de Experiencia Laboral para aplicar a **{self.empleo.title()}**.",
+                        ephemeral=True,
+                    )
+                xp_consumida = 0 if bypass else xp_requerida
 
-        now = time.time()
-        xp_consumida = info["xp_requisito"]
-        data["exp_laboral"] -= xp_consumida
-        data.update({
-            "empleo_actual": self.empleo,
-            "dificultad": info['dificultad'],
-            "cooldown_renuncia": 0,
-            "fecha_contratacion": now,
-            "ultimo_trabajo": 0,
-            "historial_reciente_de_jornadas": [],
-            "progreso_permanencia": 0,
-            "despedido_inactividad": False,
-            "ingresos_empleo_actual": 0,
-            "exitosos_empleo_actual": 0,
-            "fallidos_empleo_actual": 0,
-        })
-        await save_empleo_user(data)
+            now = time.time()
+            data["exp_laboral"] -= xp_consumida
+            data.update({
+                "empleo_actual": self.empleo,
+                "dificultad": info["dificultad"],
+                "cooldown_renuncia": 0,
+                "fecha_contratacion": now,
+                "ultimo_trabajo": 0,
+                "historial_reciente_de_jornadas": [],
+                "progreso_permanencia": 0,
+                "despedido_inactividad": False,
+                "ingresos_empleo_actual": 0,
+                "exitosos_empleo_actual": 0,
+                "fallidos_empleo_actual": 0,
+            })
+            await save_empleo_user(data)
+            self.procesado = True
+            self.stop()
+
         mensaje = (
-            f"🎉 {interaction.user.mention} ahora eres **{self.empleo.title()}**. "
+            f"🎉 {interaction.user.mention} ahora eres **{info['nombre'] if es_maestria else self.empleo.title()}**. "
             "Usa `!trabajar` para iniciar tu jornada de 3 horas."
         )
         if xp_consumida:
@@ -644,6 +698,13 @@ class ConfirmarEmpleoView(ui.View):
     async def rechazar(self, interaction: Interaction, button: ui.Button):
         if interaction.user.id != self.user_id:
             return await interaction.response.send_message("❌ No es tu confirmación.", ephemeral=True)
+        if self._interaction_lock.locked() or self.procesado:
+            return await interaction.response.send_message(
+                "⌛ Esta solicitud ya se está procesando.",
+                ephemeral=True,
+            )
+        self.procesado = True
+        self.stop()
         await interaction.response.send_message("❌ Has rechazado aplicar a este empleo.", ephemeral=True)
         try:
             await interaction.message.delete(delay=1)
@@ -684,7 +745,10 @@ class AbrirOficinaView(ui.View):
             return await interaction.response.send_message("❌ Este panel no es tuyo.", ephemeral=True)
 
         data = await get_empleo_user(self.owner_id, force_refresh=True)
-        if not data or data.get("exp_laboral", 0) < OFICINA_XP_MINIMA:
+        if not data or (
+            data.get("exp_laboral", 0) < OFICINA_XP_MINIMA
+            and not _es_coordinador(interaction.user)
+        ):
             return await interaction.response.send_message(
                 "Para acceder a la oficina necesitas tener 30 de exp laboral, consulta **!exp** continua trabajando.",
                 ephemeral=True,
@@ -864,13 +928,48 @@ class EmpleosMaestriaSelect(ui.Select):
         empleo = self.values[0]
         info = EMPLEOS_MAESTRIA[empleo]
         data = await get_empleo_user(self.owner_id, force_refresh=True)
-        if data.get("maestrias", 0) < info["maestrias_requeridas"]:
+        if not data:
+            return await interaction.response.send_message(
+                "❌ No fue posible consultar tu información laboral. Inténtalo nuevamente.",
+                ephemeral=True,
+            )
+        bypass = _es_coordinador(interaction.user)
+        if data.get("maestrias", 0) < info["maestrias_requeridas"] and not bypass:
             return await interaction.response.send_message(
                 f"❌ **{info['nombre']}** requiere {info['maestrias_requeridas']} maestría(s).",
                 ephemeral=True,
             )
+        if not info.get("desarrollado", False):
+            return await interaction.response.send_message(
+                f"🚧 **{info['nombre']}**: Trabajo Pendiente de desarrollo.",
+                ephemeral=True,
+            )
+
+        cooldown_until = data.get("cooldown_renuncia", 0)
+        if cooldown_until and time.time() < cooldown_until and not bypass:
+            return await interaction.response.send_message(
+                f"⏳ Debes esperar {format_relative_time(cooldown_until)} para aplicar a un nuevo empleo.",
+                ephemeral=True,
+            )
+
+        if normalizar_empleo(data.get("empleo_actual") or "") == empleo:
+            return await interaction.response.send_message(
+                f"❌ Ya trabajas como **{info['nombre']}**.",
+                ephemeral=True,
+            )
+
+        embed = discord.Embed(
+            title=f"¿Deseas aplicar como {info['nombre']}?",
+            description=(
+                f"Requiere **{info['maestrias_requeridas']} maestría(s)**\n"
+                f"Recompensa: **{info['salario_min']} {COIN} + {info['xp_ganada']} XP Laboral**\n"
+                f"Jornada: **{info['duracion_horas']} horas**"
+            ),
+            color=discord.Color.blurple(),
+        )
         await interaction.response.send_message(
-            f"🚧 **{info['nombre']}**: Trabajo Pendiente de desarrollo.",
+            embed=embed,
+            view=ConfirmarEmpleoView(None, self.owner_id, empleo),
             ephemeral=True,
         )
 
@@ -925,15 +1024,16 @@ class Empleos(commands.Cog):
             return await ctx.send("⭕ Empleo **Invalido** Consulta **!empleos.**")
 
         data = await get_empleo_user(ctx.author.id)
+        bypass = _es_coordinador(ctx.author)
         cooldown_until = data.get("cooldown_renuncia", 0) if data else 0
-        if cooldown_until and time.time() < cooldown_until and not _es_coordinador(ctx.author):
+        if cooldown_until and time.time() < cooldown_until and not bypass:
             return await ctx.send(f"⏳ Debes esperar {format_relative_time(cooldown_until)} para aplicar a un nuevo empleo.")
 
         if data and normalizar_empleo(data.get("empleo_actual") or "") == empleo:
             return await ctx.send(f"❌ Ya trabajas como **{data['empleo_actual'].title()}**. Elige un empleo distinto.")
 
         info = EMPLEOS[empleo]
-        if data and data.get("exp_laboral", 0) < info["xp_requisito"]:
+        if data and data.get("exp_laboral", 0) < info["xp_requisito"] and not bypass:
             return await ctx.send(f"❌ {ctx.author.mention} necesitas **{info['xp_requisito']}** puntos de Experiencia Laboral para aplicar a **{empleo.title()}**.")
 
         embed = discord.Embed(
@@ -959,7 +1059,10 @@ class Empleos(commands.Cog):
     @commands.command(name="oficina")
     async def oficina(self, ctx):
         data = await get_empleo_user(ctx.author.id, force_refresh=True)
-        if not data or data.get("exp_laboral", 0) < OFICINA_XP_MINIMA:
+        if not data or (
+            data.get("exp_laboral", 0) < OFICINA_XP_MINIMA
+            and not _es_coordinador(ctx.author)
+        ):
             return await ctx.reply(
                 "Para acceder a la oficina necesitas tener 30 de exp laboral, consulta **!exp** continua trabajando.",
                 mention_author=False,
@@ -974,8 +1077,15 @@ class Empleos(commands.Cog):
 
         empleo = normalizar_empleo(data["empleo_actual"])
         if empleo in EMPLEOS_MAESTRIA:
-            return await ctx.send("🚧 Trabajo Pendiente de desarrollo.")
-        info = EMPLEOS[empleo]
+            info = EMPLEOS_MAESTRIA[empleo]
+            if not info.get("desarrollado", False):
+                return await ctx.send("🚧 Trabajo Pendiente de desarrollo.")
+        elif empleo in EMPLEOS:
+            info = EMPLEOS[empleo]
+        else:
+            logger.error("Empleo desconocido en DB para %s: %r", ctx.author.id, data["empleo_actual"])
+            return await ctx.send("❌ Tu empleo actual no es válido. Contacta a un administrador.")
+
         now = time.time()
         bypass = _es_coordinador(ctx.author)
 
@@ -997,11 +1107,265 @@ class Empleos(commands.Cog):
             view = LimpiadorView(self.bot, ctx.author, info)
         elif empleo == "ingeniero":
             view = IngenieroView(self.bot, ctx.author, info)
-        else:
+        elif empleo == "plomero":
             view = PlomeroView(self.bot, ctx.author, info)
+        elif empleo == "chantajista":
+            if ctx.author.id in _JORNADAS_CHANTAJISTA_ACTIVAS:
+                return await ctx.reply(
+                    "⌛ Ya tienes una jornada de Chantajista activa.",
+                    mention_author=False,
+                )
+            _JORNADAS_CHANTAJISTA_ACTIVAS.add(ctx.author.id)
+            view = ChantajistaView(self.bot, ctx.author, info)
+        else:
+            return await ctx.send("🚧 Trabajo Pendiente de desarrollo.")
 
-        msg = await ctx.send(embed=view.build_embed(), view=view)
+        try:
+            if empleo == "chantajista":
+                msg = await ctx.reply(embed=view.build_embed(), view=view, mention_author=False)
+            else:
+                msg = await ctx.send(embed=view.build_embed(), view=view)
+        except Exception:
+            if empleo == "chantajista":
+                _JORNADAS_CHANTAJISTA_ACTIVAS.discard(ctx.author.id)
+            raise
         view.message = msg
+
+
+class ChantajistaView(ui.View):
+    TRIPULANTE = discord.PartialEmoji.from_str("<:t_Enginer:1288581004914589756>")
+    INCORRECTO = discord.PartialEmoji.from_str("<:n_JokerCoin:1287140438276571146>")
+    MAX_VIDAS = 3
+
+    def __init__(self, bot, author, info):
+        super().__init__(timeout=60)
+        self.bot = bot
+        self.author = author
+        self.info = info
+        self.message = None
+        self.ganador = random.randrange(6)
+        self.vidas = self.MAX_VIDAS
+        self.descartadas = set()
+        self.incorrecta_visible = None
+        self.mostrar_ganador = False
+        self.bloqueado = False
+        self.terminado = False
+        self._cleanup_programado = False
+        self._interaction_lock = asyncio.Lock()
+        self._build_buttons()
+
+    def _build_buttons(self):
+        self.clear_items()
+        for idx in range(6):
+            es_ganador_visible = idx == self.ganador and self.mostrar_ganador
+            es_incorrecta_visible = idx == self.incorrecta_visible
+
+            if es_ganador_visible:
+                button = ui.Button(
+                    emoji=self.TRIPULANTE,
+                    style=ButtonStyle.success,
+                    row=idx // 3,
+                    custom_id=f"chant_{self.author.id}_{idx}",
+                    disabled=True,
+                )
+            elif es_incorrecta_visible:
+                button = ui.Button(
+                    emoji=self.INCORRECTO,
+                    style=ButtonStyle.danger,
+                    row=idx // 3,
+                    custom_id=f"chant_{self.author.id}_{idx}",
+                    disabled=True,
+                )
+            else:
+                button = ui.Button(
+                    label="⬜",
+                    style=ButtonStyle.secondary,
+                    row=idx // 3,
+                    custom_id=f"chant_{self.author.id}_{idx}",
+                    disabled=self.terminado or self.bloqueado or idx in self.descartadas,
+                )
+
+            button.callback = self._make_callback(idx)
+            self.add_item(button)
+
+    def build_embed(self):
+        corazones = "❤️" * self.vidas + "🖤" * (self.MAX_VIDAS - self.vidas)
+        embed = discord.Embed(
+            title="Jornada Chantajista",
+            description="Adivina en cual casilla se encuentra el Tripulante",
+            color=discord.Color.purple(),
+        )
+        embed.add_field(name="Vidas restantes", value=corazones, inline=False)
+        embed.set_footer(text="Tienes 60 segundos para encontrar al Tripulante.")
+        return embed
+
+    def _make_callback(self, idx):
+        async def callback(interaction: Interaction):
+            if interaction.user.id != self.author.id:
+                return await interaction.response.send_message(
+                    "❌ Este tablero no es tuyo.",
+                    ephemeral=True,
+                )
+            if self._interaction_lock.locked():
+                return await interaction.response.defer()
+
+            resultado = None
+            async with self._interaction_lock:
+                if self.terminado:
+                    return await interaction.response.send_message(
+                        "⌛ Esta jornada ya finalizó.",
+                        ephemeral=True,
+                    )
+                if self.bloqueado or idx in self.descartadas:
+                    return await interaction.response.defer()
+
+                if idx == self.ganador:
+                    self.terminado = True
+                    self.bloqueado = True
+                    self.mostrar_ganador = True
+                    self.stop()
+                    self._build_buttons()
+                    await interaction.response.edit_message(embed=self.build_embed(), view=self)
+                    resultado = True
+                else:
+                    self.vidas -= 1
+                    self.descartadas.add(idx)
+                    self.incorrecta_visible = idx
+                    self.bloqueado = True
+                    self._build_buttons()
+                    await interaction.response.edit_message(embed=self.build_embed(), view=self)
+                    await asyncio.sleep(1)
+
+                    self.incorrecta_visible = None
+                    if self.vidas <= 0:
+                        self.terminado = True
+                        self.mostrar_ganador = True
+                        self.stop()
+                        resultado = False
+                    else:
+                        self.bloqueado = False
+
+                    self._build_buttons()
+                    await interaction.edit_original_response(embed=self.build_embed(), view=self)
+
+            if resultado is not None:
+                await self._finalizar(resultado, interaction=interaction)
+
+        return callback
+
+    async def _finalizar(self, exito, interaction=None, por_timeout=False):
+        try:
+            if exito:
+                pago = self.info["salario_max"]
+                xp_ganada = self.info["xp_ganada"]
+                mensaje = (
+                    f"Felicidades has encontrado al Tripulante Ganas "
+                    f"{pago} {COIN} + {xp_ganada} Exp Laboral"
+                )
+                await update_bank(self.author.id, pago)
+                bonus = await registrar_resultado(
+                    self.author.id,
+                    "chantajista",
+                    True,
+                    pago,
+                    mensaje,
+                    xp_ganada=xp_ganada,
+                )
+                if bonus["coins"] > 0:
+                    await update_bank(self.author.id, bonus["coins"])
+                    mensaje += (
+                        f"\n🌟 **¡Racha de 5!** Bono: **+{bonus['coins']}** "
+                        f"{COIN} y **+{bonus['xp']} XP Laboral**"
+                    )
+                embed = discord.Embed(
+                    title="Jornada Chantajista",
+                    description=f"{self.author.mention} {mensaje}",
+                    color=discord.Color.green(),
+                )
+            else:
+                if por_timeout:
+                    motivo = "No encontraste al Tripulante antes de finalizar el tiempo."
+                else:
+                    motivo = "Perdiste tus 3 vidas sin encontrar al Tripulante."
+                await registrar_resultado(
+                    self.author.id,
+                    "chantajista",
+                    False,
+                    0,
+                    motivo,
+                )
+                embed = discord.Embed(
+                    title="Jornada Chantajista - Derrota",
+                    description=(
+                        f"{self.author.mention} {motivo}\n"
+                        f"El Tripulante estaba en la casilla **{self.ganador + 1}** "
+                        f"{self.TRIPULANTE}"
+                    ),
+                    color=discord.Color.red(),
+                )
+
+            if interaction is not None:
+                await interaction.edit_original_response(embed=embed, view=None)
+            elif self.message is not None:
+                await self.message.edit(embed=embed, view=None)
+        except Exception as error:
+            _log_trabajar_error("Chantajista", error, self.author.name, "_finalizar")
+            if interaction is not None:
+                await _notificar_error_interaccion(interaction)
+            elif self.message is not None:
+                try:
+                    await self.message.edit(
+                        content="❌ Ocurrió un error al finalizar la jornada. Consulta **!trabajar** nuevamente.",
+                        embed=None,
+                        view=None,
+                    )
+                except (discord.HTTPException, discord.NotFound):
+                    pass
+        finally:
+            _JORNADAS_CHANTAJISTA_ACTIVAS.discard(self.author.id)
+            if not self._cleanup_programado:
+                self._cleanup_programado = True
+                asyncio.create_task(self._cleanup())
+
+    async def on_timeout(self):
+        async with self._interaction_lock:
+            if self.terminado:
+                return
+            self.terminado = True
+            self.bloqueado = True
+            self.mostrar_ganador = True
+            self._build_buttons()
+        logger.info("[TRABAJAR/CHANTAJISTA] Jornada vencida — Usuario: %s", self.author.name)
+        await self._finalizar(False, por_timeout=True)
+
+    async def on_error(self, interaction: Interaction, error: Exception, item):
+        self.terminado = True
+        self.bloqueado = True
+        self.stop()
+        _JORNADAS_CHANTAJISTA_ACTIVAS.discard(self.author.id)
+        _log_trabajar_error(
+            "Chantajista",
+            error,
+            interaction.user.name,
+            f"on_error — Item: {item}",
+        )
+        if self.message is not None:
+            try:
+                await self.message.edit(view=None)
+            except (discord.HTTPException, discord.NotFound):
+                pass
+        await _notificar_error_interaccion(interaction)
+        if not self._cleanup_programado:
+            self._cleanup_programado = True
+            asyncio.create_task(self._cleanup())
+
+    async def _cleanup(self):
+        await asyncio.sleep(180)
+        try:
+            if self.message:
+                await self.message.delete()
+        except (discord.HTTPException, discord.NotFound):
+            pass
 
 
 class LimpiadorView(ui.View):
