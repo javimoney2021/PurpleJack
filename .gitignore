@@ -1,1 +1,47 @@
+# ── Secrets and deployment environment ─────────────────
 .env
+.env.*
+!.env.example
+
+# ── Python virtual environments ─────────────────────────
+.venv/
+.venv-*/
+venv/
+env/
+ENV/
+
+# ── Python bytecode and caches ──────────────────────────
+__pycache__/
+*.py[cod]
+*$py.class
+
+# ── Test, type-checker and linter caches ────────────────
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+.coverage.*
+htmlcov/
+
+# ── Python build artifacts ──────────────────────────────
+build/
+dist/
+*.egg-info/
+.eggs/
+
+# ── Editors and local tooling ───────────────────────────
+.vscode/
+.idea/
+.codex/
+.agents/
+
+# ── Operating-system generated files ───────────────────
+.DS_Store
+Thumbs.db
+Desktop.ini
+
+# ── Logs and temporary files ────────────────────────────
+*.log
+*.tmp
+*.bak
+*.swp

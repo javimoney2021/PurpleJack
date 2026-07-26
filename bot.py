@@ -57,7 +57,8 @@ from core.database import (
     load_collect_config_to_cache, delete_cargo_temporal,
     create_game_config_table, load_game_config, load_dados_config, load_memo_config,
     load_veterano_config_to_cache, load_saboteador_config_to_cache, load_item_role_restrictions_to_cache,
-    save_collect_cooldowns, load_evento_to_cache, flush_evento_puntos
+    save_collect_cooldowns, load_evento_to_cache, flush_evento_puntos,
+    recover_pending_wagers
 )
 from core import cache
 from core.config import AYUDA_CHANNEL_ID
@@ -214,6 +215,12 @@ def run_bot():
         loop.add_signal_handler(signal.SIGTERM, lambda: asyncio.create_task(shutdown()))
 
         await init_db()
+        reembolsadas = await recover_pending_wagers()
+        if reembolsadas:
+            logger.warning(
+                "Se reembolsaron %s apuestas pendientes de una ejecución anterior.",
+                reembolsadas,
+            )
         await create_game_config_table()
         await load_game_config()
         await load_dados_config()

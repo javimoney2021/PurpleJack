@@ -1,6 +1,8 @@
 import asyncio
+from contextlib import AsyncExitStack
 import logging
 import time
+import uuid
 import asyncpg
 from settings import DATABASE_URL
 from core import cache
@@ -9,6 +11,7 @@ logger = logging.getLogger(__name__)
 
 pool = None
 _purchase_locks = {}
+_economy_locks = {}
 
 
 def _get_purchase_lock(user_id):
@@ -16,6 +19,15 @@ def _get_purchase_lock(user_id):
     if lock is None:
         lock = asyncio.Lock()
         _purchase_locks[user_id] = lock
+    return lock
+
+
+def _get_economy_lock(user_id):
+    """Serializa movimientos económicos críticos de un usuario en este proceso."""
+    lock = _economy_locks.get(user_id)
+    if lock is None:
+        lock = asyncio.Lock()
+        _economy_locks[user_id] = lock
     return lock
 
 async def init_db():
@@ -161,6 +173,47 @@ async def init_db():
         )
         """)
 
+        await conn.execute("""
+        CREATE TABLE IF NOT EXISTS command_cooldowns (
+            scope_type TEXT NOT NULL,
+            scope_id BIGINT NOT NULL,
+            command TEXT NOT NULL,
+            expira_en DOUBLE PRECISION NOT NULL,
+            PRIMARY KEY (scope_type, scope_id, command)
+        )
+        """)
+
+        await conn.execute("""
+        CREATE TABLE IF NOT EXISTS duel_config (
+            guild_id BIGINT PRIMARY KEY,
+            cooldown INTEGER NOT NULL
+        )
+        """)
+
+        await conn.execute("""
+        CREATE TABLE IF NOT EXISTS wagers (
+            id TEXT PRIMARY KEY,
+            session_id TEXT NOT NULL,
+            game TEXT NOT NULL,
+            user_id BIGINT NOT NULL,
+            amount INTEGER NOT NULL CHECK (amount > 0),
+            source TEXT NOT NULL CHECK (source IN ('balance', 'bank')),
+            status TEXT NOT NULL DEFAULT 'pending',
+            payout INTEGER NOT NULL DEFAULT 0,
+            track_event BOOLEAN NOT NULL DEFAULT TRUE,
+            created_at DOUBLE PRECISION NOT NULL,
+            expires_at DOUBLE PRECISION NOT NULL
+        )
+        """)
+        await conn.execute("""
+        CREATE INDEX IF NOT EXISTS wagers_pending_session_idx
+        ON wagers (session_id, status)
+        """)
+        await conn.execute("""
+        CREATE INDEX IF NOT EXISTS wagers_pending_user_idx
+        ON wagers (user_id, game, status)
+        """)
+
     logger.info("Base de datos conectada y tablas verificadas.")
 
 
@@ -256,7 +309,7 @@ async def get_user(user_id):
         return data
 
 
-async def flush_user_to_db(user_id):
+async def _flush_user_to_db_unlocked(user_id):
     """
     Persiste un usuario específico a DB de forma inmediata.
     Se usa para operaciones críticas (collect, shop, rob).
@@ -275,8 +328,16 @@ async def flush_user_to_db(user_id):
                 user_id,
             )
         cache.clear_dirty(user_id)
+        return True
     except Exception as e:
         logger.warning(f"flush_user_to_db error para {user_id}: {e}")
+        return False
+
+
+async def flush_user_to_db(user_id):
+    """Persiste un usuario sin competir con otro movimiento económico."""
+    async with _get_economy_lock(user_id):
+        return await _flush_user_to_db_unlocked(user_id)
 
 
 # ── ESCRITURAS INMEDIATAS (shop, collect, rob, duels) ──
@@ -284,8 +345,9 @@ async def flush_user_to_db(user_id):
 async def update_balance(user_id, amount, track_event=True):
     """Actualiza balance en RAM y persiste a DB de inmediato."""
     await get_user(user_id)
-    cache.update_cached_balance(user_id, amount, track_event=track_event)
-    await flush_user_to_db(user_id)
+    async with _get_economy_lock(user_id):
+        cache.update_cached_balance(user_id, amount, track_event=track_event)
+        await _flush_user_to_db_unlocked(user_id)
 
 
 async def update_bank(user_id, amount, track_event=True):
@@ -295,9 +357,14 @@ async def update_bank(user_id, amount, track_event=True):
     se redirige al balance automáticamente. Garantiza flush en ambos casos.
     """
     await get_user(user_id)
-    aplicado_banco = cache.update_cached_bank(user_id, amount, track_event=track_event)
-    await flush_user_to_db(user_id)
-    return aplicado_banco
+    async with _get_economy_lock(user_id):
+        aplicado_banco = cache.update_cached_bank(
+            user_id,
+            amount,
+            track_event=track_event,
+        )
+        await _flush_user_to_db_unlocked(user_id)
+        return aplicado_banco
 
 
 # ── ESCRITURAS EN RAM (mini-juegos: ruleta, rr, dados) ─
@@ -309,7 +376,8 @@ async def cache_balance(user_id, amount, track_event=True):
     Usar en mini-juegos donde no hay transferencia entre usuarios.
     """
     await get_user(user_id)  # garantiza fila en DB y usuario en caché
-    cache.update_cached_balance(user_id, amount, track_event=track_event)
+    async with _get_economy_lock(user_id):
+        cache.update_cached_balance(user_id, amount, track_event=track_event)
 
 
 async def cache_bank(user_id, amount, track_event=True):
@@ -319,12 +387,608 @@ async def cache_bank(user_id, amount, track_event=True):
     La persistencia ocurre en el flush_loop (cada 10 min).
     """
     await get_user(user_id)
-    return cache.update_cached_bank(user_id, amount, track_event=track_event)
+    async with _get_economy_lock(user_id):
+        return cache.update_cached_bank(user_id, amount, track_event=track_event)
+
+
+async def transfer_balance(
+    sender_id: int,
+    recipient_id: int,
+    amount: int,
+    *,
+    track_sender_event: bool = True,
+    track_recipient_event: bool = True,
+):
+    """Transfiere balance entre dos usuarios de forma atómica."""
+    if amount <= 0 or sender_id == recipient_id:
+        return {"ok": False, "reason": "invalid_transfer"}
+
+    await get_user(sender_id)
+    await get_user(recipient_id)
+    user_ids = sorted((sender_id, recipient_id))
+
+    async with AsyncExitStack() as stack:
+        for user_id in user_ids:
+            await stack.enter_async_context(_get_economy_lock(user_id))
+
+        sender = cache.get_cached(sender_id)
+        recipient = cache.get_cached(recipient_id)
+        if not sender or sender["balance"] < amount:
+            return {"ok": False, "reason": "insufficient_balance"}
+        if not recipient:
+            return {"ok": False, "reason": "recipient_not_found"}
+
+        sender_balance = sender["balance"] - amount
+        recipient_balance = recipient["balance"] + amount
+        async with pool.acquire() as conn:
+            async with conn.transaction():
+                await conn.fetch(
+                    """
+                    SELECT id FROM users
+                    WHERE id = ANY($1::BIGINT[])
+                    ORDER BY id
+                    FOR UPDATE
+                    """,
+                    user_ids,
+                )
+                await conn.execute(
+                    """
+                    UPDATE users SET balance=$1, bank=$2,
+                        cooldown_work=$3, cooldown_crime=$4
+                    WHERE id=$5
+                    """,
+                    sender_balance,
+                    sender["bank"],
+                    sender["cooldown_work"],
+                    sender["cooldown_crime"],
+                    sender_id,
+                )
+                await conn.execute(
+                    """
+                    UPDATE users SET balance=$1, bank=$2,
+                        cooldown_work=$3, cooldown_crime=$4
+                    WHERE id=$5
+                    """,
+                    recipient_balance,
+                    recipient["bank"],
+                    recipient["cooldown_work"],
+                    recipient["cooldown_crime"],
+                    recipient_id,
+                )
+
+        cache.update_cached_balance(
+            sender_id,
+            -amount,
+            track_event=track_sender_event,
+        )
+        cache.update_cached_balance(
+            recipient_id,
+            amount,
+            track_event=track_recipient_event,
+        )
+        return {"ok": True, "amount": amount}
 
 
 async def update_cooldown(user_id, command, timestamp):
     await get_user(user_id)
-    cache.update_cached_cooldown(user_id, command, timestamp)
+    async with _get_economy_lock(user_id):
+        cache.update_cached_cooldown(user_id, command, timestamp)
+
+
+# ── COOLDOWNS PERSISTENTES ─────────────────────────────
+
+async def get_command_cooldown(scope_type: str, scope_id: int, command: str) -> float:
+    async with pool.acquire() as conn:
+        value = await conn.fetchval(
+            """
+            SELECT expira_en FROM command_cooldowns
+            WHERE scope_type=$1 AND scope_id=$2 AND command=$3
+            """,
+            scope_type,
+            scope_id,
+            command,
+        )
+    return float(value or 0)
+
+
+async def set_command_cooldown(
+    scope_type: str,
+    scope_id: int,
+    command: str,
+    expira_en: float,
+) -> None:
+    async with pool.acquire() as conn:
+        await conn.execute(
+            """
+            INSERT INTO command_cooldowns (scope_type, scope_id, command, expira_en)
+            VALUES ($1, $2, $3, $4)
+            ON CONFLICT (scope_type, scope_id, command)
+            DO UPDATE SET expira_en=EXCLUDED.expira_en
+            """,
+            scope_type,
+            scope_id,
+            command,
+            expira_en,
+        )
+
+
+async def clear_command_cooldown(scope_type: str, scope_id: int, command: str) -> None:
+    async with pool.acquire() as conn:
+        await conn.execute(
+            """
+            DELETE FROM command_cooldowns
+            WHERE scope_type=$1 AND scope_id=$2 AND command=$3
+            """,
+            scope_type,
+            scope_id,
+            command,
+        )
+
+
+async def clear_command_cooldowns(command: str) -> None:
+    async with pool.acquire() as conn:
+        await conn.execute(
+            "DELETE FROM command_cooldowns WHERE command=$1",
+            command,
+        )
+
+
+async def get_duel_cooldown_config(guild_id: int, default: int) -> int:
+    async with pool.acquire() as conn:
+        value = await conn.fetchval(
+            "SELECT cooldown FROM duel_config WHERE guild_id=$1",
+            guild_id,
+        )
+    return int(value) if value is not None else default
+
+
+async def set_duel_cooldown_config(guild_id: int, cooldown: int) -> None:
+    async with pool.acquire() as conn:
+        await conn.execute(
+            """
+            INSERT INTO duel_config (guild_id, cooldown)
+            VALUES ($1, $2)
+            ON CONFLICT (guild_id) DO UPDATE SET cooldown=EXCLUDED.cooldown
+            """,
+            guild_id,
+            cooldown,
+        )
+
+
+# ── APUESTAS TRANSACCIONALES ───────────────────────────
+
+async def reserve_wager(
+    user_id: int,
+    game: str,
+    amount: int,
+    *,
+    source: str = "balance",
+    session_id: str | None = None,
+    expires_in: int = 600,
+    track_event: bool = True,
+):
+    """Descuenta y registra una apuesta pendiente en una sola transacción."""
+    if amount <= 0 or source not in {"balance", "bank"}:
+        return {"ok": False, "reason": "invalid_wager"}
+
+    await get_user(user_id)
+    async with _get_economy_lock(user_id):
+        user = cache.get_cached(user_id)
+        if not user or user[source] < amount:
+            return {
+                "ok": False,
+                "reason": f"insufficient_{source}",
+                "available": user[source] if user else 0,
+            }
+
+        wager_id = str(uuid.uuid4())
+        session_id = session_id or wager_id
+        created_at = time.time()
+        expires_at = created_at + max(60, expires_in)
+        new_balance = user["balance"] - amount if source == "balance" else user["balance"]
+        new_bank = user["bank"] - amount if source == "bank" else user["bank"]
+
+        async with pool.acquire() as conn:
+            async with conn.transaction():
+                await conn.execute(
+                    """
+                    UPDATE users SET balance=$1, bank=$2,
+                        cooldown_work=$3, cooldown_crime=$4
+                    WHERE id=$5
+                    """,
+                    new_balance,
+                    new_bank,
+                    user["cooldown_work"],
+                    user["cooldown_crime"],
+                    user_id,
+                )
+                await conn.execute(
+                    """
+                    INSERT INTO wagers (
+                        id, session_id, game, user_id, amount, source,
+                        status, payout, track_event, created_at, expires_at
+                    )
+                    VALUES ($1,$2,$3,$4,$5,$6,'pending',0,$7,$8,$9)
+                    """,
+                    wager_id,
+                    session_id,
+                    game,
+                    user_id,
+                    amount,
+                    source,
+                    track_event,
+                    created_at,
+                    expires_at,
+                )
+
+        if source == "balance":
+            cache.update_cached_balance(user_id, -amount, track_event=False)
+        else:
+            cache.update_cached_bank(user_id, -amount, track_event=False)
+
+        return {
+            "ok": True,
+            "id": wager_id,
+            "session_id": session_id,
+            "amount": amount,
+            "source": source,
+        }
+
+
+async def increase_wager(wager_id: str, extra_amount: int):
+    """Amplía el riesgo de una apuesta pendiente, validando fondos primero."""
+    if extra_amount <= 0:
+        return {"ok": True, "added": 0}
+
+    async with pool.acquire() as conn:
+        preliminary = await conn.fetchrow(
+            "SELECT user_id FROM wagers WHERE id=$1",
+            wager_id,
+        )
+    if not preliminary:
+        return {"ok": False, "reason": "not_found"}
+
+    user_id = preliminary["user_id"]
+    await get_user(user_id)
+    async with _get_economy_lock(user_id):
+        user = cache.get_cached(user_id)
+        async with pool.acquire() as conn:
+            async with conn.transaction():
+                wager = await conn.fetchrow(
+                    "SELECT * FROM wagers WHERE id=$1 FOR UPDATE",
+                    wager_id,
+                )
+                if not wager or wager["status"] != "pending":
+                    return {"ok": False, "reason": "not_pending"}
+
+                source = wager["source"]
+                if not user or user[source] < extra_amount:
+                    return {
+                        "ok": False,
+                        "reason": f"insufficient_{source}",
+                        "available": user[source] if user else 0,
+                    }
+
+                new_balance = (
+                    user["balance"] - extra_amount
+                    if source == "balance"
+                    else user["balance"]
+                )
+                new_bank = (
+                    user["bank"] - extra_amount
+                    if source == "bank"
+                    else user["bank"]
+                )
+                await conn.execute(
+                    """
+                    UPDATE users SET balance=$1, bank=$2,
+                        cooldown_work=$3, cooldown_crime=$4
+                    WHERE id=$5
+                    """,
+                    new_balance,
+                    new_bank,
+                    user["cooldown_work"],
+                    user["cooldown_crime"],
+                    user_id,
+                )
+                await conn.execute(
+                    "UPDATE wagers SET amount=amount+$1 WHERE id=$2",
+                    extra_amount,
+                    wager_id,
+                )
+
+        if source == "balance":
+            cache.update_cached_balance(user_id, -extra_amount, track_event=False)
+        else:
+            cache.update_cached_bank(user_id, -extra_amount, track_event=False)
+        return {"ok": True, "added": extra_amount}
+
+
+async def finalize_wager(
+    wager_id: str,
+    *,
+    payout: int,
+    status: str,
+):
+    """Liquida una apuesta una sola vez y sincroniza DB, caché y evento."""
+    if payout < 0 or status not in {"settled", "lost", "refunded"}:
+        return {"ok": False, "reason": "invalid_settlement"}
+
+    async with pool.acquire() as conn:
+        preliminary = await conn.fetchrow(
+            "SELECT user_id FROM wagers WHERE id=$1",
+            wager_id,
+        )
+    if not preliminary:
+        return {"ok": False, "reason": "not_found"}
+
+    user_id = preliminary["user_id"]
+    await get_user(user_id)
+    async with _get_economy_lock(user_id):
+        user = cache.get_cached(user_id)
+        async with pool.acquire() as conn:
+            async with conn.transaction():
+                wager = await conn.fetchrow(
+                    "SELECT * FROM wagers WHERE id=$1 FOR UPDATE",
+                    wager_id,
+                )
+                if not wager:
+                    return {"ok": False, "reason": "not_found"}
+                if wager["status"] != "pending":
+                    return {
+                        "ok": False,
+                        "reason": "already_finalized",
+                        "status": wager["status"],
+                    }
+
+                source = wager["source"]
+                if source == "balance":
+                    new_balance = user["balance"] + payout
+                    new_bank = user["bank"]
+                else:
+                    espacio = max(0, cache.MAX_BANK - user["bank"])
+                    banco_aplicado = min(payout, espacio)
+                    new_bank = user["bank"] + banco_aplicado
+                    new_balance = user["balance"] + (payout - banco_aplicado)
+
+                await conn.execute(
+                    """
+                    UPDATE users SET balance=$1, bank=$2,
+                        cooldown_work=$3, cooldown_crime=$4
+                    WHERE id=$5
+                    """,
+                    new_balance,
+                    new_bank,
+                    user["cooldown_work"],
+                    user["cooldown_crime"],
+                    user_id,
+                )
+                await conn.execute(
+                    """
+                    UPDATE wagers SET status=$1, payout=$2
+                    WHERE id=$3
+                    """,
+                    status,
+                    payout,
+                    wager_id,
+                )
+
+        if payout:
+            if source == "balance":
+                cache.update_cached_balance(user_id, payout, track_event=False)
+            else:
+                cache.update_cached_bank(user_id, payout, track_event=False)
+
+        if wager["track_event"] and source == "balance":
+            if status == "refunded":
+                event_delta = 0
+            elif status == "lost":
+                event_delta = -wager["amount"]
+            else:
+                event_delta = payout - wager["amount"]
+            if event_delta:
+                cache.record_evento_balance_delta(user_id, event_delta)
+
+        return {
+            "ok": True,
+            "user_id": user_id,
+            "amount": wager["amount"],
+            "payout": payout,
+            "status": status,
+        }
+
+
+async def settle_wager(wager_id: str, payout: int):
+    return await finalize_wager(wager_id, payout=payout, status="settled")
+
+
+async def lose_wager(wager_id: str):
+    return await finalize_wager(wager_id, payout=0, status="lost")
+
+
+async def refund_wager(wager_id: str):
+    async with pool.acquire() as conn:
+        amount = await conn.fetchval(
+            "SELECT amount FROM wagers WHERE id=$1 AND status='pending'",
+            wager_id,
+        )
+    if amount is None:
+        return {"ok": False, "reason": "not_pending"}
+    return await finalize_wager(wager_id, payout=amount, status="refunded")
+
+
+async def refund_wager_session(session_id: str):
+    result = await finalize_wager_session(session_id, refund=True)
+    return result.get("count", 0) if result.get("ok") else 0
+
+
+async def finalize_wager_session(
+    session_id: str,
+    payouts: dict[str, int] | None = None,
+    *,
+    refund: bool = False,
+):
+    """Liquida en una única transacción todas las apuestas pendientes de una sesión."""
+    payouts = payouts or {}
+    async with pool.acquire() as conn:
+        rows = await conn.fetch(
+            """
+            SELECT * FROM wagers
+            WHERE session_id=$1 AND status='pending'
+            ORDER BY user_id, id
+            """,
+            session_id,
+        )
+    if not rows:
+        return {"ok": False, "reason": "not_pending", "count": 0}
+
+    user_ids = sorted({row["user_id"] for row in rows})
+    for user_id in user_ids:
+        await get_user(user_id)
+
+    async with AsyncExitStack() as stack:
+        for user_id in user_ids:
+            await stack.enter_async_context(_get_economy_lock(user_id))
+
+        states = {
+            user_id: dict(cache.get_cached(user_id))
+            for user_id in user_ids
+        }
+        settlements = []
+
+        async with pool.acquire() as conn:
+            async with conn.transaction():
+                locked_rows = await conn.fetch(
+                    """
+                    SELECT * FROM wagers
+                    WHERE session_id=$1 AND status='pending'
+                    ORDER BY user_id, id
+                    FOR UPDATE
+                    """,
+                    session_id,
+                )
+                if not locked_rows:
+                    return {"ok": False, "reason": "not_pending", "count": 0}
+
+                for wager in locked_rows:
+                    payout = (
+                        wager["amount"]
+                        if refund
+                        else max(0, int(payouts.get(wager["id"], 0)))
+                    )
+                    status = (
+                        "refunded"
+                        if refund
+                        else ("settled" if payout > 0 else "lost")
+                    )
+                    state = states[wager["user_id"]]
+
+                    if wager["source"] == "balance":
+                        state["balance"] += payout
+                    else:
+                        espacio = max(0, cache.MAX_BANK - state["bank"])
+                        banco_aplicado = min(payout, espacio)
+                        state["bank"] += banco_aplicado
+                        state["balance"] += payout - banco_aplicado
+
+                    await conn.execute(
+                        """
+                        UPDATE wagers SET status=$1, payout=$2
+                        WHERE id=$3
+                        """,
+                        status,
+                        payout,
+                        wager["id"],
+                    )
+                    settlements.append((dict(wager), payout, status))
+
+                for user_id, state in states.items():
+                    await conn.execute(
+                        """
+                        UPDATE users SET balance=$1, bank=$2,
+                            cooldown_work=$3, cooldown_crime=$4
+                        WHERE id=$5
+                        """,
+                        state["balance"],
+                        state["bank"],
+                        state["cooldown_work"],
+                        state["cooldown_crime"],
+                        user_id,
+                    )
+
+        for wager, payout, status in settlements:
+            if payout:
+                if wager["source"] == "balance":
+                    cache.update_cached_balance(
+                        wager["user_id"],
+                        payout,
+                        track_event=False,
+                    )
+                else:
+                    cache.update_cached_bank(
+                        wager["user_id"],
+                        payout,
+                        track_event=False,
+                    )
+
+            if wager["track_event"] and wager["source"] == "balance":
+                event_delta = (
+                    0
+                    if status == "refunded"
+                    else payout - wager["amount"]
+                )
+                if event_delta:
+                    cache.record_evento_balance_delta(
+                        wager["user_id"],
+                        event_delta,
+                    )
+
+    return {"ok": True, "count": len(settlements)}
+
+
+async def settle_wager_session(session_id: str, payouts: dict[str, int]):
+    return await finalize_wager_session(session_id, payouts)
+
+
+async def recover_pending_wagers():
+    """
+    Reembolsa apuestas que quedaron pendientes tras un reinicio.
+    Se ejecuta antes de cargar usuarios y el ranking del evento a RAM.
+    """
+    async with pool.acquire() as conn:
+        async with conn.transaction():
+            rows = await conn.fetch(
+                "SELECT * FROM wagers WHERE status='pending' FOR UPDATE"
+            )
+            for wager in rows:
+                if wager["source"] == "balance":
+                    await conn.execute(
+                        "UPDATE users SET balance=balance+$1 WHERE id=$2",
+                        wager["amount"],
+                        wager["user_id"],
+                    )
+                else:
+                    user = await conn.fetchrow(
+                        "SELECT balance, bank FROM users WHERE id=$1 FOR UPDATE",
+                        wager["user_id"],
+                    )
+                    if user:
+                        espacio = max(0, cache.MAX_BANK - user["bank"])
+                        banco_aplicado = min(wager["amount"], espacio)
+                        await conn.execute(
+                            "UPDATE users SET bank=$1, balance=$2 WHERE id=$3",
+                            user["bank"] + banco_aplicado,
+                            user["balance"] + wager["amount"] - banco_aplicado,
+                            wager["user_id"],
+                        )
+                await conn.execute(
+                    """
+                    UPDATE wagers SET status='refunded', payout=amount
+                    WHERE id=$1
+                    """,
+                    wager["id"],
+                )
+    return len(rows)
 
 
 # ── ITEMS ──────────────────────────────────────────────

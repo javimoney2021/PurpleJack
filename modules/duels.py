@@ -3,8 +3,18 @@ import asyncio
 import logging
 import random
 import time
+import uuid
 from discord.ext import commands
-from core.database import get_user, update_balance, update_bank
+from core.database import (
+    get_user,
+    get_command_cooldown,
+    set_command_cooldown,
+    clear_command_cooldown,
+    get_duel_cooldown_config,
+    reserve_wager,
+    settle_wager_session,
+    refund_wager_session,
+)
 from core.config import COIN
 
 logger = logging.getLogger(__name__)
@@ -22,7 +32,7 @@ NAVE_ROLE_ID = 1515377564439281726  # Miembros de la Nave
 _active_duels = set()  # {guild_id} para evitar múltiples duelos por servidor
 _duel_cooldowns = {}  # {guild_id: cooldown_seconds}
 DEFAULT_DUEL_COOLDOWN = 600  # 10 minutos
-_last_duel_times = {}  # {guild_id: timestamp}
+_last_duel_times = {}  # {guild_id: expira_en}
 
 
 class AcceptDuelView(discord.ui.View):
@@ -32,13 +42,20 @@ class AcceptDuelView(discord.ui.View):
         self.retado_id = retado_id
         self.monto = monto
         self.ctx = ctx
+        self.session_id = None
+        self.resolved = False
 
     async def on_timeout(self):
+        if self.resolved:
+            return
+        self.resolved = True
         try:
             await self.message.delete()
         except discord.HTTPException:
             pass
         _last_duel_times.pop(self.ctx.guild.id, None)
+        _active_duels.discard(self.ctx.guild.id)
+        await clear_command_cooldown("guild", self.ctx.guild.id, "retar")
         try:
             await self.ctx.send(
                 f"⚔️ {self.ctx.author.mention} **Reto anulado (Sin Respuesta)** Intenta retar a otra persona.",
@@ -52,10 +69,17 @@ class AcceptDuelView(discord.ui.View):
     async def aceptar(self, interaction: discord.Interaction, button: discord.ui.Button):
         if interaction.user.id != self.retado_id:
             return await interaction.response.send_message("❌ Solo el retado puede aceptar.", ephemeral=True)
+        if self.resolved:
+            return await interaction.response.send_message(
+                "❌ Este reto ya fue resuelto.",
+                ephemeral=True,
+            )
+        self.resolved = True
 
         # Verificar saldo del retado
         retado_data = await get_user(self.retado_id)
         if retado_data["bank"] < self.monto:
+            self.resolved = False
             return await interaction.response.send_message(
                 f"❌ No tienes suficiente en banco. Necesitas **{self.monto}** {COIN}.",
                 ephemeral=True
@@ -64,56 +88,121 @@ class AcceptDuelView(discord.ui.View):
         # Verificar saldo del retador nuevamente
         retador_data = await get_user(self.retador_id)
         if retador_data["bank"] < self.monto:
+            self.resolved = False
             return await interaction.response.send_message(
                 f"❌ El retador ya no tiene suficiente saldo.",
                 ephemeral=True
             )
 
-        # Descontar
-        await update_bank(self.retador_id, -self.monto)
-        await update_bank(self.retado_id, -self.monto)
-
-        # Detener la vista de aceptación para evitar timeouts posteriores
-        self.stop()
-
-        # Auto-eliminar mensaje de reto en 3 segundos
-        async def delete_message():
-            await asyncio.sleep(3)
-            try:
-                await self.message.delete()
-            except discord.HTTPException:
-                pass
-        
-        asyncio.create_task(delete_message())
-
-        # Mensaje anunciando el inicio sin embed
-        await interaction.response.defer()
-        msg_anuncio = await self.ctx.send(f"⚔️ La batalla entre <@{self.retador_id}> y <@{self.retado_id}> Comenzará en segundos.... ⚔️")
-        
-        # Cerrar permisos de escritura para el rol Nave
-        nave_role = self.ctx.guild.get_role(NAVE_ROLE_ID)
-        if nave_role:
-            await self.ctx.channel.set_permissions(nave_role, send_messages=False, view_channel=True, read_message_history=True, add_reactions=True)
-        
-        await asyncio.sleep(3)
-        await msg_anuncio.delete()
-
-        # Iniciar minijuego
-        duel_view = DuelGameView(self.retador_id, self.retado_id, self.monto * 2, self.ctx.guild.id, self.ctx.channel, self.ctx.guild)
-        embed = discord.Embed(
-            title="⚔️ Duelo Iniciado",
-            description=f"¡Comienza el duelo entre <@{self.retador_id}> y <@{self.retado_id}>!\n\n**Pozo total:** {self.monto * 2} {COIN}\n\nRonda 1/{TOTAL_ROUNDS}",
-            color=discord.Color.blue()
+        self.session_id = str(uuid.uuid4())
+        retador_wager = await reserve_wager(
+            self.retador_id,
+            "duelo",
+            self.monto,
+            source="bank",
+            session_id=self.session_id,
+            expires_in=420,
+            track_event=False,
         )
-        embed.set_thumbnail(url=RETAL_THUMBNAIL)
-        msg_duelo = await self.ctx.send(embed=embed, view=duel_view)
-        duel_view.message = msg_duelo
-        await duel_view.start_game()
+        if not retador_wager["ok"]:
+            self.resolved = False
+            return await interaction.response.send_message(
+                "❌ El retador ya no tiene suficiente saldo.",
+                ephemeral=True,
+            )
+        retado_wager = await reserve_wager(
+            self.retado_id,
+            "duelo",
+            self.monto,
+            source="bank",
+            session_id=self.session_id,
+            expires_in=420,
+            track_event=False,
+        )
+        if not retado_wager["ok"]:
+            await refund_wager_session(self.session_id)
+            self.resolved = False
+            return await interaction.response.send_message(
+                f"❌ No tienes suficiente en banco. Necesitas **{self.monto}** {COIN}.",
+                ephemeral=True,
+            )
+
+        try:
+            # Detener la vista de aceptación para evitar timeouts posteriores
+            self.stop()
+
+            # Auto-eliminar mensaje de reto en 3 segundos
+            async def delete_message():
+                await asyncio.sleep(3)
+                try:
+                    await self.message.delete()
+                except discord.HTTPException:
+                    pass
+
+            asyncio.create_task(delete_message())
+
+            # Mensaje anunciando el inicio sin embed
+            await interaction.response.defer()
+            msg_anuncio = await self.ctx.send(f"⚔️ La batalla entre <@{self.retador_id}> y <@{self.retado_id}> Comenzará en segundos.... ⚔️")
+
+            # Cerrar permisos de escritura para el rol Nave
+            nave_role = self.ctx.guild.get_role(NAVE_ROLE_ID)
+            if nave_role:
+                await self.ctx.channel.set_permissions(nave_role, send_messages=False, view_channel=True, read_message_history=True, add_reactions=True)
+
+            await asyncio.sleep(3)
+            await msg_anuncio.delete()
+
+            # Iniciar minijuego
+            duel_view = DuelGameView(
+                self.retador_id,
+                self.retado_id,
+                self.monto * 2,
+                self.ctx.guild.id,
+                self.session_id,
+                {
+                    self.retador_id: retador_wager["id"],
+                    self.retado_id: retado_wager["id"],
+                },
+                self.ctx.channel,
+                self.ctx.guild,
+            )
+            embed = discord.Embed(
+                title="⚔️ Duelo Iniciado",
+                description=f"¡Comienza el duelo entre <@{self.retador_id}> y <@{self.retado_id}>!\n\n**Pozo total:** {self.monto * 2} {COIN}\n\nRonda 1/{TOTAL_ROUNDS}",
+                color=discord.Color.blue()
+            )
+            embed.set_thumbnail(url=RETAL_THUMBNAIL)
+            msg_duelo = await self.ctx.send(embed=embed, view=duel_view)
+            duel_view.message = msg_duelo
+            await duel_view.start_game()
+        except Exception:
+            await refund_wager_session(self.session_id)
+            _active_duels.discard(self.ctx.guild.id)
+            nave_role = self.ctx.guild.get_role(NAVE_ROLE_ID)
+            if nave_role:
+                try:
+                    await self.ctx.channel.set_permissions(
+                        nave_role,
+                        send_messages=True,
+                        view_channel=True,
+                        read_message_history=True,
+                        add_reactions=True,
+                    )
+                except discord.HTTPException:
+                    pass
+            raise
 
     @discord.ui.button(label="Rechazar Reto", style=discord.ButtonStyle.danger)
     async def rechazar(self, interaction: discord.Interaction, button: discord.ui.Button):
         if interaction.user.id != self.retado_id:
             return await interaction.response.send_message("❌ Solo el retado puede rechazar.", ephemeral=True)
+        if self.resolved:
+            return await interaction.response.send_message(
+                "❌ Este reto ya fue resuelto.",
+                ephemeral=True,
+            )
+        self.resolved = True
 
         embed = discord.Embed(
             title="❌ Reto Rechazado",
@@ -126,6 +215,8 @@ class AcceptDuelView(discord.ui.View):
         # Resetear cooldown para que otros puedan retar
         self.ctx.command.reset_cooldown(self.ctx)
         _last_duel_times.pop(self.ctx.guild.id, None)
+        _active_duels.discard(self.ctx.guild.id)
+        await clear_command_cooldown("guild", self.ctx.guild.id, "retar")
         
         # Auto-eliminar el embed de rechazo en 30 segundos
         async def delete_message():
@@ -171,12 +262,24 @@ class DuelButton(discord.ui.Button):
 
 
 class DuelGameView(discord.ui.View):
-    def __init__(self, retador_id, retado_id, pozo, guild_id, channel=None, guild=None):
+    def __init__(
+        self,
+        retador_id,
+        retado_id,
+        pozo,
+        guild_id,
+        session_id,
+        wagers,
+        channel=None,
+        guild=None,
+    ):
         super().__init__(timeout=300)  # 5 min total
         self.retador_id = retador_id
         self.retado_id = retado_id
         self.pozo = pozo
         self.guild_id = guild_id
+        self.session_id = session_id
+        self.wagers = wagers
         self.channel = channel
         self.guild = guild
         self.round = 0
@@ -187,6 +290,7 @@ class DuelGameView(discord.ui.View):
         self.clicked = False
         self.game_task = None
         self.message = None
+        self.ended = False
 
         # Crear cuadrícula 5x5
         for y in range(GRID_SIZE):
@@ -249,7 +353,7 @@ class DuelGameView(discord.ui.View):
 
         except Exception as e:
             logger.error(f"Error en duelo: {e}")
-            await self.end_game()
+            await self.cancel_game()
 
     async def hide_sword(self):
         self.sword_visible = False
@@ -263,7 +367,8 @@ class DuelGameView(discord.ui.View):
             pass
 
     async def end_game(self):
-        _active_duels.discard(self.guild_id)
+        if self.ended:
+            return
 
         if self.retador_score > self.retado_score:
             winner_id = self.retador_id
@@ -272,16 +377,39 @@ class DuelGameView(discord.ui.View):
             winner_id = self.retado_id
             winner_name = f"<@{self.retado_id}>"
         else:
-            # Empate (aunque con 7 rondas es improbable)
+            # Empate: se devuelve la apuesta a ambos participantes.
             winner_id = None
             winner_name = "Empate"
 
         if winner_id:
-            await update_bank(winner_id, self.pozo)
+            result = await settle_wager_session(
+                self.session_id,
+                {self.wagers[winner_id]: self.pozo},
+            )
+        else:
+            refunded = await refund_wager_session(self.session_id)
+            result = {"ok": refunded > 0}
+
+        if not result["ok"]:
+            raise RuntimeError(
+                f"No se pudo liquidar el pozo del duelo {self.session_id}"
+            )
+
+        self.ended = True
+        _active_duels.discard(self.guild_id)
 
         embed = discord.Embed(
             title="🏆 Duelo Finalizado",
-            description=f"**Ganador:** {winner_name}\n\n**Puntuación:**\n<@{self.retador_id}>: {self.retador_score}\n<@{self.retado_id}>: {self.retado_score}\n\n**Recompensa:** {self.pozo} {COIN} al banco del ganador.",
+            description=(
+                f"**Ganador:** {winner_name}\n\n"
+                f"**Puntuación:**\n<@{self.retador_id}>: {self.retador_score}\n"
+                f"<@{self.retado_id}>: {self.retado_score}\n\n"
+                + (
+                    f"**Recompensa:** {self.pozo} {COIN} al banco del ganador."
+                    if winner_id
+                    else "**Empate:** las dos apuestas fueron reembolsadas."
+                )
+            ),
             color=discord.Color.green() if winner_id else discord.Color.yellow()
         )
         embed.set_thumbnail(url=WIN_THUMBNAIL)
@@ -303,15 +431,55 @@ class DuelGameView(discord.ui.View):
             pass
         
         # Abrir permisos de escritura para el rol Nave
+        await self._restore_channel()
+        if self.channel:
+            try:
+                await self.channel.send("Batalla Finalizada, Se Retoma la Actividad!")
+            except discord.HTTPException:
+                pass
+
+        self.stop()
+
+    async def cancel_game(self):
+        if self.ended:
+            return
+        self.ended = True
+        _active_duels.discard(self.guild_id)
+        await refund_wager_session(self.session_id)
+        for item in self.children:
+            item.disabled = True
+        if self.message:
+            try:
+                await self.message.edit(
+                    embed=discord.Embed(
+                        title="⚠️ Duelo cancelado",
+                        description="Ocurrió un error y ambas apuestas fueron reembolsadas.",
+                        color=discord.Color.red(),
+                    ),
+                    view=self,
+                )
+            except discord.HTTPException:
+                pass
+        await self._restore_channel()
+        self.stop()
+
+    async def on_timeout(self):
+        await self.cancel_game()
+
+    async def _restore_channel(self):
         if self.channel and self.guild:
             nave_role = self.guild.get_role(NAVE_ROLE_ID)
             if nave_role:
-                await self.channel.set_permissions(nave_role, send_messages=True, view_channel=True, read_message_history=True, add_reactions=True)
-            # Anunciar fin de batalla
-            await self.channel.send("Batalla Finalizada, Se Retoma la Actividad!")
-
-        if self.game_task:
-            self.game_task.cancel()
+                try:
+                    await self.channel.set_permissions(
+                        nave_role,
+                        send_messages=True,
+                        view_channel=True,
+                        read_message_history=True,
+                        add_reactions=True,
+                    )
+                except discord.HTTPException:
+                    pass
 
 
 class Duels(commands.Cog):
@@ -321,13 +489,21 @@ class Duels(commands.Cog):
     @commands.command(name="retar")
     async def retar(self, ctx, usuario: discord.Member, monto: int):
         # Check cooldown
-        cooldown = _duel_cooldowns.get(ctx.guild.id, DEFAULT_DUEL_COOLDOWN)
-        last_time = _last_duel_times.get(ctx.guild.id, 0)
-        if time.time() - last_time < cooldown:
-            remaining = cooldown - (time.time() - last_time)
-            timestamp = int(ctx.message.created_at.timestamp()) + int(remaining)
+        cooldown = _duel_cooldowns.get(ctx.guild.id)
+        if cooldown is None:
+            cooldown = await get_duel_cooldown_config(
+                ctx.guild.id,
+                DEFAULT_DUEL_COOLDOWN,
+            )
+            _duel_cooldowns[ctx.guild.id] = cooldown
+
+        now = time.time()
+        expira_en = _last_duel_times.get(ctx.guild.id, 0)
+        if expira_en <= now:
+            expira_en = await get_command_cooldown("guild", ctx.guild.id, "retar")
+        if expira_en > now:
+            timestamp = int(expira_en)
             return await ctx.reply(f"🚀 La Arena de combate esta ocupada por Jugadores de otros universos Intenta <t:{timestamp}:R>")
-        _last_duel_times[ctx.guild.id] = time.time()
 
         if ctx.author.id == usuario.id:
             return await ctx.send("❌ No puedes retarte a ti mismo.")
@@ -343,6 +519,11 @@ class Duels(commands.Cog):
         if retador_data["bank"] < monto:
             return await ctx.send(f"❌ No tienes suficiente en banco. Necesitas **{monto}** {COIN}.")
 
+        expira_en = now + cooldown
+        _last_duel_times[ctx.guild.id] = expira_en
+        await set_command_cooldown("guild", ctx.guild.id, "retar", expira_en)
+        _active_duels.add(ctx.guild.id)
+
         embed = discord.Embed(
             title="⚔️ Reto de Duelo",
             description=f"<@{usuario.id}> Has recibido un duelo por parte de <@{ctx.author.id}> por **{monto}** {COIN}.\n\n¿Aceptas?",
@@ -350,10 +531,16 @@ class Duels(commands.Cog):
         )
         embed.set_thumbnail(url=RETAL_THUMBNAIL)
 
-        await ctx.send(f"{usuario.mention} Ha sido retado a un duelo.")
-        view = AcceptDuelView(ctx.author.id, usuario.id, monto, ctx)
-        message = await ctx.send(embed=embed, view=view)
-        view.message = message
+        try:
+            await ctx.send(f"{usuario.mention} Ha sido retado a un duelo.")
+            view = AcceptDuelView(ctx.author.id, usuario.id, monto, ctx)
+            message = await ctx.send(embed=embed, view=view)
+            view.message = message
+        except Exception:
+            _last_duel_times.pop(ctx.guild.id, None)
+            _active_duels.discard(ctx.guild.id)
+            await clear_command_cooldown("guild", ctx.guild.id, "retar")
+            raise
 
     @retar.error
     async def retar_error(self, ctx, error):

@@ -3,7 +3,14 @@ from discord.ext import commands
 import random
 import time
 
-from core.database import get_user, update_balance, update_bank
+from core.database import (
+    get_user,
+    update_balance,
+    update_bank,
+    transfer_balance,
+    get_command_cooldown,
+    set_command_cooldown,
+)
 from core.config import rob_config, COIN
 from core import cache
 from core.cache import get_rob_cooldown, set_rob_cooldown
@@ -34,6 +41,11 @@ def _apply_event_victim_penalty(user_id: int, stolen_amount: int) -> None:
 class Rob(commands.Cog):
     def __init__(self, bot):
         self.bot = bot
+
+    async def _set_rob_cooldown(self, user_id: int) -> None:
+        expira_en = time.time() + rob_config["cooldown"]
+        set_rob_cooldown(user_id)
+        await set_command_cooldown("user", user_id, "rob", expira_en)
 
     async def _get_top_target(self, ctx, position: int):
         """Resuelve una posición del Top 15 al miembro correspondiente."""
@@ -106,6 +118,8 @@ class Rob(commands.Cog):
         # Verificar cooldown del atacante
         cooldown_ts = get_rob_cooldown(author_id)
         now = time.time()
+        if cooldown_ts <= now:
+            cooldown_ts = await get_command_cooldown("user", author_id, "rob")
         if cooldown_ts > now:
             remaining = int(cooldown_ts - now)
             return await ctx.send(
@@ -134,7 +148,7 @@ class Rob(commands.Cog):
                     robo_saboteador = True
                 else:
                     await update_bank(author_id, -proteccion_veterano["monto"])
-                    set_rob_cooldown(author_id)
+                    await self._set_rob_cooldown(author_id)
                     await ctx.send(
                         f"🖐️ Lo siento tanto {ctx.author.mention} {proteccion_veterano['msj']}"
                     )
@@ -142,7 +156,7 @@ class Rob(commands.Cog):
 
         # Verificar balance mínimo del objetivo
         if target_user["balance"] < 5000:
-            set_rob_cooldown(author_id)
+            await self._set_rob_cooldown(author_id)
             return await ctx.message.reply(
                 f"😳 No te avergüenza robar a alguien que no tiene ni para una Tarjeta de Rol? "
                 f"Atrévete a por los más grandes."
@@ -153,8 +167,16 @@ class Rob(commands.Cog):
             success = random.random() <= SABOTEADOR_EXITO_PROB
             if success:
                 monto_robo = int(target_user["balance"] * SABOTEADOR_ROBO_PORCENTAJE)
-                await update_balance(author_id, monto_robo)
-                await update_balance(target_id, -monto_robo, track_event=False)
+                transfer = await transfer_balance(
+                    target_id,
+                    author_id,
+                    monto_robo,
+                    track_sender_event=False,
+                )
+                if not transfer["ok"]:
+                    return await ctx.send(
+                        "⚠️ El saldo del objetivo cambió durante el robo. Inténtalo de nuevo."
+                    )
                 _apply_event_victim_penalty(target_id, monto_robo)
                 await ctx.message.reply(
                     f"😈 Logras romper la Protección del **Veterano** de {target_nick} "
@@ -174,8 +196,16 @@ class Rob(commands.Cog):
             success = random.random() <= rob_config["exito_prob"]
             if success:
                 monto_robo = int(target_user["balance"] * 0.15)
-                await update_balance(author_id, monto_robo)
-                await update_balance(target_id, -monto_robo, track_event=False)
+                transfer = await transfer_balance(
+                    target_id,
+                    author_id,
+                    monto_robo,
+                    track_sender_event=False,
+                )
+                if not transfer["ok"]:
+                    return await ctx.send(
+                        "⚠️ El saldo del objetivo cambió durante el robo. Inténtalo de nuevo."
+                    )
                 _apply_event_victim_penalty(target_id, monto_robo)
                 await ctx.message.reply(
                     f"✅ Robo exitoso. Le sacaste **{monto_robo:,}** {COIN} a {target.mention} "
@@ -190,7 +220,7 @@ class Rob(commands.Cog):
                     f"robar a {target_nick}."
                 )
 
-        set_rob_cooldown(author_id)
+        await self._set_rob_cooldown(author_id)
 
 
 async def setup(bot):

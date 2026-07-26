@@ -1,0 +1,12 @@
+# Normalize text files in Git and use Linux line endings in SquareCloud.
+* text=auto
+
+*.py   text eol=lf
+*.txt  text eol=lf
+*.app  text eol=lf
+*.html text eol=lf
+*.md   text eol=lf
+
+# Keep media assets byte-for-byte unchanged.
+*.png  binary
+*.webp binary

@@ -1,9 +1,16 @@
 import discord
 import asyncio
 import random
+import uuid
 from discord.ext import commands
 from discord import app_commands
-from core.database import update_balance, get_user
+from core.database import (
+    get_user,
+    reserve_wager,
+    refund_wager,
+    settle_wager_session,
+    refund_wager_session,
+)
 from core.config import COIN, STAFF_ROLE
 
 # ── CONFIG ─────────────────────────────────────────────
@@ -37,13 +44,16 @@ def is_staff():
 
 # ── JOIN VIEW ──────────────────────────────────────────
 class JoinRaceView(discord.ui.View):
-    def __init__(self, author, monto):
+    def __init__(self, author, monto, session_id, author_wager_id):
         super().__init__(timeout=JOIN_TIMEOUT)
         self.author  = author
         self.monto   = monto
         self.players = [author]   # solo jugadores reales
+        self.wagers = {author.id: author_wager_id}
+        self.session_id = session_id
         self.message = None
         self.started = False
+        self.join_lock = asyncio.Lock()
 
     def build_embed(self, countdown=None):
         inscritos = "\n".join(
@@ -70,28 +80,47 @@ class JoinRaceView(discord.ui.View):
 
     @discord.ui.button(label="🏎️ Unirse", style=discord.ButtonStyle.primary)
     async def unirse(self, interaction: discord.Interaction, button: discord.ui.Button):
-        if self.started:
-            return await interaction.response.send_message("❌ La carrera ya comenzó.", ephemeral=True)
-        if interaction.user in self.players:
-            return await interaction.response.send_message("❌ Ya estás inscrito.", ephemeral=True)
-        if len(self.players) >= MAX_PLAYERS:
-            return await interaction.response.send_message("❌ La carrera está llena.", ephemeral=True)
+        async with self.join_lock:
+            if self.started:
+                return await interaction.response.send_message("❌ La carrera ya comenzó.", ephemeral=True)
+            if interaction.user.id in self.wagers:
+                return await interaction.response.send_message("❌ Ya estás inscrito.", ephemeral=True)
+            if len(self.players) >= MAX_PLAYERS:
+                return await interaction.response.send_message("❌ La carrera está llena.", ephemeral=True)
 
-        user_data = await get_user(interaction.user.id)
-        if user_data["balance"] < self.monto:
-            return await interaction.response.send_message(
-                f"❌ No tienes suficiente balance. Necesitas **{self.monto}** {COIN}.", ephemeral=True
+            wager = await reserve_wager(
+                interaction.user.id,
+                "carrera",
+                self.monto,
+                session_id=self.session_id,
+                expires_in=180,
             )
+            if not wager["ok"]:
+                return await interaction.response.send_message(
+                    f"❌ No tienes suficiente balance. Necesitas **{self.monto}** {COIN}.",
+                    ephemeral=True,
+                )
 
-        self.players.append(interaction.user)
-        await interaction.response.edit_message(embed=self.build_embed(countdown=None), view=self)
+            self.players.append(interaction.user)
+            self.wagers[interaction.user.id] = wager["id"]
+            try:
+                await interaction.response.edit_message(
+                    embed=self.build_embed(countdown=None),
+                    view=self,
+                )
+            except Exception:
+                self.players.remove(interaction.user)
+                self.wagers.pop(interaction.user.id, None)
+                await refund_wager(wager["id"])
+                raise
 
     async def on_timeout(self):
-        if self.started:
-            return
-        self.started = True
-        for item in self.children:
-            item.disabled = True
+        async with self.join_lock:
+            if self.started:
+                return
+            self.started = True
+            for item in self.children:
+                item.disabled = True
         if self.message:
             try:
                 await self.message.edit(embed=self.build_embed(countdown=0), view=self)
@@ -113,11 +142,13 @@ def build_jack_confirmation_embed(author, monto):
 
 
 class SoloVsJackView(discord.ui.View):
-    def __init__(self, author, monto, channel_id):
+    def __init__(self, author, monto, channel_id, session_id, wagers):
         super().__init__(timeout=30)
         self.author = author
         self.monto = monto
         self.channel_id = channel_id
+        self.session_id = session_id
+        self.wagers = wagers
         self.message = None
         self.resolved = False
 
@@ -135,26 +166,25 @@ class SoloVsJackView(discord.ui.View):
                 "❌ Esta carrera ya fue resuelta.", ephemeral=True
             )
 
-        user_data = await get_user(self.author.id)
-        if user_data["balance"] < self.monto:
-            self.resolved = True
-            _active_races.discard(self.channel_id)
-            return await interaction.response.edit_message(
-                embed=discord.Embed(
-                    title="🏎️ Carrera cancelada",
-                    description=f"No tienes suficiente balance para apostar **{self.monto}** {COIN}.",
-                    color=discord.Color.red(),
-                ),
-                view=None,
-            )
-
         self.resolved = True
         for item in self.children:
             item.disabled = True
-        await interaction.response.defer()
-        asyncio.create_task(
-            run_race(interaction.message, [self.author], self.monto, self.channel_id)
-        )
+        try:
+            await interaction.response.defer()
+            asyncio.create_task(
+                run_race(
+                    interaction.message,
+                    [self.author],
+                    self.monto,
+                    self.channel_id,
+                    self.session_id,
+                    self.wagers,
+                )
+            )
+        except Exception:
+            await refund_wager_session(self.session_id)
+            _active_races.discard(self.channel_id)
+            raise
 
     @discord.ui.button(label="NO", style=discord.ButtonStyle.danger)
     async def cancelar(self, interaction: discord.Interaction, button: discord.ui.Button):
@@ -166,13 +196,14 @@ class SoloVsJackView(discord.ui.View):
             )
 
         self.resolved = True
+        await refund_wager_session(self.session_id)
         _active_races.discard(self.channel_id)
         for item in self.children:
             item.disabled = True
         await interaction.response.edit_message(
             embed=discord.Embed(
                 title="🏎️ Carrera cancelada",
-                description="La carrera contra Jack fue cancelada.",
+                description="La carrera contra Jack fue cancelada y la apuesta fue reembolsada.",
                 color=discord.Color.red(),
             ),
             view=self,
@@ -182,6 +213,7 @@ class SoloVsJackView(discord.ui.View):
         if self.resolved:
             return
         self.resolved = True
+        await refund_wager_session(self.session_id)
         _active_races.discard(self.channel_id)
         for item in self.children:
             item.disabled = True
@@ -190,7 +222,10 @@ class SoloVsJackView(discord.ui.View):
                 await self.message.edit(
                     embed=discord.Embed(
                         title="🏎️ Carrera cancelada",
-                        description="No se confirmó la carrera contra Jack a tiempo.",
+                        description=(
+                            "No se confirmó la carrera contra Jack a tiempo. "
+                            "La apuesta fue reembolsada."
+                        ),
                         color=discord.Color.red(),
                     ),
                     view=self,
@@ -200,7 +235,7 @@ class SoloVsJackView(discord.ui.View):
 
 
 # ── RESULT EMBED ───────────────────────────────────────
-def build_result_embed(winner_name, monto, players, has_bot: bool):
+def build_result_embed(winner_id, monto, players, has_bot: bool):
     """
     players: lista de Member reales.
     has_bot: si Jack (bot) participó.
@@ -211,16 +246,16 @@ def build_result_embed(winner_name, monto, players, has_bot: bool):
 
     lines = []
     for player in players:
-        if player.display_name == winner_name:
+        if player.id == winner_id:
             lines.append(
                 f"🥇 {player.mention} **¡GANÓ!** **+{ganancia_net}** {COIN} "
-                f"*(apuesta devuelta + 150% del pozo)*"
+                f"*(apuesta devuelta + 150% de las apuestas rivales)*"
             )
         else:
             lines.append(f"💀 {player.mention} perdió **-{monto}** {COIN}")
 
     # Si Jack ganó (bot), nadie recibe nada extra — solo se muestra
-    if has_bot and winner_name == BOT_NAME:
+    if has_bot and winner_id is None:
         lines.insert(0, f"🥇 **{BOT_NAME}** (Bot) se llevó la carrera — nadie ganó el pozo.")
 
     return discord.Embed(
@@ -231,21 +266,25 @@ def build_result_embed(winner_name, monto, players, has_bot: bool):
 
 
 # ── RACE LOGIC ─────────────────────────────────────────
-async def run_race(message, real_players, monto, channel_id):
+async def run_race(
+    message,
+    real_players,
+    monto,
+    channel_id,
+    session_id,
+    wagers,
+):
     has_bot  = len(real_players) == 1
-    all_names = [p.display_name for p in real_players]
-    if has_bot:
-        all_names.append(BOT_NAME)
 
     # Jack conserva ventaja en carreras con un único jugador real.
     if has_bot:
-        winner_name = (
-            real_players[0].display_name
+        winner_id = (
+            real_players[0].id
             if random.random() < JACK_PLAYER_WIN_PROBABILITY
-            else BOT_NAME
+            else None
         )
     else:
-        winner_name = random.choice(all_names)
+        winner_id = random.choice(real_players).id
 
     # ── Mostrar embed con GIF mientras "corre" la carrera ─────────
     gif_embed = discord.Embed(
@@ -253,7 +292,8 @@ async def run_race(message, real_players, monto, channel_id):
         color=discord.Color.gold()
     )
     gif_embed.set_image(url=GIF_URL)
-    pot = monto * len(all_names)
+    n_total = len(real_players) + (1 if has_bot else 0)
+    pot = monto * n_total
     gif_embed.set_footer(text=f"Apuesta: {monto} • Pozo Total {pot}.")
 
     try:
@@ -261,20 +301,36 @@ async def run_race(message, real_players, monto, channel_id):
     except Exception:
         pass
 
-    await asyncio.sleep(GIF_DURATION)
+    try:
+        await asyncio.sleep(GIF_DURATION)
 
-    # ── Aplicar resultados económicos (solo jugadores reales) ──────
-    for player in real_players:
-        if player.display_name == winner_name:
-            n_total      = len(all_names)
-            pot_others   = monto * (n_total - 1)
-            ganancia_net = int(pot_others * 1.5)
-            await update_balance(player.id, ganancia_net)
-        else:
-            await update_balance(player.id, -monto)
+        # El ganador recupera su apuesta y recibe 150% de las apuestas rivales.
+        payouts = {}
+        if winner_id is not None:
+            pot_others = monto * (n_total - 1)
+            ganancia_neta = int(pot_others * 1.5)
+            payouts[wagers[winner_id]] = monto + ganancia_neta
+        settlement = await settle_wager_session(session_id, payouts)
+        if not settlement["ok"]:
+            raise RuntimeError("No se pudo liquidar el pozo de la carrera.")
+    except Exception:
+        await refund_wager_session(session_id)
+        _active_races.discard(channel_id)
+        try:
+            await message.edit(
+                embed=discord.Embed(
+                    title="🏎️ Carrera cancelada",
+                    description="Ocurrió un error y todas las apuestas fueron reembolsadas.",
+                    color=discord.Color.red(),
+                ),
+                view=None,
+            )
+        except Exception:
+            pass
+        return
 
     # ── Embed de resultado final ───────────────────────────────────
-    result_embed = build_result_embed(winner_name, monto, real_players, has_bot)
+    result_embed = build_result_embed(winner_id, monto, real_players, has_bot)
     try:
         await message.edit(embed=result_embed)
     except Exception:
@@ -311,17 +367,35 @@ class Carrera(commands.Cog):
         if ctx.channel.id in _active_races:
             return await ctx.send(f"❌ {ctx.author.mention} Ya hay una carrera activa en este canal.")
 
-        user_data = await get_user(ctx.author.id)
-        if user_data["balance"] < monto:
+        await get_user(ctx.author.id)
+        session_id = str(uuid.uuid4())
+        author_wager = await reserve_wager(
+            ctx.author.id,
+            "carrera",
+            monto,
+            session_id=session_id,
+            expires_in=180,
+        )
+        if not author_wager["ok"]:
             return await ctx.send(
                 f"❌ {ctx.author.mention} No tienes suficiente balance. Necesitas **{monto}** {COIN}."
             )
 
         _active_races.add(ctx.channel.id)
 
-        view    = JoinRaceView(ctx.author, monto)
-        embed   = view.build_embed(countdown=JOIN_TIMEOUT)
-        message = await ctx.send(embed=embed, view=view)
+        view = JoinRaceView(
+            ctx.author,
+            monto,
+            session_id,
+            author_wager["id"],
+        )
+        embed = view.build_embed(countdown=JOIN_TIMEOUT)
+        try:
+            message = await ctx.send(embed=embed, view=view)
+        except Exception:
+            _active_races.discard(ctx.channel.id)
+            await refund_wager_session(session_id)
+            raise
         view.message = message
 
         # ── Countdown de inscripciones ──────────────────────────────
@@ -334,15 +408,22 @@ class Carrera(commands.Cog):
             except Exception:
                 pass
 
-        view.started = True
-        for item in view.children:
-            item.disabled = True
-
-        real_players = view.players
+        async with view.join_lock:
+            view.started = True
+            for item in view.children:
+                item.disabled = True
+            real_players = list(view.players)
+            race_wagers = dict(view.wagers)
 
         # Un solo jugador debe confirmar antes de competir contra Jack.
         if len(real_players) == 1:
-            solo_view = SoloVsJackView(ctx.author, monto, ctx.channel.id)
+            solo_view = SoloVsJackView(
+                ctx.author,
+                monto,
+                ctx.channel.id,
+                session_id,
+                race_wagers,
+            )
             solo_view.message = message
             try:
                 await message.edit(
@@ -351,6 +432,7 @@ class Carrera(commands.Cog):
                 )
             except discord.HTTPException:
                 _active_races.discard(ctx.channel.id)
+                await refund_wager_session(session_id)
             return
 
         # ── Mostrar inscritos finales antes de arrancar ─────────────
@@ -360,7 +442,14 @@ class Carrera(commands.Cog):
             pass
 
         await asyncio.sleep(1)
-        await run_race(message, real_players, monto, ctx.channel.id)
+        await run_race(
+            message,
+            real_players,
+            monto,
+            ctx.channel.id,
+            session_id,
+            race_wagers,
+        )
 
     @app_commands.command(name="carrera_alternar", description="Activa o desactiva el sistema de carreras")
     @is_staff()

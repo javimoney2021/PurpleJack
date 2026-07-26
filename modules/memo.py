@@ -1,8 +1,17 @@
 import discord
 import asyncio
 import random
+import time
 from discord.ext import commands
-from core.database import get_user, update_balance
+from core.database import (
+    get_user,
+    get_command_cooldown,
+    set_command_cooldown,
+    reserve_wager,
+    settle_wager,
+    lose_wager,
+    refund_wager,
+)
 from core.config import COIN, memo_config
 
 # ── CONFIG ─────────────────────────────────────────────
@@ -20,7 +29,13 @@ _memo_cooldowns: dict[int, float] = {}  # {user_id: expira_en}
 
 # ── VIEW ───────────────────────────────────────────────
 class MemoView(discord.ui.View):
-    def __init__(self, author: discord.Member, monto: int, tablero: list[str]):
+    def __init__(
+        self,
+        author: discord.Member,
+        monto: int,
+        tablero: list[str],
+        wager_id: str,
+    ):
         super().__init__(timeout=120)
         self.author        = author
         self.monto         = monto
@@ -32,6 +47,7 @@ class MemoView(discord.ui.View):
         self.bloqueado     = False
         self.racha         = 0
         self.message       = None
+        self.wager_id      = wager_id
         self._terminado    = False
         self._build_buttons()
 
@@ -68,6 +84,7 @@ class MemoView(discord.ui.View):
                     "❌ Ya seleccionaste esta casilla.", ephemeral=True
                 )
 
+            self.bloqueado = True
             self.seleccion.append(idx)
 
             # ── Mostrar casilla seleccionada temporalmente ────────
@@ -85,7 +102,6 @@ class MemoView(discord.ui.View):
 
             # ── Evaluar par cuando hay 2 seleccionadas ────────────
             if len(self.seleccion) == 2:
-                self.bloqueado = True
                 i1, i2 = self.seleccion
 
                 if self.tablero[i1] == self.tablero[i2]:
@@ -107,7 +123,7 @@ class MemoView(discord.ui.View):
                         # 🏆 Ganó — devuelve la apuesta + premio total
                         recompensa_total = self.monto * 3
                         ganancia_neta = self.monto * 2
-                        await update_balance(self.author.id, recompensa_total)
+                        await settle_wager(self.wager_id, recompensa_total)
                         embed = self._build_embed(
                             estado=(
                                 f"🏆 ¡Ganaste! Recibes **+{recompensa_total}** {COIN} en total "
@@ -117,6 +133,7 @@ class MemoView(discord.ui.View):
                         )
                         self.stop()
                         self._deshabilitar_todo()
+                        _active_memo.discard(self.author.id)
                         try:
                             await interaction.edit_original_response(embed=embed, view=self)
                         except Exception:
@@ -126,7 +143,6 @@ class MemoView(discord.ui.View):
                             await self.message.delete()
                         except Exception:
                             pass
-                        _active_memo.discard(self.author.id)
                         return
 
                     self.bloqueado = False
@@ -149,6 +165,7 @@ class MemoView(discord.ui.View):
                             return
                         self._terminado = True
                         # 💀 Perdió — apuesta ya descontada al iniciar
+                        await lose_wager(self.wager_id)
                         self.revelado = [True] * 16   # revelar todo
                         self._build_buttons()
                         self._deshabilitar_todo()
@@ -157,6 +174,7 @@ class MemoView(discord.ui.View):
                             thumbnail_url=MEMO_LOSS_THUMBNAIL,
                         )
                         self.stop()
+                        _active_memo.discard(self.author.id)
                         try:
                             await interaction.edit_original_response(embed=embed, view=self)
                         except Exception:
@@ -166,7 +184,6 @@ class MemoView(discord.ui.View):
                             await self.message.delete()
                         except Exception:
                             pass
-                        _active_memo.discard(self.author.id)
                         return
 
                     # Mostrar las dos incorrectas 1.5s y luego ocultarlas
@@ -180,6 +197,8 @@ class MemoView(discord.ui.View):
                         )
                     except Exception:
                         pass
+            else:
+                self.bloqueado = False
 
         return callback
 
@@ -210,18 +229,40 @@ class MemoView(discord.ui.View):
             item.disabled = True
 
     async def on_timeout(self):
+        if self._terminado:
+            return
+        self._terminado = True
         _active_memo.discard(self.author.id)
+        await refund_wager(self.wager_id)
         self._deshabilitar_todo()
         if self.message:
             try:
                 await self.message.edit(
-                    embed=self._build_embed(estado="⏰ Tiempo agotado. Partida cancelada."),
+                    embed=self._build_embed(
+                        estado=(
+                            f"⏰ Tiempo agotado. Partida cancelada y apuesta de "
+                            f"**{self.monto}** {COIN} reembolsada."
+                        )
+                    ),
                     view=self
                 )
                 await asyncio.sleep(AUTO_DELETE)
                 await self.message.delete()
             except Exception:
                 pass
+
+    async def on_error(self, interaction, error, item):
+        self._terminado = True
+        _active_memo.discard(self.author.id)
+        await refund_wager(self.wager_id)
+        self._deshabilitar_todo()
+        try:
+            await interaction.followup.send(
+                "⚠️ La partida se canceló por un error y tu apuesta fue reembolsada.",
+                ephemeral=True,
+            )
+        except Exception:
+            pass
 
 
 # ── COG ────────────────────────────────────────────────
@@ -231,12 +272,13 @@ class Memo(commands.Cog):
 
     @commands.command(name="memo")
     async def memo(self, ctx, monto: int = None):
-        import time
         user_id = ctx.author.id
         now     = time.time()
 
         # ── Cooldown individual por usuario ────────────────────────
         expira_en = _memo_cooldowns.get(user_id, 0)
+        if expira_en <= now:
+            expira_en = await get_command_cooldown("user", user_id, "memo")
         if expira_en > now:
             remaining = int(expira_en - now)
             tiempo = f"{remaining // 60}m {remaining % 60}s" if remaining >= 60 else f"{remaining}s"
@@ -274,19 +316,34 @@ class Memo(commands.Cog):
                 f"Necesitas **{monto}** {COIN}."
             )
 
-        # ── Aplicar cooldown individual ANTES de iniciar partida ──
-        _memo_cooldowns[user_id] = now + memo_config["cooldown"]
-
         # ── Generar tablero aleatorio ──────────────────────────────
         tablero = EMOJIS_PARES * 2
         random.shuffle(tablero)
 
-        await update_balance(user_id, -monto)  # descuenta al iniciar
-        _active_memo.add(user_id)
+        wager = await reserve_wager(
+            user_id,
+            "memo",
+            monto,
+            expires_in=180,
+        )
+        if not wager["ok"]:
+            return await ctx.send(
+                f"❌ {ctx.author.mention} No tienes suficiente balance. "
+                f"Necesitas **{monto}** {COIN}."
+            )
 
-        view = MemoView(ctx.author, monto, tablero)
-        msg  = await ctx.send(embed=view._build_embed(), view=view)
-        view.message = msg
+        expira_en = now + memo_config["cooldown"]
+        try:
+            _memo_cooldowns[user_id] = expira_en
+            await set_command_cooldown("user", user_id, "memo", expira_en)
+            _active_memo.add(user_id)
+            view = MemoView(ctx.author, monto, tablero, wager["id"])
+            msg = await ctx.send(embed=view._build_embed(), view=view)
+            view.message = msg
+        except Exception:
+            _active_memo.discard(user_id)
+            await refund_wager(wager["id"])
+            raise
 
     @memo.error
     async def memo_error(self, ctx, error):

@@ -3,7 +3,15 @@ import random
 import time
 import asyncio
 from discord.ext import commands
-from core.database import get_user, get_game_cooldown, set_game_cooldown
+from core.database import (
+    get_user,
+    get_game_cooldown,
+    set_game_cooldown,
+    reserve_wager,
+    settle_wager,
+    lose_wager,
+    refund_wager,
+)
 from core.config import COIN, dados_config
 from core import cache
 
@@ -47,13 +55,20 @@ def choose_dice_rolls(success: bool):
 
 
 class DadosRollView(discord.ui.View):
-    def __init__(self, author_id: int, monto: int):
+    def __init__(self, author_id: int, monto: int, wager_id: str):
         super().__init__(timeout=60)
         self.author_id = author_id
         self.monto     = monto
+        self.wager_id  = wager_id
         self.message   = None
+        self.finished  = False
+        self.processing = False
 
     async def on_timeout(self):
+        if self.finished:
+            return
+        self.finished = True
+        await refund_wager(self.wager_id)
         _ACTIVE_DADOS.discard(self.author_id)
         for child in self.children:
             child.disabled = True
@@ -69,10 +84,21 @@ class DadosRollView(discord.ui.View):
             return await interaction.response.send_message(
                 "❌ Solo el autor de la apuesta puede lanzar los dados.", ephemeral=True
             )
+        if self.finished or self.processing:
+            return await interaction.response.send_message(
+                "⏳ Esta partida ya se está procesando.",
+                ephemeral=True,
+            )
+        self.processing = True
 
         if not dados_config["activa"]:
+            self.finished = True
+            await refund_wager(self.wager_id)
+            _ACTIVE_DADOS.discard(self.author_id)
+            self.stop()
             return await interaction.response.send_message(
-                "🔧 El sistema de dados está desactivado.", ephemeral=True
+                "🔧 El sistema de dados está desactivado. Tu apuesta fue reembolsada.",
+                ephemeral=True,
             )
 
         await interaction.response.defer()
@@ -102,20 +128,21 @@ class DadosRollView(discord.ui.View):
         autor_suma = d1 + d2
         bot_suma   = b1 + b2
 
-        # Mini-juego: actualizar solo en RAM — flush_loop persiste a DB cada 10 min
-        # get_user asegura que el usuario está en cache (seguridad extra)
-        await get_user(self.author_id)
-
         if exito:
-            ganancia = self.monto * 2
-            cache.update_cached_balance(self.author_id, ganancia)
-            resultado_text = f"🎉 ¡Ganaste! Tu apuesta se duplica: +{ganancia} {COIN}."
+            pago_total = self.monto * 2
+            await settle_wager(self.wager_id, pago_total)
+            resultado_text = (
+                f"🎉 ¡Ganaste! Pago total: **{pago_total}** {COIN}; "
+                f"ganancia neta: **+{self.monto}** {COIN}."
+            )
             color = discord.Color.green()
         else:
-            cache.update_cached_balance(self.author_id, -self.monto)
+            await lose_wager(self.wager_id)
             resultado_text = f"💀 Perdiste tu apuesta inicial de {self.monto} {COIN}."
             color = discord.Color.red()
 
+        self.finished = True
+        self.stop()
         _ACTIVE_DADOS.discard(self.author_id)
 
         expira_en = time.time() + dados_config["cooldown"]
@@ -144,6 +171,19 @@ class DadosRollView(discord.ui.View):
             await interaction.message.edit(embed=embed, view=self)
             if self.message:
                 asyncio.create_task(self.message.delete(delay=80))
+        except Exception:
+            pass
+
+    async def on_error(self, interaction, error, item):
+        self.finished = True
+        await refund_wager(self.wager_id)
+        self.stop()
+        _ACTIVE_DADOS.discard(self.author_id)
+        try:
+            await interaction.followup.send(
+                "⚠️ La partida se canceló por un error y tu apuesta fue reembolsada.",
+                ephemeral=True,
+            )
         except Exception:
             pass
 
@@ -222,11 +262,27 @@ class Dados(commands.Cog):
                  f"Máx apuesta: {dados_config['max_apuesta']} PurpleCoins"
         )
 
-        _ACTIVE_DADOS.add(ctx.author.id)
+        wager = await reserve_wager(
+            ctx.author.id,
+            "dados",
+            monto,
+            expires_in=120,
+        )
+        if not wager["ok"]:
+            return await ctx.send(
+                f"❌ {ctx.author.mention} No tienes suficiente balance "
+                f"para apostar {monto} {COIN}."
+            )
 
-        view    = DadosRollView(ctx.author.id, monto)
-        message = await ctx.reply(embed=embed, view=view, mention_author=False)
-        view.message = message
+        _ACTIVE_DADOS.add(ctx.author.id)
+        try:
+            view = DadosRollView(ctx.author.id, monto, wager["id"])
+            message = await ctx.reply(embed=embed, view=view, mention_author=False)
+            view.message = message
+        except Exception:
+            _ACTIVE_DADOS.discard(ctx.author.id)
+            await refund_wager(wager["id"])
+            raise
 
 
 async def setup(bot):

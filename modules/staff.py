@@ -21,7 +21,7 @@ from core.database import (
     save_game_config, save_rr_config, save_ruleta_config,
     save_rob_config, save_dados_config, save_memo_config, clear_game_cooldowns,
     activar_evento as activar_evento_db, cerrar_evento as cerrar_evento_db,
-    flush_evento_puntos
+    flush_evento_puntos, set_duel_cooldown_config, clear_command_cooldowns
 )
 from core import cache
 from core.config import (
@@ -77,7 +77,14 @@ class ResetAllModal(discord.ui.Modal, title="Confirmar Reset Global"):
         if self.confirmacion.value != "Reset":
             return await interaction.response.send_message("❌ Confirmación incorrecta.", ephemeral=True)
         async with pool.acquire() as conn:
-            await conn.execute("UPDATE users SET balance=0, bank=0")
+            async with conn.transaction():
+                await conn.execute("UPDATE users SET balance=0, bank=0")
+                await conn.execute(
+                    """
+                    UPDATE wagers SET status='lost', payout=0
+                    WHERE status='pending'
+                    """
+                )
         cache._cache.clear()
         cache._dirty.clear()
         if cache.is_evento_activo():
@@ -907,6 +914,7 @@ class Staff(commands.Cog):
         memo_config["cooldown"] = cooldown_segundos
         await save_memo_config()
         _memo_cooldowns.clear()
+        await clear_command_cooldowns("memo")
 
         await interaction.response.send_message(
             "✅ Memo actualizado:\n"
@@ -1795,6 +1803,7 @@ class Staff(commands.Cog):
         rob_config["fallo_prob"] = fallo
         await save_rob_config()
         cache.clear_rob_cooldowns_cache()
+        await clear_command_cooldowns("rob")
         await interaction.response.send_message(
             f"✅ Rob actualizado:\n• CD: {cooldown}\n• Éxito: {int(exito*100)}%\n• Fallo: {int(fallo*100)}%",
             ephemeral=False
@@ -1983,6 +1992,7 @@ class Staff(commands.Cog):
         
         from modules.duels import _duel_cooldowns
         _duel_cooldowns[interaction.guild.id] = cooldown
+        await set_duel_cooldown_config(interaction.guild.id, cooldown)
         await interaction.response.send_message(f"✅ Cooldown de !retar cambiado a {cooldown} segundos.", ephemeral=True)
 
     @app_commands.command(name="veterano_config", description="Configurar Rol Anti-Robo")

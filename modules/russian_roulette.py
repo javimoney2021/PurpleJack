@@ -7,7 +7,16 @@ import discord
 from discord.ext import commands
 
 from core.config import COIN, rr_config
-from core.database import get_user, get_game_cooldown, set_game_cooldown
+from core.database import (
+    get_user,
+    get_game_cooldown,
+    set_game_cooldown,
+    reserve_wager,
+    increase_wager,
+    settle_wager,
+    lose_wager,
+    refund_wager,
+)
 from core import cache
 
 logger = logging.getLogger(__name__)
@@ -34,7 +43,13 @@ def build_rr_embed(user: discord.Member, game, state: str, description: str, thu
         description=description,
         color=discord.Color.purple() if state != "lost" else discord.Color.red(),
     )
-    embed.add_field(name="Apuesta", value=f"{game.apuesta} {COIN}", inline=True)
+    embed.add_field(name="Apuesta inicial", value=f"{game.apuesta} {COIN}", inline=True)
+    if game.risk_amount != game.apuesta:
+        embed.add_field(
+            name="Riesgo actual",
+            value=f"{game.risk_amount} {COIN}",
+            inline=True,
+        )
     if state == "lost":
         embed.add_field(name="Rondas completadas", value=f"{game.round}/5",      inline=True)
         embed.add_field(name="Ganancia final",       value=f"0 {COIN}",           inline=False)
@@ -49,7 +64,7 @@ def build_rr_embed(user: discord.Member, game, state: str, description: str, thu
 
 
 class RRGameState:
-    def __init__(self, user_id: int, apuesta: int, author_name: str):
+    def __init__(self, user_id: int, apuesta: int, author_name: str, wager_id: str):
         self.user_id     = user_id
         self.apuesta     = apuesta
         self.round       = 0
@@ -58,6 +73,9 @@ class RRGameState:
         self.finished    = False
         self.message     = None
         self.author_name = author_name
+        self.wager_id    = wager_id
+        self.risk_amount = apuesta
+        self.processing  = False
 
 
 class RRView(discord.ui.View):
@@ -83,6 +101,8 @@ class RRView(discord.ui.View):
         if self.game.finished:
             return
         self.game.active = False
+        self.game.finished = True
+        await refund_wager(self.game.wager_id)
         for item in self.children:
             item.disabled = True
         if self.game.message:
@@ -90,7 +110,7 @@ class RRView(discord.ui.View):
                 title=f"**RULETA RUSA - {self.game.author_name}**",
                 description=(
                     "⏳ La Ruleta Rusa expiró por inactividad. "
-                    "Crea otra para intentarlo de nuevo."
+                    f"Tu riesgo de **{self.game.risk_amount} {COIN}** fue reembolsado."
                 ),
                 color=discord.Color.dark_grey(),
             )
@@ -103,7 +123,30 @@ class RRView(discord.ui.View):
 
     @discord.ui.button(label="Disparar", style=discord.ButtonStyle.danger, row=0)
     async def disparar(self, interaction: discord.Interaction, button: discord.ui.Button):
+        if self.game.processing:
+            return await interaction.response.send_message(
+                "⏳ Ya se está procesando una acción.",
+                ephemeral=True,
+            )
+        self.game.processing = True
         try:
+            target_risk = None
+            if self.game.round == 3:
+                target_risk = int(self.game.apuesta * 1.8)
+            elif self.game.round == 4:
+                target_risk = int(self.game.apuesta * 2.8)
+
+            if target_risk is not None and target_risk > self.game.risk_amount:
+                extra = target_risk - self.game.risk_amount
+                increased = await increase_wager(self.game.wager_id, extra)
+                if not increased["ok"]:
+                    return await interaction.response.send_message(
+                        f"❌ Necesitas **{extra} {COIN}** adicionales para asumir "
+                        f"el riesgo de esta ronda. Puedes reclamar tu ganancia actual.",
+                        ephemeral=True,
+                    )
+                self.game.risk_amount = target_risk
+
             preparing_embed = build_rr_embed(
                 interaction.user,
                 self.game,
@@ -115,10 +158,9 @@ class RRView(discord.ui.View):
                 ),
                 thumbnail=WAIT_IMAGE,
             )
-            disabled_view = RRView(self.game, self.author_id)
-            for item in disabled_view.children:
+            for item in self.children:
                 item.disabled = True
-            await interaction.response.edit_message(embed=preparing_embed, view=disabled_view)
+            await interaction.response.edit_message(embed=preparing_embed, view=self)
 
             await asyncio.sleep(5)
 
@@ -141,20 +183,25 @@ class RRView(discord.ui.View):
                         description=(
                             f"💥 **Victoria Total**! Completaste las 5 fases de la Ruleta Rusa, "
                             f"**Suerte** es tu segundo nombre!.\n\n"
-                            f"Has acumulado **{self.game.ganancia} {COIN}** Dinero enviado a tu balance."
+                            f"Recuperas tu riesgo de **{self.game.risk_amount} {COIN}** "
+                            f"y recibes **{self.game.ganancia} {COIN}** de ganancia."
                         ),
                         thumbnail=END_IMAGE,
                     )
-                    final_view = RRView(self.game, self.author_id)
-                    for item in final_view.children:
+                    for item in self.children:
                         item.disabled = True
-                    # Mini-juego: solo RAM — flush_loop persiste a DB cada 10 min
-                    cache.update_cached_balance(self.game.user_id, self.game.ganancia)
-                    await interaction.edit_original_response(embed=total_embed, view=final_view)
+                    await settle_wager(
+                        self.game.wager_id,
+                        self.game.risk_amount + self.game.ganancia,
+                    )
+                    self.stop()
+                    await interaction.edit_original_response(embed=total_embed, view=self)
                     rr_games.pop(self.game.user_id, None)
                     return
 
-                reward_percent = format_percent(sum(ROUND_REWARDS[: self.game.round]))
+                reward_percent = format_percent(
+                    sum(ROUND_REWARDS[: self.game.round])
+                )
 
                 if self.game.round == 3:
                     aviso = (
@@ -178,28 +225,27 @@ class RRView(discord.ui.View):
                     description=(
                         f"✅ Te salvaste en la **{ROUND_LABELS[self.game.round - 1]}**!\n\n"
                         f"Ganancia acumulada: **{self.game.ganancia} {COIN}**\n"
+                        f"Equivale al **{reward_percent}%** de la apuesta inicial.\n"
                         f"Puedes reclamar ya o arriesgarte al siguiente disparo.\n\n"
-                        f"🔸 **Boost!** por completar la ronda actual: **{reward_percent}%**"
                         f"{aviso}"
                     ),
                     thumbnail=SUCCESS_IMAGE,
                 )
                 active_view = RRView(self.game, self.author_id)
                 await interaction.edit_original_response(embed=result_embed, view=active_view)
+                self.stop()
                 return
 
             self.game.active   = False
             self.game.finished = True
 
             ronda_actual = self.game.round + 1
+            perdida = self.game.risk_amount
             if ronda_actual == 4:
-                perdida   = int(self.game.apuesta * 1.3)
-                extra_txt = f"⚠️ Ronda 4 — Perdiste **{perdida} {COIN}** (apuesta +30%)"
+                extra_txt = f"⚠️ Ronda 4 — Perdiste **{perdida} {COIN}** (riesgo x1.8)"
             elif ronda_actual == 5:
-                perdida   = int(self.game.apuesta * 1.5)
-                extra_txt = f"⚠️ Ronda 5 — Perdiste **{perdida} {COIN}** (apuesta +50%)"
+                extra_txt = f"⚠️ Ronda 5 — Perdiste **{perdida} {COIN}** (riesgo x2.8)"
             else:
-                perdida   = self.game.apuesta
                 extra_txt = f"Perdiste tu apuesta inicial de **{perdida} {COIN}**"
 
             loss_embed = build_rr_embed(
@@ -212,25 +258,43 @@ class RRView(discord.ui.View):
                 ),
                 thumbnail=FAILURE_IMAGE,
             )
-            loss_view = RRView(self.game, self.author_id)
-            for item in loss_view.children:
+            for item in self.children:
                 item.disabled = True
-            # Mini-juego: solo RAM — flush_loop persiste a DB cada 10 min
-            cache.update_cached_balance(self.game.user_id, -perdida)
-            await interaction.edit_original_response(embed=loss_embed, view=loss_view)
+            await lose_wager(self.game.wager_id)
+            self.stop()
+            await interaction.edit_original_response(embed=loss_embed, view=self)
             rr_games.pop(self.game.user_id, None)
 
         except Exception as e:
             logger.error(f"Error en disparar: {e}")
+            self.game.active = False
+            self.game.finished = True
+            await refund_wager(self.game.wager_id)
+            rr_games.pop(self.game.user_id, None)
             try:
-                await interaction.response.send_message(
-                    f"❌ Error al procesar: {e}", ephemeral=True
-                )
+                if interaction.response.is_done():
+                    await interaction.followup.send(
+                        "❌ La partida se canceló por un error y tu apuesta fue reembolsada.",
+                        ephemeral=True,
+                    )
+                else:
+                    await interaction.response.send_message(
+                        "❌ La partida se canceló por un error y tu apuesta fue reembolsada.",
+                        ephemeral=True,
+                    )
             except Exception:
                 pass
+        finally:
+            self.game.processing = False
 
     @discord.ui.button(label="Reclamar", style=discord.ButtonStyle.success, row=0)
     async def reclamar(self, interaction: discord.Interaction, button: discord.ui.Button):
+        if self.game.processing:
+            return await interaction.response.send_message(
+                "⏳ Ya se está procesando una acción.",
+                ephemeral=True,
+            )
+        self.game.processing = True
         try:
             if self.game.round == 0:
                 return await interaction.response.send_message(
@@ -246,27 +310,43 @@ class RRView(discord.ui.View):
                 self.game,
                 state="claimed",
                 description=(
-                    f"🟢 Has reclamado **{self.game.ganancia} {COIN}** al balance.\n\n"
+                    f"🟢 Recuperas tu riesgo de **{self.game.risk_amount} {COIN}** "
+                    f"y reclamas **{self.game.ganancia} {COIN}** de ganancia.\n\n"
                     f"Gracias por jugar Ruleta Rusa."
                 ),
                 thumbnail=END_IMAGE,
             )
-            claim_view = RRView(self.game, self.author_id)
-            for item in claim_view.children:
+            for item in self.children:
                 item.disabled = True
-            # Mini-juego: solo RAM — flush_loop persiste a DB cada 10 min
-            cache.update_cached_balance(self.game.user_id, self.game.ganancia)
-            await interaction.response.edit_message(embed=claim_embed, view=claim_view)
+            await settle_wager(
+                self.game.wager_id,
+                self.game.risk_amount + self.game.ganancia,
+            )
+            self.stop()
+            await interaction.response.edit_message(embed=claim_embed, view=self)
             rr_games.pop(self.game.user_id, None)
 
         except Exception as e:
             logger.error(f"Error en reclamar: {e}")
+            self.game.active = False
+            self.game.finished = True
+            await refund_wager(self.game.wager_id)
+            rr_games.pop(self.game.user_id, None)
             try:
-                await interaction.response.send_message(
-                    f"❌ Error al procesar: {e}", ephemeral=True
-                )
+                if interaction.response.is_done():
+                    await interaction.followup.send(
+                        "❌ La partida se canceló por un error y tu apuesta fue reembolsada.",
+                        ephemeral=True,
+                    )
+                else:
+                    await interaction.response.send_message(
+                        "❌ La partida se canceló por un error y tu apuesta fue reembolsada.",
+                        ephemeral=True,
+                    )
             except Exception:
                 pass
+        finally:
+            self.game.processing = False
 
 
 class RussianRoulette(commands.Cog):
@@ -317,28 +397,49 @@ class RussianRoulette(commands.Cog):
                 f"⏳ {ctx.author.mention} Espera <t:{int(expira_en)}:R> para volver a jugar Ruleta Rusa."
             )
 
-        expira_en = now + rr_config["cooldown"]
-        cache.set_game_cooldown_cache(ctx.author.id, "rr", expira_en)
-        await set_game_cooldown(ctx.author.id, "rr", expira_en)
-
-        game = RRGameState(ctx.author.id, monto, ctx.author.display_name)
-        rr_games[ctx.author.id] = game
-
-        initial_embed = build_rr_embed(
-            ctx.author,
-            game,
-            state="waiting",
-            description=(
-                f"Has iniciado una partida de Ruleta Rusa con **{monto} {COIN}**.\n\n"
-                f"Tienes **5 disparos**. Cada salvada aumenta tu ganancia acumulada.\n"
-                f"Pulsa **Disparar** para comenzar, o reclama cuando quieras si sobrevives."
-            ),
-            thumbnail=WAIT_IMAGE,
+        wager = await reserve_wager(
+            ctx.author.id,
+            "rr",
+            monto,
+            expires_in=300,
         )
+        if not wager["ok"]:
+            return await ctx.send(
+                f"❌ {ctx.author.mention} No tienes suficiente balance para esta apuesta."
+            )
 
-        view = RRView(game, ctx.author.id)
-        message = await ctx.send(embed=initial_embed, view=view)
-        game.message = message
+        try:
+            expira_en = now + rr_config["cooldown"]
+            cache.set_game_cooldown_cache(ctx.author.id, "rr", expira_en)
+            await set_game_cooldown(ctx.author.id, "rr", expira_en)
+
+            game = RRGameState(
+                ctx.author.id,
+                monto,
+                ctx.author.display_name,
+                wager["id"],
+            )
+            rr_games[ctx.author.id] = game
+
+            initial_embed = build_rr_embed(
+                ctx.author,
+                game,
+                state="waiting",
+                description=(
+                    f"Has iniciado una partida de Ruleta Rusa con **{monto} {COIN}**.\n\n"
+                    f"Tienes **5 disparos**. Cada salvada aumenta tu ganancia acumulada.\n"
+                    f"Pulsa **Disparar** para comenzar, o reclama cuando quieras si sobrevives."
+                ),
+                thumbnail=WAIT_IMAGE,
+            )
+
+            view = RRView(game, ctx.author.id)
+            message = await ctx.send(embed=initial_embed, view=view)
+            game.message = message
+        except Exception:
+            rr_games.pop(ctx.author.id, None)
+            await refund_wager(wager["id"])
+            raise
 
 
 async def setup(bot):

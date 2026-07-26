@@ -391,7 +391,7 @@ async def flush_to_db():
     El dirty-flag se limpia SOLO después de un write exitoso,
     garantizando que los datos no se pierdan ante un fallo de conexión.
     """
-    from core.database import pool
+    from core.database import flush_user_to_db
     dirty = get_dirty_users()
     if not dirty:
         return
@@ -403,16 +403,8 @@ async def flush_to_db():
             clear_dirty(user_id)   # sin datos en caché → nada que persistir
             continue
         try:
-            async with pool.acquire() as conn:
-                await conn.execute(
-                    """UPDATE users SET balance=$1, bank=$2,
-                    cooldown_work=$3, cooldown_crime=$4 WHERE id=$5""",
-                    data["balance"], data["bank"],
-                    data["cooldown_work"], data["cooldown_crime"],
-                    user_id,
-                )
-            clear_dirty(user_id)   # ✅ solo se limpia tras write exitoso
-            flushed += 1
+            if await flush_user_to_db(user_id):
+                flushed += 1
         except Exception as e:
             logger.warning(f"flush_to_db error para {user_id}: {e} — reintentará en próximo ciclo")
 
