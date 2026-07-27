@@ -203,9 +203,7 @@ async def golpear_loop(bot):
                     continue
 
             # ── Spawn ──────────────────────────────────────────────────────────
-            logger.info(f"golpear_loop: spawneando cofre en #{canal.name} ({canal_id}).")
             await spawn_cofre(canal)
-            logger.info("golpear_loop: cofre enviado correctamente.")
 
         except asyncio.CancelledError:
             logger.info("golpear_loop: tarea cancelada, cerrando loop.")

@@ -4,7 +4,8 @@ import logging
 import asyncio
 from core.database import (
     update_bank, get_all_items, get_item_by_name, purchase_item,
-    get_inventory, consume_inventory_item
+    get_inventory, consume_inventory_item, claim_pending_item_use_logs,
+    mark_item_use_log_sent, mark_item_use_log_failed,
 )
 from core import cache
 from core.config import COIN, LOG_CHANNEL_ID, TARJETA_CREDITO_ROL_ID, STAFF_ROLE_ID
@@ -28,6 +29,66 @@ def _get_item_use_lock(user_id: int, item_id: int) -> asyncio.Lock:
         lock = asyncio.Lock()
         _item_use_locks[key] = lock
     return lock
+
+
+async def _dispatch_item_use_logs(bot, event_ids=None, limit: int = 25) -> int:
+    """
+    Envía logs reservados desde el outbox persistente.
+    Los fallos quedan en Aiven y se reintentan con espera progresiva.
+    """
+    pending = await claim_pending_item_use_logs(limit=limit, event_ids=event_ids)
+    sent = 0
+    for event in pending:
+        try:
+            channel = bot.get_channel(event["channel_id"])
+            if channel is None:
+                channel = await bot.fetch_channel(event["channel_id"])
+            if not hasattr(channel, "send"):
+                raise RuntimeError(f"El canal {event['channel_id']} no permite mensajes")
+
+            if event["allow_mentions"]:
+                allowed_mentions = discord.AllowedMentions(
+                    everyone=False,
+                    roles=True,
+                    users=True,
+                    replied_user=False,
+                )
+            else:
+                allowed_mentions = discord.AllowedMentions.none()
+
+            await asyncio.wait_for(
+                channel.send(
+                    event["content"],
+                    allowed_mentions=allowed_mentions,
+                ),
+                timeout=10,
+            )
+            await mark_item_use_log_sent(event["id"])
+            sent += 1
+        except asyncio.CancelledError:
+            raise
+        except Exception as error:
+            retry_after = min(900, 5 * (2 ** min(event["attempts"], 8)))
+            try:
+                await mark_item_use_log_failed(
+                    event["id"],
+                    f"{type(error).__name__}: {error}",
+                    retry_after,
+                )
+            except Exception:
+                logger.exception(
+                    "No se pudo actualizar el reintento del log de uso %s",
+                    event["id"],
+                )
+            logger.warning(
+                "Log de uso pendiente %s no enviado al canal %s; "
+                "se reintentará en %ss: %s",
+                event["id"],
+                event["channel_id"],
+                retry_after,
+                error,
+            )
+    return sent
 
 
 # ── CONFIRMACION DE COMPRA ─────────────────────────────
@@ -659,6 +720,8 @@ class UseButton(discord.ui.Button):
                     )
 
             duration = item.get("duracion", 0) or 0
+            icono = item["icono"] if item["icono"] else "🔹"
+            nombre_log = interaction.user.nick or interaction.user.display_name
             consumption = await consume_inventory_item(
                 interaction.user.id,
                 item["id"],
@@ -666,6 +729,11 @@ class UseButton(discord.ui.Button):
                 guild_id=self.guild.id if role else None,
                 role_id=role.id if role else None,
                 role_duration=duration if role else 0,
+                log_guild_id=self.guild.id,
+                general_log_channel_id=LOG_CHANNEL_ID,
+                log_user_display_name=discord.utils.escape_markdown(nombre_log),
+                log_user_mention=interaction.user.mention,
+                staff_role_id=STAFF_ROLE_ID,
             )
             if not consumption["ok"]:
                 if role and assigned_new_role:
@@ -697,7 +765,21 @@ class UseButton(discord.ui.Button):
                 )
             consumed = True
 
-            icono = item["icono"] if item["icono"] else "🔹"
+            # El outbox fue creado en la misma transacción del consumo. Se intenta
+            # entregar antes de tocar el panel; cualquier fallo queda para reintento.
+            try:
+                await _dispatch_item_use_logs(
+                    self.bot,
+                    event_ids=consumption.get("log_event_ids"),
+                    limit=2,
+                )
+            except Exception:
+                logger.exception(
+                    "No se pudieron despachar inmediatamente los logs del uso "
+                    "de item %s; permanecen pendientes en Aiven",
+                    item["id"],
+                )
+
             mensaje = item["mensaje_uso"] if item["mensaje_uso"] else f"Usaste {icono} **{item['nombre']}**."
             if role and consumption.get("expires_at"):
                 mensaje += (
@@ -719,38 +801,6 @@ class UseButton(discord.ui.Button):
                 await interaction.message.edit(view=inv_view)
             else:
                 await interaction.message.delete()
-
-            # ── Log de uso ──────────────────────────
-            log_channel = self.bot.get_channel(LOG_CHANNEL_ID)
-            nombre_log = interaction.user.nick or interaction.user.display_name
-            if log_channel:
-                await log_channel.send(
-                    f"✨ **{nombre_log}** usó {icono} **{item['nombre']}**"
-                )
-
-            # El canal especial es adicional y solo se usa al consumir el item.
-            item_config = await get_item_by_name(item["nombre"])
-            log_uso_channel_id = (item_config or item).get("log_uso_channel_id")
-            if log_uso_channel_id and log_uso_channel_id != LOG_CHANNEL_ID:
-                special_log_channel = self.bot.get_channel(log_uso_channel_id)
-                if special_log_channel:
-                    try:
-                        await special_log_channel.send(
-                            f"<@&{STAFF_ROLE_ID}> ✨ {interaction.user.mention} usó {icono} **{item['nombre']}**",
-                            allowed_mentions=discord.AllowedMentions(roles=True, users=True),
-                        )
-                    except discord.HTTPException as error:
-                        logger.warning(
-                            "No se pudo enviar el log especial de uso para item %s: %s",
-                            item["id"],
-                            error,
-                        )
-                else:
-                    logger.warning(
-                        "Canal de log especial no encontrado para item %s: %s",
-                        item["id"],
-                        log_uso_channel_id,
-                    )
 
         except Exception:
             logger.exception(
@@ -867,6 +917,30 @@ def format_tiempo_restante(segundos: int) -> str:
 class Shop(commands.Cog):
     def __init__(self, bot):
         self.bot = bot
+        self._item_use_log_task = None
+
+    async def cog_load(self):
+        if self._item_use_log_task is None or self._item_use_log_task.done():
+            self._item_use_log_task = asyncio.create_task(
+                self._item_use_log_worker(),
+                name="item-use-log-outbox",
+            )
+
+    def cog_unload(self):
+        if self._item_use_log_task is not None:
+            self._item_use_log_task.cancel()
+
+    async def _item_use_log_worker(self):
+        await self.bot.wait_until_ready()
+        while not self.bot.is_closed():
+            try:
+                sent = await _dispatch_item_use_logs(self.bot, limit=25)
+                await asyncio.sleep(5 if sent else 20)
+            except asyncio.CancelledError:
+                raise
+            except Exception:
+                logger.exception("Error procesando logs pendientes de uso de items")
+                await asyncio.sleep(20)
 
     async def cog_command_error(self, ctx, error):
         if isinstance(error, commands.CommandOnCooldown):

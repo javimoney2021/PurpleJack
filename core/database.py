@@ -141,6 +141,27 @@ async def init_db():
         """)
 
         await conn.execute("""
+        CREATE TABLE IF NOT EXISTS item_use_log_outbox (
+            id TEXT PRIMARY KEY,
+            user_id BIGINT NOT NULL,
+            item_id INTEGER NOT NULL,
+            guild_id BIGINT NOT NULL,
+            channel_id BIGINT NOT NULL,
+            content TEXT NOT NULL,
+            allow_mentions BOOLEAN NOT NULL DEFAULT FALSE,
+            attempts INTEGER NOT NULL DEFAULT 0,
+            next_attempt_at DOUBLE PRECISION NOT NULL DEFAULT 0,
+            locked_until DOUBLE PRECISION NOT NULL DEFAULT 0,
+            last_error TEXT DEFAULT NULL,
+            created_at DOUBLE PRECISION NOT NULL
+        )
+        """)
+        await conn.execute("""
+        CREATE INDEX IF NOT EXISTS item_use_log_outbox_pending_idx
+        ON item_use_log_outbox (next_attempt_at, locked_until, created_at)
+        """)
+
+        await conn.execute("""
         CREATE TABLE IF NOT EXISTS veterano_config (
             rol_id BIGINT PRIMARY KEY,
             monto_penalizar INTEGER NOT NULL,
@@ -1327,15 +1348,22 @@ async def consume_inventory_item(
     guild_id: int | None = None,
     role_id: int | None = None,
     role_duration: int = 0,
+    log_guild_id: int | None = None,
+    general_log_channel_id: int | None = None,
+    log_user_display_name: str = "",
+    log_user_mention: str = "",
+    staff_role_id: int | None = None,
 ):
     """
-    Consume una unidad y registra límite/rol temporal en una sola transacción.
+    Consume una unidad y registra límite, rol temporal y logs pendientes
+    en una sola transacción.
     Debe invocarse únicamente después de verificar la entrega del rol en Discord.
     """
     from datetime import date
 
     today = date.today()
     expires_at = None
+    log_event_ids = []
     async with pool.acquire() as conn:
         async with conn.transaction():
             row = await conn.fetchrow(
@@ -1448,6 +1476,71 @@ async def consume_inventory_item(
                         expires_at,
                     )
 
+            if log_guild_id is not None and general_log_channel_id is not None:
+                item_log = await conn.fetchrow(
+                    """
+                    SELECT nombre, icono, log_uso_channel_id
+                    FROM items
+                    WHERE id=$1
+                    """,
+                    item_id,
+                )
+                if not item_log:
+                    raise RuntimeError(
+                        f"No se encontró configuración del item {item_id} para registrar su uso"
+                    )
+
+                icono = item_log["icono"] or "🔹"
+                nombre = item_log["nombre"]
+                created_at = time.time()
+                log_rows = []
+
+                general_event_id = str(uuid.uuid4())
+                log_event_ids.append(general_event_id)
+                log_rows.append((
+                    general_event_id,
+                    user_id,
+                    item_id,
+                    log_guild_id,
+                    general_log_channel_id,
+                    f"✨ **{log_user_display_name}** usó {icono} **{nombre}**",
+                    False,
+                    created_at,
+                ))
+
+                special_channel_id = item_log["log_uso_channel_id"]
+                if (
+                    special_channel_id
+                    and special_channel_id != general_log_channel_id
+                    and staff_role_id is not None
+                ):
+                    special_event_id = str(uuid.uuid4())
+                    log_event_ids.append(special_event_id)
+                    log_rows.append((
+                        special_event_id,
+                        user_id,
+                        item_id,
+                        log_guild_id,
+                        special_channel_id,
+                        (
+                            f"<@&{staff_role_id}> ✨ {log_user_mention} "
+                            f"usó {icono} **{nombre}**"
+                        ),
+                        True,
+                        created_at,
+                    ))
+
+                await conn.executemany(
+                    """
+                    INSERT INTO item_use_log_outbox (
+                        id, user_id, item_id, guild_id, channel_id,
+                        content, allow_mentions, created_at
+                    )
+                    VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+                    """,
+                    log_rows,
+                )
+
     cache.invalidate_inventory_cache(user_id)
     if guild_id is not None and role_id is not None:
         if expires_at is not None:
@@ -1463,7 +1556,91 @@ async def consume_inventory_item(
         "ok": True,
         "remaining": remaining,
         "expires_at": expires_at,
+        "log_event_ids": log_event_ids,
     }
+
+
+async def claim_pending_item_use_logs(limit: int = 25, event_ids=None):
+    """Reserva logs pendientes para evitar que dos procesos los envíen a la vez."""
+    limit = max(1, min(int(limit), 100))
+    now = time.time()
+    async with pool.acquire() as conn:
+        async with conn.transaction():
+            if event_ids:
+                rows = await conn.fetch(
+                    """
+                    SELECT id, user_id, item_id, guild_id, channel_id, content,
+                           allow_mentions, attempts, created_at
+                    FROM item_use_log_outbox
+                    WHERE id = ANY($1::TEXT[])
+                      AND next_attempt_at <= $2
+                      AND locked_until <= $2
+                    ORDER BY created_at ASC
+                    LIMIT $3
+                    FOR UPDATE SKIP LOCKED
+                    """,
+                    list(event_ids),
+                    now,
+                    limit,
+                )
+            else:
+                rows = await conn.fetch(
+                    """
+                    SELECT id, user_id, item_id, guild_id, channel_id, content,
+                           allow_mentions, attempts, created_at
+                    FROM item_use_log_outbox
+                    WHERE next_attempt_at <= $1
+                      AND locked_until <= $1
+                    ORDER BY created_at ASC
+                    LIMIT $2
+                    FOR UPDATE SKIP LOCKED
+                    """,
+                    now,
+                    limit,
+                )
+
+            claimed_ids = [row["id"] for row in rows]
+            if claimed_ids:
+                await conn.execute(
+                    """
+                    UPDATE item_use_log_outbox
+                    SET locked_until=$1
+                    WHERE id = ANY($2::TEXT[])
+                    """,
+                    now + 60,
+                    claimed_ids,
+                )
+    return [dict(row) for row in rows]
+
+
+async def mark_item_use_log_sent(event_id: str):
+    async with pool.acquire() as conn:
+        await conn.execute(
+            "DELETE FROM item_use_log_outbox WHERE id=$1",
+            event_id,
+        )
+
+
+async def mark_item_use_log_failed(
+    event_id: str,
+    error: str,
+    retry_after: float,
+):
+    now = time.time()
+    async with pool.acquire() as conn:
+        await conn.execute(
+            """
+            UPDATE item_use_log_outbox
+            SET attempts=attempts+1,
+                next_attempt_at=$1,
+                locked_until=0,
+                last_error=$2
+            WHERE id=$3
+            """,
+            now + max(1, retry_after),
+            error[:1000],
+            event_id,
+        )
 
 
 async def get_usos_diarios(user_id: int, item_id: int) -> int:
