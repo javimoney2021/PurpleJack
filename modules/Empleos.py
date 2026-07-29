@@ -43,7 +43,6 @@ EMPLEOS = {
         "xp_ganada": 4,
         "duracion_horas": 3,
         "penalizacion": -700,
-        "prob_fallo": 0.20,
         "mensajes_exito": [
             "Has reparado con éxito los cables de la nave... {monto} {COIN}.",
             "Las comunicaciones fueron reactivadas {monto} {COIN} .",
@@ -112,7 +111,7 @@ RACHA_BONUS_COINS = 0.10  # 10 % del pago como bono de coins por racha
 
 # ── STAFF BYPASS ─────────────────────────────────────────
 STAFF_BYPASS_ROL  = "Coordinador-ES"   # Rol con cooldowns liberados en empleos
-COOLDOWN_RENUNCIA_SEGUNDOS = 6 * 3600
+COOLDOWN_RENUNCIA_SEGUNDOS = 3 * 3600
 
 def _es_coordinador(member: discord.Member) -> bool:
     """True si el miembro posee el rol de bypass de cooldowns."""
@@ -585,7 +584,10 @@ async def renunciar_empleo(member: discord.Member) -> tuple[bool, str]:
     await save_empleo_user(data)
     if bypass:
         return True, "🛑 Has renunciado a tu empleo. Puedes aplicar inmediatamente a un nuevo trabajo."
-    return True, "🛑 Has renunciado a tu empleo. Podrás aplicar a un nuevo trabajo dentro de 6 horas."
+    return True, (
+        "🛑 Has renunciado a tu empleo. Podrás aplicar a un empleo común dentro de 3 horas. "
+        "(No necesitas esperar para aplicar a empleos de Maestría.)"
+    )
 
 
 class ConfirmarEmpleoView(ui.View):
@@ -626,8 +628,14 @@ class ConfirmarEmpleoView(ui.View):
                     ephemeral=True,
                 )
             bypass = _es_coordinador(interaction.user)
+            es_maestria = self.empleo in EMPLEOS_MAESTRIA
             cooldown_until = data.get("cooldown_renuncia", 0)
-            if cooldown_until and time.time() < cooldown_until and not bypass:
+            if (
+                cooldown_until
+                and time.time() < cooldown_until
+                and not bypass
+                and not es_maestria
+            ):
                 return await interaction.followup.send(
                     f"⏳ Podras Aplicar a otro empleo {format_relative_time(cooldown_until)} Regresa luego.",
                     ephemeral=True,
@@ -639,7 +647,6 @@ class ConfirmarEmpleoView(ui.View):
                     ephemeral=True,
                 )
 
-            es_maestria = self.empleo in EMPLEOS_MAESTRIA
             info = EMPLEOS_MAESTRIA[self.empleo] if es_maestria else EMPLEOS[self.empleo]
             if es_maestria:
                 if not info.get("desarrollado", False):
@@ -942,13 +949,6 @@ class EmpleosMaestriaSelect(ui.Select):
         if not info.get("desarrollado", False):
             return await interaction.response.send_message(
                 f"🚧 **{info['nombre']}**: Trabajo Pendiente de desarrollo.",
-                ephemeral=True,
-            )
-
-        cooldown_until = data.get("cooldown_renuncia", 0)
-        if cooldown_until and time.time() < cooldown_until and not bypass:
-            return await interaction.response.send_message(
-                f"⏳ Debes esperar {format_relative_time(cooldown_until)} para aplicar a un nuevo empleo.",
                 ephemeral=True,
             )
 
@@ -1494,6 +1494,8 @@ class LimpiadorView(ui.View):
 
 
 class IngenieroView(ui.View):
+    MAX_VIDAS = 5
+
     def __init__(self, bot, author, info):
         super().__init__(timeout=180)
         self.bot = bot
@@ -1504,6 +1506,7 @@ class IngenieroView(ui.View):
         self.revelados = [False] * 8
         self.seleccion = []
         self.pares = 0
+        self.vidas = self.MAX_VIDAS
         self.bloqueado = False
         self.erroneas = set()
         self.terminado = False
@@ -1527,9 +1530,26 @@ class IngenieroView(ui.View):
                     style = ButtonStyle.primary
                 else:
                     style = ButtonStyle.success
-                btn = ui.Button(label=emoji, style=style, row=row, custom_id=f"ing_{i}")
+                btn = ui.Button(
+                    label=emoji,
+                    style=style,
+                    row=row,
+                    custom_id=f"ing_{i}",
+                    disabled=(
+                        self.terminado
+                        or self.bloqueado
+                        or self.revelados[i]
+                        or i in self.seleccion
+                    ),
+                )
             else:
-                btn = ui.Button(label="⬜", style=ButtonStyle.secondary, row=row, custom_id=f"ing_{i}")
+                btn = ui.Button(
+                    label="⬜",
+                    style=ButtonStyle.secondary,
+                    row=row,
+                    custom_id=f"ing_{i}",
+                    disabled=self.terminado or self.bloqueado,
+                )
             btn.callback = self._make_callback(i)
             self.add_item(btn)
 
@@ -1540,7 +1560,7 @@ class IngenieroView(ui.View):
             if self._interaction_lock.locked():
                 return await interaction.response.defer()
 
-            terminar_ahora = False
+            resultado = None
             async with self._interaction_lock:
                 if self.bloqueado or self.terminado or self.revelados[idx] or idx in self.seleccion:
                     return await interaction.response.defer()
@@ -1555,27 +1575,34 @@ class IngenieroView(ui.View):
                         self.revelados[i2] = True
                         self.pares += 1
                         self.seleccion = []
-                        self.bloqueado = False
-                        self._build_buttons()
-                        await interaction.edit_original_response(embed=self.build_embed(), view=self)
                         if self.pares == 4:
                             self.terminado = True
+                            self.bloqueado = True
                             self.stop()
-                            terminar_ahora = True
+                            resultado = True
+                        else:
+                            self.bloqueado = False
+                        self._build_buttons()
+                        await interaction.edit_original_response(embed=self.build_embed(), view=self)
                     else:
+                        self.vidas -= 1
                         self.erroneas = {i1, i2}
+                        if self.vidas <= 0:
+                            self.terminado = True
+                            self.stop()
                         self._build_buttons()
                         await interaction.edit_original_response(embed=self.build_embed(), view=self)
                         await asyncio.sleep(2)
-                        if self.terminado:
-                            return
                         self.erroneas.clear()
                         self.seleccion = []
-                        self.bloqueado = False
+                        if self.terminado:
+                            resultado = False
+                        else:
+                            self.bloqueado = False
                         self._build_buttons()
                         await interaction.edit_original_response(embed=self.build_embed(), view=self)
-            if terminar_ahora:
-                await self._terminar(interaction, exito=True)
+            if resultado is not None:
+                await self._terminar(interaction, exito=resultado)
         return callback
 
     def build_embed(self):
@@ -1583,8 +1610,14 @@ class IngenieroView(ui.View):
         base = random.randint(self.info['salario_min'], self.info['salario_max'])
         ratio = 1.0 + max(0.0, 45 - tiempo) / 45.0 * 0.35
         pago_actual = min(int(base * ratio), self.info['salario_max'])
+        corazones = "❤️" * self.vidas + "🖤" * (self.MAX_VIDAS - self.vidas)
         embed = discord.Embed(title=f"🛠️ Jornada Ingeniero - {self.author.nick or self.author.display_name}", color=discord.Color.blurple())
-        embed.add_field(name="Objetivo", value="Encuentra los 4 pares para reparar la Nave", inline=False)
+        embed.add_field(
+            name="Objetivo",
+            value="Encuentra los 4 pares para reparar la Nave antes de perder tus 5 vidas.",
+            inline=False,
+        )
+        embed.add_field(name="Vidas restantes", value=corazones, inline=False)
         embed.add_field(name="Pares encontrados", value=str(self.pares), inline=True)
         embed.add_field(name="Pago estimado actual", value=f"{pago_actual} {COIN}", inline=True)
         embed.set_thumbnail(url="https://pub-a09b3609b6b34dfab5c7aa7742cd1a8a.r2.dev/Purple%20jack%20Harcode/Inge%20thumb.png")
@@ -1598,7 +1631,7 @@ class IngenieroView(ui.View):
             ratio = 1.0 + max(0.0, 45 - tiempo) / 45.0 * 0.35
             pago = min(int(base * ratio), self.info['salario_max'])
             xp_ganada = self.info.get('xp_ganada', 0)
-            if random.random() < self.info['prob_fallo']:
+            if not exito:
                 await update_bank(self.author.id, self.info['penalizacion'])
                 mensaje = random.choice(self.info['mensajes_fallo']).format(monto=abs(self.info['penalizacion']), COIN=COIN)
                 await registrar_resultado(self.author.id, 'ingeniero', False, self.info['penalizacion'], mensaje)
