@@ -1494,7 +1494,7 @@ class LimpiadorView(ui.View):
 
 
 class IngenieroView(ui.View):
-    MAX_VIDAS = 5
+    MAX_VIDAS = 4
 
     def __init__(self, bot, author, info):
         super().__init__(timeout=180)
@@ -1614,7 +1614,7 @@ class IngenieroView(ui.View):
         embed = discord.Embed(title=f"🛠️ Jornada Ingeniero - {self.author.nick or self.author.display_name}", color=discord.Color.blurple())
         embed.add_field(
             name="Objetivo",
-            value="Encuentra los 4 pares para reparar la Nave antes de perder tus 5 vidas.",
+            value="Encuentra los 4 pares para reparar la Nave antes de perder tus 4 vidas.",
             inline=False,
         )
         embed.add_field(name="Vidas restantes", value=corazones, inline=False)
