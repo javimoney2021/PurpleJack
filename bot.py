@@ -54,14 +54,16 @@ except ImportError:
 
 from core.database import (
     init_db, load_items_to_cache, load_cargos_to_cache,
-    load_collect_config_to_cache, delete_cargo_temporal,
+    load_collect_config_to_cache, claim_expired_cargos,
+    get_cargo_temporal_by_id, mark_cargo_removal_failed,
+    release_cargo_claim, delete_cargo_temporal_by_id,
     create_game_config_table, load_game_config, load_dados_config, load_memo_config,
     load_veterano_config_to_cache, load_saboteador_config_to_cache, load_item_role_restrictions_to_cache,
     save_collect_cooldowns, load_evento_to_cache, flush_evento_puntos,
     recover_pending_wagers
 )
 from core import cache
-from core.config import AYUDA_CHANNEL_ID
+from core.config import AYUDA_CHANNEL_ID, LOG_CHANNEL_ID, STAFF_ROLE_ID
 
 intents = discord.Intents.default()
 intents.message_content = True
@@ -73,6 +75,7 @@ async def get_prefix(bot, message):
 
 bot = commands.Bot(command_prefix=get_prefix, intents=intents, help_command=None)
 evento_flush_task = None
+cargos_task = None
 
 
 async def load_modules():
@@ -94,54 +97,169 @@ async def load_modules():
     await bot.load_extension("modules.adivinar")
 
 
-async def check_cargos_loop():
-    await bot.wait_until_ready()
-    while not bot.is_closed():
-        await asyncio.sleep(300)
-        now = time.time()
-        cargos = cache.get_cargos_cache()
-        vencidos = []
+async def _alertar_fallo_retiro_cargo(cargo: dict, error: Exception, intento: int):
+    """Avisa al Staff sin interrumpir los reintentos persistentes."""
+    try:
+        channel = bot.get_channel(LOG_CHANNEL_ID)
+        if channel is None:
+            channel = await bot.fetch_channel(LOG_CHANNEL_ID)
+        await channel.send(
+            (
+                f"<@&{STAFF_ROLE_ID}> ⚠️ No pude retirar un rol temporal vencido.\n"
+                f"Usuario: <@{cargo['user_id']}> (`{cargo['user_id']}`)\n"
+                f"Rol: <@&{cargo['rol_id']}> (`{cargo['rol_id']}`)\n"
+                f"Intento: **{intento}**\n"
+                f"Error: `{type(error).__name__}: {str(error)[:500]}`"
+            ),
+            allowed_mentions=discord.AllowedMentions(
+                everyone=False,
+                roles=True,
+                users=False,
+                replied_user=False,
+            ),
+        )
+    except Exception:
+        logger.exception(
+            "No se pudo alertar al Staff sobre el fallo del cargo temporal %s",
+            cargo["id"],
+        )
 
-        for user_id, lista in list(cargos.items()):
-            for cargo in lista:
-                if cargo["expira_en"] <= now:
-                    vencidos.append((user_id, cargo["guild_id"], cargo["rol_id"]))
 
-        for user_id, guild_id, rol_id in vencidos:
-            role_lock = cache.get_role_assignment_lock(
+async def _retirar_cargo_vencido(cargo: dict) -> str:
+    """
+    Retira y verifica un rol. El registro solo se elimina cuando Discord
+    confirma que el miembro ya no lo posee o cuando el recurso dejó de existir.
+    """
+    user_id = cargo["user_id"]
+    guild_id = cargo["guild_id"]
+    role_id = cargo["rol_id"]
+    role_lock = cache.get_role_assignment_lock(user_id, guild_id, role_id)
+
+    async with role_lock:
+        latest = await get_cargo_temporal_by_id(cargo["id"])
+        if latest is None:
+            return "reemplazado"
+        if latest["expira_en"] > time.time():
+            await release_cargo_claim(cargo["id"])
+            cache.upsert_cargo_cache(
                 user_id,
                 guild_id,
-                rol_id,
+                role_id,
+                latest["expira_en"],
             )
-            async with role_lock:
+            return "extendido"
+
+        guild = bot.get_guild(guild_id)
+        if guild is None:
+            try:
+                guild = await bot.fetch_guild(guild_id)
+            except discord.NotFound:
+                await delete_cargo_temporal_by_id(cargo["id"])
+                return "servidor_inexistente"
+
+        role = guild.get_role(role_id)
+        if role is None:
+            roles = await guild.fetch_roles()
+            role = discord.utils.get(roles, id=role_id)
+        if role is None:
+            await delete_cargo_temporal_by_id(cargo["id"])
+            return "rol_inexistente"
+
+        try:
+            member = await guild.fetch_member(user_id)
+        except discord.NotFound:
+            await delete_cargo_temporal_by_id(cargo["id"])
+            return "miembro_fuera"
+
+        if role_id in {member_role.id for member_role in member.roles}:
+            await member.remove_roles(
+                role,
+                reason="Expiración de rol temporal otorgado por un item",
+            )
+
+        for intento in range(3):
+            try:
+                member_check = await guild.fetch_member(user_id)
+            except discord.NotFound:
+                member_check = None
+                break
+            if role_id not in {member_role.id for member_role in member_check.roles}:
+                break
+            if intento < 2:
+                await asyncio.sleep(0.75)
+        else:
+            raise RuntimeError("Discord todavía reporta el rol después de retirarlo")
+
+        await delete_cargo_temporal_by_id(cargo["id"])
+        return "retirado"
+
+
+async def check_cargos_loop():
+    """Procesa expiraciones desde Aiven y recupera pendientes tras reinicios."""
+    await bot.wait_until_ready()
+    while not bot.is_closed():
+        try:
+            cargos = await claim_expired_cargos(limit=50)
+            if not cargos:
+                await asyncio.sleep(30)
+                continue
+
+            retirados = 0
+            limpiados = 0
+            for cargo in cargos:
                 try:
-                    latest = next(
-                        (
-                            cargo
-                            for cargo in cache.get_cargos_cache().get(user_id, [])
-                            if cargo["guild_id"] == guild_id
-                            and cargo["rol_id"] == rol_id
-                        ),
-                        None,
+                    resultado = await _retirar_cargo_vencido(cargo)
+                    if resultado == "retirado":
+                        retirados += 1
+                    elif resultado in {
+                        "servidor_inexistente",
+                        "rol_inexistente",
+                        "miembro_fuera",
+                    }:
+                        limpiados += 1
+                except asyncio.CancelledError:
+                    raise
+                except Exception as error:
+                    intento = cargo.get("attempts", 0) + 1
+                    retry_after = min(3600, 30 * (2 ** min(cargo.get("attempts", 0), 7)))
+                    try:
+                        await mark_cargo_removal_failed(
+                            cargo["id"],
+                            f"{type(error).__name__}: {error}",
+                            retry_after,
+                        )
+                    except Exception:
+                        logger.exception(
+                            "No se pudo persistir el reintento del cargo temporal %s",
+                            cargo["id"],
+                        )
+                    logger.warning(
+                        "Cargo temporal %s no retirado (usuario=%s, rol=%s, "
+                        "intento=%s); reintento en %ss: %s",
+                        cargo["id"],
+                        cargo["user_id"],
+                        cargo["rol_id"],
+                        intento,
+                        retry_after,
+                        error,
                     )
-                    if latest and latest["expira_en"] > time.time():
-                        continue
+                    if intento in {3, 10} or (
+                        isinstance(error, discord.Forbidden) and intento == 1
+                    ):
+                        await _alertar_fallo_retiro_cargo(cargo, error, intento)
 
-                    guild = bot.get_guild(guild_id)
-                    if not guild:
-                        continue
-                    member = guild.get_member(user_id)
-                    if not member:
-                        member = await guild.fetch_member(user_id)
-                    role = guild.get_role(rol_id)
-                    if role and role in member.roles:
-                        await member.remove_roles(role)
-                    await delete_cargo_temporal(user_id, rol_id, guild_id)
-                except Exception as e:
-                    logger.warning(f"Error removiendo cargo {rol_id} a {user_id}: {e}")
-
-        if vencidos:
-            logger.info(f"Cargos temporales vencidos removidos: {len(vencidos)}")
+            if retirados or limpiados:
+                logger.info(
+                    "Cargos vencidos procesados: %s retirado(s), %s registro(s) obsoleto(s).",
+                    retirados,
+                    limpiados,
+                )
+            await asyncio.sleep(1 if len(cargos) >= 50 else 5)
+        except asyncio.CancelledError:
+            raise
+        except Exception:
+            logger.exception("Error general procesando cargos temporales vencidos")
+            await asyncio.sleep(30)
 
 
 @bot.event
@@ -175,7 +293,7 @@ AUTHORIZED_GUILD_ID = 980073134411644939
 
 @bot.event
 async def on_ready():
-    global evento_flush_task
+    global evento_flush_task, cargos_task
     logger.info(f"Bot conectado como {bot.user}")
     logger.info("Caché iniciada | Flush cada 5 minutos")
     logger.info(f"Servidores activos: {len(bot.guilds)}")
@@ -204,11 +322,15 @@ async def on_ready():
         logger.warning(f"Error sincronizando comandos slash: {e}")
 
     asyncio.create_task(cache.flush_loop())
-    asyncio.create_task(check_cargos_loop())
+    if cargos_task is None or cargos_task.done():
+        cargos_task = asyncio.create_task(
+            check_cargos_loop(),
+            name="cargos-temporales-worker",
+        )
+        logger.info("Task de cargos temporales iniciada | Revisión persistente cada 30 segundos")
     if evento_flush_task is None or evento_flush_task.done():
         evento_flush_task = asyncio.create_task(cache.evento_flush_loop())
         logger.info("Task de evento iniciada | Flush de ranking cada 10 minutos")
-    logger.info("Task de cargos temporales iniciada | Revisión cada 5 minutos")
     logger.info("\n⫷ 𝙋𝙐𝙍𝙋𝙇𝙀𝙅𝘼𝘾𝙆 𝙀𝙉 𝙇𝙄𝙉𝙀𝘼 ⫸\n")
 
 

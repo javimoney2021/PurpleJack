@@ -94,8 +94,57 @@ async def init_db():
             user_id BIGINT,
             guild_id BIGINT,
             rol_id BIGINT,
-            expira_en DOUBLE PRECISION
+            expira_en DOUBLE PRECISION,
+            attempts INTEGER NOT NULL DEFAULT 0,
+            next_attempt_at DOUBLE PRECISION NOT NULL DEFAULT 0,
+            locked_until DOUBLE PRECISION NOT NULL DEFAULT 0,
+            last_error TEXT DEFAULT NULL
         )
+        """)
+        for column, definition in [
+            ("attempts", "INTEGER NOT NULL DEFAULT 0"),
+            ("next_attempt_at", "DOUBLE PRECISION NOT NULL DEFAULT 0"),
+            ("locked_until", "DOUBLE PRECISION NOT NULL DEFAULT 0"),
+            ("last_error", "TEXT DEFAULT NULL"),
+        ]:
+            await conn.execute(
+                f"ALTER TABLE cargos_temporales ADD COLUMN IF NOT EXISTS {column} {definition}"
+            )
+        await conn.execute("""
+        DELETE FROM cargos_temporales
+        WHERE user_id IS NULL
+           OR guild_id IS NULL
+           OR rol_id IS NULL
+           OR expira_en IS NULL
+        """)
+        await conn.execute("""
+        ALTER TABLE cargos_temporales
+            ALTER COLUMN user_id SET NOT NULL,
+            ALTER COLUMN guild_id SET NOT NULL,
+            ALTER COLUMN rol_id SET NOT NULL,
+            ALTER COLUMN expira_en SET NOT NULL
+        """)
+        await conn.execute("""
+        WITH duplicados AS (
+            SELECT id,
+                   ROW_NUMBER() OVER (
+                       PARTITION BY user_id, guild_id, rol_id
+                       ORDER BY expira_en DESC, id DESC
+                   ) AS posicion
+            FROM cargos_temporales
+        )
+        DELETE FROM cargos_temporales AS cargo
+        USING duplicados
+        WHERE cargo.id=duplicados.id
+          AND duplicados.posicion > 1
+        """)
+        await conn.execute("""
+        CREATE UNIQUE INDEX IF NOT EXISTS cargos_temporales_usuario_rol_idx
+        ON cargos_temporales (user_id, guild_id, rol_id)
+        """)
+        await conn.execute("""
+        CREATE INDEX IF NOT EXISTS cargos_temporales_expiracion_idx
+        ON cargos_temporales (expira_en, next_attempt_at, locked_until)
         """)
 
         await conn.execute("""
@@ -1717,6 +1766,117 @@ async def load_cargos_to_cache():
             "expira_en": r["expira_en"],
         })
     cache.set_cargos_cache(data)
+
+
+async def claim_expired_cargos(limit: int = 50):
+    """
+    Reserva cargos vencidos directamente desde Aiven.
+    La reserva expira sola para que otro proceso pueda recuperarla tras una caída.
+    """
+    limit = max(1, min(int(limit), 200))
+    now = time.time()
+    async with pool.acquire() as conn:
+        async with conn.transaction():
+            rows = await conn.fetch(
+                """
+                SELECT id, user_id, guild_id, rol_id, expira_en,
+                       attempts, last_error
+                FROM cargos_temporales
+                WHERE expira_en <= $1
+                  AND next_attempt_at <= $1
+                  AND locked_until <= $1
+                ORDER BY expira_en ASC
+                LIMIT $2
+                FOR UPDATE SKIP LOCKED
+                """,
+                now,
+                limit,
+            )
+            cargo_ids = [row["id"] for row in rows]
+            if cargo_ids:
+                await conn.execute(
+                    """
+                    UPDATE cargos_temporales
+                    SET locked_until=$1
+                    WHERE id = ANY($2::INTEGER[])
+                    """,
+                    now + 90,
+                    cargo_ids,
+                )
+    return [dict(row) for row in rows]
+
+
+async def get_cargo_temporal_by_id(cargo_id: int):
+    """Revalida una reserva antes de alterar Discord."""
+    async with pool.acquire() as conn:
+        row = await conn.fetchrow(
+            """
+            SELECT id, user_id, guild_id, rol_id, expira_en,
+                   attempts, next_attempt_at, locked_until, last_error
+            FROM cargos_temporales
+            WHERE id=$1
+            """,
+            cargo_id,
+        )
+    return dict(row) if row else None
+
+
+async def mark_cargo_removal_failed(
+    cargo_id: int,
+    error: str,
+    retry_after: float,
+):
+    """Libera la reserva y conserva el fallo para reintentarlo tras reinicios."""
+    now = time.time()
+    async with pool.acquire() as conn:
+        await conn.execute(
+            """
+            UPDATE cargos_temporales
+            SET attempts=attempts+1,
+                next_attempt_at=$1,
+                locked_until=0,
+                last_error=$2
+            WHERE id=$3
+            """,
+            now + max(1, retry_after),
+            error[:1000],
+            cargo_id,
+        )
+
+
+async def release_cargo_claim(cargo_id: int):
+    """Libera una reserva que dejó de estar vencida antes de procesarse."""
+    async with pool.acquire() as conn:
+        await conn.execute(
+            """
+            UPDATE cargos_temporales
+            SET locked_until=0
+            WHERE id=$1
+            """,
+            cargo_id,
+        )
+
+
+async def delete_cargo_temporal_by_id(cargo_id: int):
+    """Elimina exactamente la expiración procesada y sincroniza la caché."""
+    async with pool.acquire() as conn:
+        row = await conn.fetchrow(
+            """
+            DELETE FROM cargos_temporales
+            WHERE id=$1
+            RETURNING user_id, guild_id, rol_id
+            """,
+            cargo_id,
+        )
+    if row:
+        cache.remove_cargo_cache(
+            row["user_id"],
+            row["rol_id"],
+            row["guild_id"],
+        )
+        return True
+    return False
+
 
 async def add_cargo_temporal(user_id, guild_id, rol_id, expira_en):
     async with pool.acquire() as conn:
