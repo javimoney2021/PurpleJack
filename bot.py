@@ -60,7 +60,7 @@ from core.database import (
     create_game_config_table, load_game_config, load_dados_config, load_memo_config,
     load_veterano_config_to_cache, load_saboteador_config_to_cache, load_item_role_restrictions_to_cache,
     save_collect_cooldowns, load_evento_to_cache, flush_evento_puntos,
-    recover_pending_wagers
+    recover_pending_wagers, ensure_wager_constraints
 )
 from core import cache
 from core.config import AYUDA_CHANNEL_ID, LOG_CHANNEL_ID, STAFF_ROLE_ID
@@ -359,6 +359,7 @@ def run_bot():
                 "Se reembolsaron %s apuestas pendientes de una ejecución anterior.",
                 reembolsadas,
             )
+        await ensure_wager_constraints()
         await create_game_config_table()
         await load_game_config()
         await load_dados_config()

@@ -636,30 +636,108 @@ async def reserve_wager(
     session_id: str | None = None,
     expires_in: int = 600,
     track_event: bool = True,
+    idempotency_key: str | None = None,
+    exclusive_pending: bool = False,
+    enforce_cooldown: bool = False,
 ):
-    """Descuenta y registra una apuesta pendiente en una sola transacción."""
+    """
+    Descuenta y registra una apuesta pendiente en una sola transacción.
+
+    Las opciones de exclusividad se validan después de bloquear la fila del
+    usuario en PostgreSQL. Así, dos instancias del bot no pueden reservar a la
+    vez una misma solicitud ni crear dos partidas exclusivas para el usuario.
+    """
     if amount <= 0 or source not in {"balance", "bank"}:
         return {"ok": False, "reason": "invalid_wager"}
 
     await get_user(user_id)
     async with _get_economy_lock(user_id):
         user = cache.get_cached(user_id)
-        if not user or user[source] < amount:
-            return {
-                "ok": False,
-                "reason": f"insufficient_{source}",
-                "available": user[source] if user else 0,
-            }
-
         wager_id = str(uuid.uuid4())
-        session_id = session_id or wager_id
+        session_id = idempotency_key or session_id or wager_id
         created_at = time.time()
         expires_at = created_at + max(60, expires_in)
-        new_balance = user["balance"] - amount if source == "balance" else user["balance"]
-        new_bank = user["bank"] - amount if source == "bank" else user["bank"]
 
         async with pool.acquire() as conn:
             async with conn.transaction():
+                # El lock de asyncio solo coordina esta instancia. Este bloqueo
+                # de fila serializa también reservas hechas por otro proceso.
+                await conn.fetchval(
+                    "SELECT id FROM users WHERE id=$1 FOR UPDATE",
+                    user_id,
+                )
+
+                if idempotency_key:
+                    existing = await conn.fetchrow(
+                        """
+                        SELECT id, status FROM wagers
+                        WHERE session_id=$1 AND game=$2 AND user_id=$3
+                        ORDER BY created_at DESC
+                        LIMIT 1
+                        """,
+                        idempotency_key,
+                        game,
+                        user_id,
+                    )
+                    if existing:
+                        return {
+                            "ok": False,
+                            "reason": "duplicate_request",
+                            "id": existing["id"],
+                            "status": existing["status"],
+                        }
+
+                if exclusive_pending:
+                    pending = await conn.fetchrow(
+                        """
+                        SELECT id FROM wagers
+                        WHERE user_id=$1 AND game=$2 AND status='pending'
+                        ORDER BY created_at DESC
+                        LIMIT 1
+                        """,
+                        user_id,
+                        game,
+                    )
+                    if pending:
+                        return {
+                            "ok": False,
+                            "reason": "already_pending",
+                            "id": pending["id"],
+                        }
+
+                if enforce_cooldown:
+                    cooldown_until = await conn.fetchval(
+                        """
+                        SELECT expira_en FROM game_cooldowns
+                        WHERE user_id=$1 AND game=$2
+                        """,
+                        user_id,
+                        game,
+                    )
+                    if cooldown_until and cooldown_until > created_at:
+                        return {
+                            "ok": False,
+                            "reason": "cooldown",
+                            "expires_at": float(cooldown_until),
+                        }
+
+                if not user or user[source] < amount:
+                    return {
+                        "ok": False,
+                        "reason": f"insufficient_{source}",
+                        "available": user[source] if user else 0,
+                    }
+
+                new_balance = (
+                    user["balance"] - amount
+                    if source == "balance"
+                    else user["balance"]
+                )
+                new_bank = (
+                    user["bank"] - amount
+                    if source == "bank"
+                    else user["bank"]
+                )
                 await conn.execute(
                     """
                     UPDATE users SET balance=$1, bank=$2,
@@ -1059,6 +1137,31 @@ async def recover_pending_wagers():
                     wager["id"],
                 )
     return len(rows)
+
+
+async def ensure_wager_constraints():
+    """
+    Instala las garantías de unicidad después de recuperar apuestas huérfanas.
+
+    Los índices viven en PostgreSQL, por lo que siguen protegiendo incluso
+    durante el breve solapamiento entre la instancia vieja y la nueva al
+    desplegar en SquareCloud.
+    """
+    async with pool.acquire() as conn:
+        await conn.execute(
+            """
+            CREATE UNIQUE INDEX IF NOT EXISTS wagers_unique_dados_request_idx
+            ON wagers (session_id)
+            WHERE game='dados'
+            """
+        )
+        await conn.execute(
+            """
+            CREATE UNIQUE INDEX IF NOT EXISTS wagers_one_pending_dados_idx
+            ON wagers (user_id)
+            WHERE game='dados' AND status='pending'
+            """
+        )
 
 
 # ── ITEMS ──────────────────────────────────────────────
