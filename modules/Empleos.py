@@ -210,6 +210,111 @@ async def _editar_tablero_seguro(
         raise last_error
 
 
+async def _responder_jornada(
+    interaction: Interaction,
+    mensaje: str,
+    *,
+    ephemeral: bool = True,
+):
+    """Responde correctamente aunque el clic ya se haya diferido."""
+    if interaction.response.is_done():
+        return await interaction.followup.send(mensaje, ephemeral=ephemeral)
+    return await interaction.response.send_message(mensaje, ephemeral=ephemeral)
+
+
+async def _renovar_jornada_tolerante(session_id: str, timeout: int):
+    """Renueva la sesión sin destruir la partida por un fallo transitorio de Aiven."""
+    for intento in range(2):
+        try:
+            return await asyncio.wait_for(
+                renovar_jornada(session_id, timeout),
+                timeout=4,
+            )
+        except Exception as error:
+            if intento == 0:
+                await asyncio.sleep(0.25)
+                continue
+            logger.warning(
+                "No se pudo renovar temporalmente la jornada %s: %s",
+                session_id,
+                error,
+            )
+    # La liquidación atómica continúa siendo la autoridad final. Un fallo
+    # transitorio de renovación no debe cerrar un tablero que sigue en RAM.
+    return None
+
+
+async def _cerrar_tablero_con_error(
+    view: ui.View,
+    empleo: str,
+    *,
+    interaction: Interaction | None = None,
+    liquidada: bool = False,
+):
+    """Retira siempre los controles tras un error de cierre o liquidación."""
+    view.terminado = True
+    if hasattr(view, "bloqueado"):
+        view.bloqueado = True
+    for child in view.children:
+        child.disabled = True
+    view.stop()
+
+    cancelada = True
+    if not liquidada:
+        cancelada = await cancelar_jornada_segura(view.session_id, "error")
+
+    descripcion = (
+        "La jornada fue procesada, pero no fue posible mostrar el resultado. "
+        "Consulta **!exp** para verificar tu progreso."
+        if liquidada
+        else (
+            "No fue posible liquidar la jornada. Puedes consultar **!trabajar** nuevamente."
+            if cancelada
+            else (
+                "No fue posible liquidar ni cerrar la jornada en Aiven. "
+                "Espera unos minutos antes de consultar **!trabajar** nuevamente."
+            )
+        )
+    )
+    embed = discord.Embed(
+        title=f"Jornada {empleo} - Error",
+        description=descripcion,
+        color=discord.Color.red(),
+    )
+    try:
+        if interaction is not None:
+            await _editar_tablero_seguro(
+                interaction,
+                view,
+                embed=embed,
+                remove_view=True,
+            )
+        elif getattr(view, "message", None) is not None:
+            await view.message.edit(embed=embed, view=None)
+    except Exception:
+        logger.exception("No se pudo retirar el tablero con error de %s.", empleo)
+        if interaction is not None:
+            try:
+                await _responder_jornada(interaction, descripcion)
+            except (discord.HTTPException, discord.NotFound):
+                pass
+
+
+async def _mostrar_tablero_bloqueado(view: ui.View):
+    """Refleja visualmente que el tablero dejó de aceptar jugadas."""
+    for child in view.children:
+        child.disabled = True
+    if getattr(view, "message", None) is None:
+        return
+    try:
+        await view.message.edit(embed=view.build_embed(), view=view)
+    except (discord.HTTPException, discord.NotFound):
+        logger.warning(
+            "No se pudo mostrar el bloqueo visual de la jornada %s.",
+            getattr(view, "session_id", "?"),
+        )
+
+
 def _programar_eliminacion(view: ui.View, delay: int = 180):
     async def cleanup():
         await asyncio.sleep(delay)
@@ -1660,13 +1765,19 @@ class JornadaView(ui.View):
                 ephemeral=True,
             )
             return False
-        if not await renovar_jornada(
+        try:
+            await interaction.response.defer()
+        except discord.NotFound:
+            return False
+
+        renovada = await _renovar_jornada_tolerante(
             self.session_id,
             int(self.timeout or 180),
-        ):
-            await interaction.response.send_message(
+        )
+        if renovada is False:
+            await _responder_jornada(
+                interaction,
                 "⌛ Esta jornada ya fue cerrada. Consulta **!trabajar** nuevamente.",
-                ephemeral=True,
             )
             return False
         return True
@@ -1750,25 +1861,28 @@ class ChantajistaView(JornadaView):
     def _make_callback(self, idx):
         async def callback(interaction: Interaction):
             if interaction.user.id != self.author.id:
-                return await interaction.response.send_message(
+                return await _responder_jornada(
+                    interaction,
                     "❌ Este tablero no es tuyo.",
-                    ephemeral=True,
                 )
             if self._interaction_lock.locked():
-                return await interaction.response.send_message(
+                return await _responder_jornada(
+                    interaction,
                     "⏳ El tablero está actualizando la jugada anterior.",
-                    ephemeral=True,
                 )
 
             resultado = None
             async with self._interaction_lock:
                 if self.terminado:
-                    return await interaction.response.send_message(
+                    return await _responder_jornada(
+                        interaction,
                         "⌛ Esta jornada ya finalizó.",
-                        ephemeral=True,
                     )
                 if self.bloqueado or idx in self.descartadas:
-                    return await interaction.response.defer()
+                    return await _responder_jornada(
+                        interaction,
+                        "⏳ Esa casilla no está disponible.",
+                    )
 
                 if idx == self.ganador:
                     self.terminado = True
@@ -1776,7 +1890,11 @@ class ChantajistaView(JornadaView):
                     self.mostrar_ganador = True
                     self.stop()
                     self._build_buttons()
-                    await interaction.response.edit_message(embed=self.build_embed(), view=self)
+                    await _editar_tablero_seguro(
+                        interaction,
+                        self,
+                        embed=self.build_embed(),
+                    )
                     resultado = True
                 else:
                     self.vidas -= 1
@@ -1785,9 +1903,10 @@ class ChantajistaView(JornadaView):
                     self.bloqueado = True
                     self._build_buttons()
                     try:
-                        await interaction.response.edit_message(
+                        await _editar_tablero_seguro(
+                            interaction,
+                            self,
                             embed=self.build_embed(),
-                            view=self,
                         )
                         await asyncio.sleep(1)
                     finally:
@@ -1813,6 +1932,7 @@ class ChantajistaView(JornadaView):
         return callback
 
     async def _finalizar(self, exito, interaction=None, por_timeout=False):
+        liquidada = False
         try:
             if exito:
                 pago = self.info["salario_max"]
@@ -1834,6 +1954,7 @@ class ChantajistaView(JornadaView):
                     raise RuntimeError(
                         f"Jornada ya liquidada: {settlement.get('reason')}"
                     )
+                liquidada = True
                 bonus = settlement["bonus"]
                 if bonus["coins"] > 0:
                     mensaje += (
@@ -1862,6 +1983,7 @@ class ChantajistaView(JornadaView):
                     raise RuntimeError(
                         f"Jornada ya liquidada: {settlement.get('reason')}"
                     )
+                liquidada = True
                 embed = discord.Embed(
                     title="Jornada Chantajista - Derrota",
                     description=(
@@ -1883,18 +2005,12 @@ class ChantajistaView(JornadaView):
                 await self.message.edit(embed=embed, view=None)
         except Exception as error:
             _log_trabajar_error("Chantajista", error, self.author.name, "_finalizar")
-            await cancelar_jornada_segura(self.session_id, "error")
-            if interaction is not None:
-                await _notificar_error_interaccion(interaction)
-            elif self.message is not None:
-                try:
-                    await self.message.edit(
-                        content="❌ Ocurrió un error al finalizar la jornada. Consulta **!trabajar** nuevamente.",
-                        embed=None,
-                        view=None,
-                    )
-                except (discord.HTTPException, discord.NotFound):
-                    pass
+            await _cerrar_tablero_con_error(
+                self,
+                "Chantajista",
+                interaction=interaction,
+                liquidada=liquidada,
+            )
         finally:
             if not self._cleanup_programado:
                 self._cleanup_programado = True
@@ -1908,6 +2024,7 @@ class ChantajistaView(JornadaView):
             self.bloqueado = True
             self.mostrar_ganador = True
             self._build_buttons()
+        await _mostrar_tablero_bloqueado(self)
         logger.info("[TRABAJAR/CHANTAJISTA] Jornada vencida — Usuario: %s", self.author.name)
         await self._finalizar(False, por_timeout=True)
 
@@ -1975,9 +2092,21 @@ class LimpiadorView(JornadaView):
             row = i // 4
             if self.revelados[i]:
                 style = ButtonStyle.success if emoji == "🗑️" else ButtonStyle.danger
-                btn = ui.Button(label=emoji, style=style, row=row, custom_id=f"limp_{i}")
+                btn = ui.Button(
+                    label=emoji,
+                    style=style,
+                    row=row,
+                    custom_id=f"limp_{i}",
+                    disabled=True,
+                )
             else:
-                btn = ui.Button(label="⬜", style=ButtonStyle.secondary, row=row, custom_id=f"limp_{i}")
+                btn = ui.Button(
+                    label="⬜",
+                    style=ButtonStyle.secondary,
+                    row=row,
+                    custom_id=f"limp_{i}",
+                    disabled=self.terminado,
+                )
             btn.custom_id = f"limp_{self.session_id}_{i}"
             btn.callback = self._make_callback(i)
             self.add_item(btn)
@@ -1985,19 +2114,19 @@ class LimpiadorView(JornadaView):
     def _make_callback(self, idx):
         async def callback(interaction: Interaction):
             if interaction.user.id != self.author.id:
-                return await interaction.response.send_message("❌ Este tablero no es tuyo.", ephemeral=True)
+                return await _responder_jornada(interaction, "❌ Este tablero no es tuyo.")
             if self._interaction_lock.locked():
-                return await interaction.response.send_message(
+                return await _responder_jornada(
+                    interaction,
                     "⏳ El tablero está actualizando la jugada anterior.",
-                    ephemeral=True,
                 )
 
             terminar_ahora = False
             async with self._interaction_lock:
                 if self.terminado:
-                    return await interaction.response.send_message("⌛ Esta jornada ya finalizó.", ephemeral=True)
+                    return await _responder_jornada(interaction, "⌛ Esta jornada ya finalizó.")
                 if self.revelados[idx]:
-                    return await interaction.response.send_message("✅ Esa casilla ya está descubierta.", ephemeral=True)
+                    return await _responder_jornada(interaction, "✅ Esa casilla ya está descubierta.")
                 self.revelados[idx] = True
                 self.puntos += 1
                 if self.tablero[idx] == "🗑️":
@@ -2009,7 +2138,11 @@ class LimpiadorView(JornadaView):
                     self.terminado = True
                     self.stop()
                 self._build_buttons()
-                await interaction.response.edit_message(embed=self.build_embed(), view=self)
+                await _editar_tablero_seguro(
+                    interaction,
+                    self,
+                    embed=self.build_embed(),
+                )
             if terminar_ahora:
                 await self._terminar(interaction, exito=True)
         return callback
@@ -2027,27 +2160,39 @@ class LimpiadorView(JornadaView):
         embed.set_footer(text="Trabajo de Limpiador en progreso......")
         return embed
 
-    async def _terminar(self, interaction, exito):
+    async def _terminar(self, interaction, exito, *, por_timeout=False):
+        liquidada = False
         try:
             tiempo = int(time.time() - self.start_time)
             ratio = 1.0 + max(0.0, 45 - tiempo) / 45.0 * 0.35
             pago = min(int(self.pago_base * ratio), self.info['salario_max'])
             xp_ganada = self.info.get('xp_ganada', 0)
-            if random.random() < self.info['prob_fallo']:
+            if not exito or random.random() < self.info['prob_fallo']:
                 pago = self.info['penalizacion']
-                mensaje = random.choice(self.info['mensajes_fallo']).format(monto=abs(self.info['penalizacion']), COIN=COIN)
+                if por_timeout:
+                    mensaje = (
+                        f"La jornada terminó por inactividad; pierdes "
+                        f"{abs(self.info['penalizacion'])} {COIN}."
+                    )
+                else:
+                    mensaje = random.choice(self.info['mensajes_fallo']).format(monto=abs(self.info['penalizacion']), COIN=COIN)
                 settlement = await finalizar_jornada_atomica(
                     self.session_id, self.author.id, "limpiador", False,
                     self.info['penalizacion'], mensaje,
                 )
                 if not settlement["ok"]:
                     raise RuntimeError(settlement.get("reason"))
-                await _editar_tablero_seguro(
-                    interaction,
-                    self,
-                    embed=discord.Embed(title="🧹 Resultado", description=f"{self.author.mention} {mensaje}", color=discord.Color.red()),
-                    remove_view=True,
-                )
+                liquidada = True
+                result_embed = discord.Embed(title="🧹 Resultado", description=f"{self.author.mention} {mensaje}", color=discord.Color.red())
+                if interaction is not None:
+                    await _editar_tablero_seguro(
+                        interaction,
+                        self,
+                        embed=result_embed,
+                        remove_view=True,
+                    )
+                elif self.message is not None:
+                    await self.message.edit(embed=result_embed, view=None)
                 _programar_eliminacion(self)
                 return
             mensaje = random.choice(self.info['mensajes_exito']).format(monto=pago, COIN=COIN)
@@ -2058,20 +2203,30 @@ class LimpiadorView(JornadaView):
             )
             if not settlement["ok"]:
                 raise RuntimeError(settlement.get("reason"))
+            liquidada = True
             bonus = settlement["bonus"]
             if bonus["coins"] > 0:
                 mensaje += f"\n🌟 **¡Racha de 5!** Bono: **+{bonus['coins']}** {COIN} y **+{bonus['xp']} XP Laboral**"
-            await _editar_tablero_seguro(
-                interaction,
-                self,
-                embed=discord.Embed(title="🧹 Resultado", description=f"{self.author.mention} {mensaje}", color=discord.Color.green()),
-                remove_view=True,
-            )
+            result_embed = discord.Embed(title="🧹 Resultado", description=f"{self.author.mention} {mensaje}", color=discord.Color.green())
+            if interaction is not None:
+                await _editar_tablero_seguro(
+                    interaction,
+                    self,
+                    embed=result_embed,
+                    remove_view=True,
+                )
+            elif self.message is not None:
+                await self.message.edit(embed=result_embed, view=None)
             _programar_eliminacion(self)
         except Exception as e:
             _log_trabajar_error("Limpiador", e, self.author.name, "_terminar")
-            await cancelar_jornada_segura(self.session_id, "error")
-            await _notificar_error_interaccion(interaction)
+            await _cerrar_tablero_con_error(
+                self,
+                "Limpiador",
+                interaction=interaction,
+                liquidada=liquidada,
+            )
+            _programar_eliminacion(self)
 
     async def on_error(self, interaction: Interaction, error: Exception, item):
         self.terminado = True
@@ -2087,8 +2242,14 @@ class LimpiadorView(JornadaView):
 
     async def on_timeout(self):
         logger.warning(f"[TRABAJAR/LIMPIADOR] on_timeout — Usuario: {self.author.name}")
-        await cancelar_jornada_segura(self.session_id, "expired")
-        await _caducar_tablero(self)
+        async with self._interaction_lock:
+            if self.terminado:
+                return
+            self.terminado = True
+            self.stop()
+            self._build_buttons()
+        await _mostrar_tablero_bloqueado(self)
+        await self._terminar(None, exito=False, por_timeout=True)
 
     async def _cleanup(self):
         await asyncio.sleep(180)
@@ -2168,20 +2329,27 @@ class IngenieroView(JornadaView):
     def _make_callback(self, idx):
         async def callback(interaction: Interaction):
             if interaction.user.id != self.author.id:
-                return await interaction.response.send_message("❌ Este tablero no es tuyo.", ephemeral=True)
+                return await _responder_jornada(interaction, "❌ Este tablero no es tuyo.")
             if self._interaction_lock.locked():
-                return await interaction.response.send_message(
+                return await _responder_jornada(
+                    interaction,
                     "⏳ El tablero está actualizando la jugada anterior.",
-                    ephemeral=True,
                 )
 
             resultado = None
             async with self._interaction_lock:
                 if self.bloqueado or self.terminado or self.revelados[idx] or idx in self.seleccion:
-                    return await interaction.response.defer()
+                    return await _responder_jornada(
+                        interaction,
+                        "⏳ Esa casilla no está disponible.",
+                    )
                 self.seleccion.append(idx)
                 self._build_buttons()
-                await interaction.response.edit_message(embed=self.build_embed(), view=self)
+                await _editar_tablero_seguro(
+                    interaction,
+                    self,
+                    embed=self.build_embed(),
+                )
                 if len(self.seleccion) == 2:
                     self.bloqueado = True
                     i1, i2 = self.seleccion
@@ -2249,6 +2417,7 @@ class IngenieroView(JornadaView):
         return embed
 
     async def _terminar(self, interaction, exito, *, por_timeout=False):
+        liquidada = False
         try:
             tiempo = int(time.time() - self.start_time)
             ratio = 1.0 + max(0.0, 45 - tiempo) / 45.0 * 0.35
@@ -2268,6 +2437,7 @@ class IngenieroView(JornadaView):
                 )
                 if not settlement["ok"]:
                     raise RuntimeError(settlement.get("reason"))
+                liquidada = True
                 result_embed = discord.Embed(title="🔧 Resultado", description=f"{self.author.mention} {mensaje}", color=discord.Color.red())
             else:
                 mensaje = random.choice(self.info['mensajes_exito']).format(monto=pago, COIN=COIN)
@@ -2278,6 +2448,7 @@ class IngenieroView(JornadaView):
                 )
                 if not settlement["ok"]:
                     raise RuntimeError(settlement.get("reason"))
+                liquidada = True
                 bonus = settlement["bonus"]
                 if bonus["coins"] > 0:
                     mensaje += f"\n🌟 **¡Racha de 5!** Bono: **+{bonus['coins']}** {COIN} y **+{bonus['xp']} XP Laboral**"
@@ -2294,9 +2465,13 @@ class IngenieroView(JornadaView):
             _programar_eliminacion(self)
         except Exception as e:
             _log_trabajar_error("Ingeniero", e, self.author.name, "_terminar")
-            await cancelar_jornada_segura(self.session_id, "error")
-            if interaction is not None:
-                await _notificar_error_interaccion(interaction)
+            await _cerrar_tablero_con_error(
+                self,
+                "Ingeniero",
+                interaction=interaction,
+                liquidada=liquidada,
+            )
+            _programar_eliminacion(self)
 
     async def on_error(self, interaction: Interaction, error: Exception, item):
         self.terminado = True
@@ -2320,6 +2495,7 @@ class IngenieroView(JornadaView):
             self.bloqueado = True
             self.stop()
             self._build_buttons()
+        await _mostrar_tablero_bloqueado(self)
         await self._terminar(None, exito=False, por_timeout=True)
 
 
@@ -2355,9 +2531,21 @@ class PlomeroView(JornadaView):
         for i, emoji in enumerate(self.tablero):
             row = i // 3
             if self.revelados[i]:
-                btn = ui.Button(label=emoji, style=ButtonStyle.success if emoji == "💣" else ButtonStyle.danger, row=row, custom_id=f"plo_{i}")
+                btn = ui.Button(
+                    label=emoji,
+                    style=ButtonStyle.success if emoji == "💣" else ButtonStyle.danger,
+                    row=row,
+                    custom_id=f"plo_{i}",
+                    disabled=True,
+                )
             else:
-                btn = ui.Button(label="⬜", style=ButtonStyle.secondary, row=row, custom_id=f"plo_{i}")
+                btn = ui.Button(
+                    label="⬜",
+                    style=ButtonStyle.secondary,
+                    row=row,
+                    custom_id=f"plo_{i}",
+                    disabled=self.terminado,
+                )
             btn.custom_id = f"plo_{self.session_id}_{i}"
             btn.callback = self._make_callback(i)
             self.add_item(btn)
@@ -2365,19 +2553,19 @@ class PlomeroView(JornadaView):
     def _make_callback(self, idx):
         async def callback(interaction: Interaction):
             if interaction.user.id != self.author.id:
-                return await interaction.response.send_message("❌ Este tablero no es tuyo.", ephemeral=True)
+                return await _responder_jornada(interaction, "❌ Este tablero no es tuyo.")
             if self._interaction_lock.locked():
-                return await interaction.response.send_message(
+                return await _responder_jornada(
+                    interaction,
                     "⏳ El tablero está actualizando la jugada anterior.",
-                    ephemeral=True,
                 )
 
             terminar_exito = None
             async with self._interaction_lock:
                 if self.terminado:
-                    return await interaction.response.send_message("⌛ Esta jornada ya finalizó.", ephemeral=True)
+                    return await _responder_jornada(interaction, "⌛ Esta jornada ya finalizó.")
                 if self.revelados[idx]:
-                    return await interaction.response.send_message("✅ Esa casilla ya está abierta.", ephemeral=True)
+                    return await _responder_jornada(interaction, "✅ Esa casilla ya está abierta.")
                 self.revelados[idx] = True
                 if self.tablero[idx] == "💣":
                     self.hallazgos += 1
@@ -2391,7 +2579,11 @@ class PlomeroView(JornadaView):
                     self.terminado = True
                     self.stop()
                 self._build_buttons()
-                await interaction.response.edit_message(embed=self.build_embed(), view=self)
+                await _editar_tablero_seguro(
+                    interaction,
+                    self,
+                    embed=self.build_embed(),
+                )
             if terminar_exito is not None:
                 await self._terminar(interaction, exito=terminar_exito)
         return callback
@@ -2411,20 +2603,28 @@ class PlomeroView(JornadaView):
         embed.set_footer(text="Trabajo de Plomero en progreso......")
         return embed
 
-    async def _terminar(self, interaction, exito):
+    async def _terminar(self, interaction, exito, *, por_timeout=False):
+        liquidada = False
         try:
             tiempo = int(time.time() - self.start_time)
             ratio = 1.0 + max(0.0, 45 - tiempo) / 45.0 * 0.35
             pago = min(int(self.pago_base * ratio), self.info['salario_max'])
             xp_ganada = self.info.get('xp_ganada', 0)
             if not exito:
-                mensaje = random.choice(self.info['mensajes_fallo']).format(monto=abs(self.info['penalizacion']), COIN=COIN)
+                if por_timeout:
+                    mensaje = (
+                        f"La jornada terminó por inactividad; pierdes "
+                        f"{abs(self.info['penalizacion'])} {COIN}."
+                    )
+                else:
+                    mensaje = random.choice(self.info['mensajes_fallo']).format(monto=abs(self.info['penalizacion']), COIN=COIN)
                 settlement = await finalizar_jornada_atomica(
                     self.session_id, self.author.id, "plomero", False,
                     self.info['penalizacion'], mensaje,
                 )
                 if not settlement["ok"]:
                     raise RuntimeError(settlement.get("reason"))
+                liquidada = True
                 result_embed = discord.Embed(title="🛠️ Resultado", description=f"{self.author.mention} {mensaje}", color=discord.Color.red())
             else:
                 mensaje = random.choice(self.info['mensajes_exito']).format(monto=pago, COIN=COIN)
@@ -2435,21 +2635,30 @@ class PlomeroView(JornadaView):
                 )
                 if not settlement["ok"]:
                     raise RuntimeError(settlement.get("reason"))
+                liquidada = True
                 bonus = settlement["bonus"]
                 if bonus["coins"] > 0:
                     mensaje += f"\n🌟 **¡Racha de 5!** Bono: **+{bonus['coins']}** {COIN} y **+{bonus['xp']} XP Laboral**"
                 result_embed = discord.Embed(title="🛠️ Resultado", description=f"{self.author.mention} {mensaje}", color=discord.Color.green())
-            await _editar_tablero_seguro(
-                interaction,
-                self,
-                embed=result_embed,
-                remove_view=True,
-            )
+            if interaction is not None:
+                await _editar_tablero_seguro(
+                    interaction,
+                    self,
+                    embed=result_embed,
+                    remove_view=True,
+                )
+            elif self.message is not None:
+                await self.message.edit(embed=result_embed, view=None)
             _programar_eliminacion(self)
         except Exception as e:
             _log_trabajar_error("Plomero", e, self.author.name, "_terminar")
-            await cancelar_jornada_segura(self.session_id, "error")
-            await _notificar_error_interaccion(interaction)
+            await _cerrar_tablero_con_error(
+                self,
+                "Plomero",
+                interaction=interaction,
+                liquidada=liquidada,
+            )
+            _programar_eliminacion(self)
 
     async def on_error(self, interaction: Interaction, error: Exception, item):
         self.terminado = True
@@ -2465,8 +2674,14 @@ class PlomeroView(JornadaView):
 
     async def on_timeout(self):
         logger.warning(f"[TRABAJAR/PLOMERO] on_timeout — Usuario: {self.author.name}")
-        await cancelar_jornada_segura(self.session_id, "expired")
-        await _caducar_tablero(self)
+        async with self._interaction_lock:
+            if self.terminado:
+                return
+            self.terminado = True
+            self.stop()
+            self._build_buttons()
+        await _mostrar_tablero_bloqueado(self)
+        await self._terminar(None, exito=False, por_timeout=True)
 
 
 async def setup(bot):
