@@ -4,13 +4,15 @@ import logging
 import random
 import time
 import traceback
+import uuid
 
 import discord
 from discord import ButtonStyle, Interaction, ui
 from discord.ext import commands
 
 from core.config import COIN, COORDINADOR_ROLE_ID
-from core.database import pool, update_bank
+from core.database import pool, _get_economy_lock, _flush_user_to_db_unlocked
+from core import cache as economy_cache
 
 logger = logging.getLogger("purplejack.empleos")
 
@@ -169,14 +171,51 @@ async def _caducar_tablero(view: ui.View):
         pass
 
 
+async def _editar_tablero_seguro(
+    interaction: Interaction,
+    view: ui.View,
+    *,
+    embed: discord.Embed,
+    remove_view: bool = False,
+):
+    """Actualiza un tablero con reintento y fallback al mensaje almacenado."""
+    target_view = None if remove_view else view
+    last_error = None
+    for intento in range(3):
+        try:
+            await interaction.edit_original_response(embed=embed, view=target_view)
+            return
+        except (discord.HTTPException, discord.NotFound) as error:
+            last_error = error
+            if getattr(view, "message", None) is not None:
+                try:
+                    await view.message.edit(embed=embed, view=target_view)
+                    return
+                except (discord.HTTPException, discord.NotFound) as message_error:
+                    last_error = message_error
+            if intento < 2:
+                await asyncio.sleep(0.5 * (intento + 1))
+    if last_error:
+        raise last_error
+
+
+def _programar_eliminacion(view: ui.View, delay: int = 180):
+    async def cleanup():
+        await asyncio.sleep(delay)
+        try:
+            if getattr(view, "message", None):
+                await view.message.delete()
+        except (discord.HTTPException, discord.NotFound):
+            pass
+
+    asyncio.create_task(cleanup())
+
+
 # ── CONFIG DESPIDOS ─────────────────────────────────────
 _despidos_config = {"activo": False}
 
 _EMPLEOS_CACHE = {}
 _CONFIRMACION_EMPLEO_LOCKS = {}
-_JORNADAS_CHANTAJISTA_ACTIVAS = set()
-
-
 def _get_confirmacion_empleo_lock(user_id: int) -> asyncio.Lock:
     lock = _CONFIRMACION_EMPLEO_LOCKS.get(user_id)
     if lock is None:
@@ -247,6 +286,412 @@ async def init_empleos_tables():
             motivo TEXT NOT NULL
         )
         """)
+        await conn.execute("""
+        CREATE TABLE IF NOT EXISTS empleos_jornadas (
+            session_id TEXT PRIMARY KEY,
+            request_id TEXT NOT NULL UNIQUE,
+            user_id BIGINT NOT NULL,
+            empleo TEXT NOT NULL,
+            status TEXT NOT NULL DEFAULT 'active',
+            guild_id BIGINT,
+            channel_id BIGINT,
+            message_id BIGINT,
+            created_at DOUBLE PRECISION NOT NULL,
+            expires_at DOUBLE PRECISION NOT NULL,
+            finalized_at DOUBLE PRECISION,
+            exito BOOLEAN,
+            pago INTEGER NOT NULL DEFAULT 0
+        )
+        """)
+        await conn.execute("""
+        CREATE UNIQUE INDEX IF NOT EXISTS empleos_una_jornada_activa_idx
+        ON empleos_jornadas (user_id)
+        WHERE status='active'
+        """)
+        await conn.execute("""
+        CREATE INDEX IF NOT EXISTS empleos_jornadas_estado_idx
+        ON empleos_jornadas (status, expires_at)
+        """)
+
+
+async def get_jornada_activa(user_id: int):
+    async with pool.acquire() as conn:
+        row = await conn.fetchrow(
+            """
+            SELECT * FROM empleos_jornadas
+            WHERE user_id=$1 AND status='active'
+            """,
+            user_id,
+        )
+    return dict(row) if row else None
+
+
+async def crear_jornada(
+    user_id: int,
+    empleo: str,
+    request_id: str,
+    *,
+    guild_id: int | None,
+    channel_id: int,
+    timeout: int,
+    cooldown_seconds: int,
+    bypass_cooldown: bool,
+):
+    """Crea una única jornada por usuario, también entre varias instancias."""
+    session_id = str(uuid.uuid4())
+    now = time.time()
+    async with pool.acquire() as conn:
+        async with conn.transaction():
+            # La fila laboral es el punto de serialización entre procesos.
+            empleo_actual = await conn.fetchrow(
+                """
+                SELECT user_id, empleo_actual, ultimo_trabajo
+                FROM empleos_users WHERE user_id=$1 FOR UPDATE
+                """,
+                user_id,
+            )
+            if not empleo_actual or normalizar_empleo(
+                empleo_actual["empleo_actual"] or ""
+            ) != empleo:
+                return {"ok": False, "reason": "employment_changed"}
+            duplicate = await conn.fetchrow(
+                "SELECT session_id, status FROM empleos_jornadas WHERE request_id=$1",
+                request_id,
+            )
+            if duplicate:
+                return {
+                    "ok": False,
+                    "reason": "duplicate_request",
+                    "session_id": duplicate["session_id"],
+                }
+
+            disponible_en = (
+                float(empleo_actual["ultimo_trabajo"] or 0) + cooldown_seconds
+            )
+            if not bypass_cooldown and disponible_en > now:
+                return {
+                    "ok": False,
+                    "reason": "cooldown",
+                    "expires_at": disponible_en,
+                }
+
+            active = await conn.fetchrow(
+                """
+                SELECT session_id, expires_at FROM empleos_jornadas
+                WHERE user_id=$1 AND status='active'
+                FOR UPDATE
+                """,
+                user_id,
+            )
+            if active and active["expires_at"] <= now:
+                await conn.execute(
+                    """
+                    UPDATE empleos_jornadas
+                    SET status='cancelled', finalized_at=$2
+                    WHERE session_id=$1 AND status='active'
+                    """,
+                    active["session_id"],
+                    now,
+                )
+                active = None
+            if active:
+                return {
+                    "ok": False,
+                    "reason": "already_active",
+                    "session_id": active["session_id"],
+                }
+
+            await conn.execute(
+                """
+                INSERT INTO empleos_jornadas (
+                    session_id, request_id, user_id, empleo, status,
+                    guild_id, channel_id, created_at, expires_at
+                )
+                VALUES ($1,$2,$3,$4,'active',$5,$6,$7,$8)
+                """,
+                session_id,
+                request_id,
+                user_id,
+                empleo,
+                guild_id,
+                channel_id,
+                now,
+                now + timeout + 30,
+            )
+    return {"ok": True, "session_id": session_id}
+
+
+async def asociar_mensaje_jornada(session_id: str, message_id: int):
+    async with pool.acquire() as conn:
+        await conn.execute(
+            """
+            UPDATE empleos_jornadas SET message_id=$2
+            WHERE session_id=$1 AND status='active'
+            """,
+            session_id,
+            message_id,
+        )
+
+
+async def renovar_jornada(session_id: str, timeout: int) -> bool:
+    async with pool.acquire() as conn:
+        result = await conn.execute(
+            """
+            UPDATE empleos_jornadas
+            SET expires_at=$2
+            WHERE session_id=$1 AND status='active'
+            """,
+            session_id,
+            time.time() + timeout + 30,
+        )
+    return result.endswith("1")
+
+
+async def cancelar_jornada(session_id: str, status: str = "cancelled") -> bool:
+    async with pool.acquire() as conn:
+        result = await conn.execute(
+            """
+            UPDATE empleos_jornadas
+            SET status=$2, finalized_at=$3
+            WHERE session_id=$1 AND status='active'
+            """,
+            session_id,
+            status,
+            time.time(),
+        )
+    return result.endswith("1")
+
+
+async def cancelar_jornada_segura(
+    session_id: str,
+    status: str = "cancelled",
+) -> bool:
+    try:
+        return await cancelar_jornada(session_id, status)
+    except Exception:
+        logger.exception(
+            "No se pudo cerrar la jornada %s con estado %s.",
+            session_id,
+            status,
+        )
+        return False
+
+
+async def cancelar_jornadas_de_ejecucion_anterior():
+    """Cierra sesiones RAM huérfanas y devuelve sus mensajes para limpiarlos."""
+    async with pool.acquire() as conn:
+        rows = await conn.fetch(
+            """
+            UPDATE empleos_jornadas
+            SET status='cancelled', finalized_at=$1
+            WHERE status='active'
+            RETURNING user_id, empleo, guild_id, channel_id, message_id
+            """,
+            time.time(),
+        )
+    return [dict(row) for row in rows]
+
+
+def _parse_historial_jornadas(value) -> list:
+    if isinstance(value, list):
+        return value
+    try:
+        return ast.literal_eval(value or "[]")
+    except Exception:
+        return []
+
+
+async def _finalizar_jornada_atomica_unlocked(
+    session_id: str,
+    user_id: int,
+    empleo: str,
+    exito: bool,
+    pago: int,
+    motivo: str,
+    *,
+    xp_ganada: int = 0,
+):
+    """Liquida banco, EXP, historial y sesión exactamente una vez."""
+    now = time.time()
+    bonus = {"coins": 0, "xp": 0}
+    overflow_balance = 0
+
+    async with pool.acquire() as conn:
+        async with conn.transaction():
+            # Mismo orden de locks que crear_jornada: empleo -> sesión -> economía.
+            # Evita deadlocks entre un clic final y otro !trabajar simultáneo.
+            empleo_row = await conn.fetchrow(
+                "SELECT * FROM empleos_users WHERE user_id=$1 FOR UPDATE",
+                user_id,
+            )
+            if not empleo_row:
+                raise RuntimeError("Usuario laboral inexistente")
+            session = await conn.fetchrow(
+                "SELECT * FROM empleos_jornadas WHERE session_id=$1 FOR UPDATE",
+                session_id,
+            )
+            if not session:
+                return {"ok": False, "reason": "session_not_found", "bonus": bonus}
+            if session["status"] != "active":
+                return {
+                    "ok": False,
+                    "reason": "already_finalized",
+                    "status": session["status"],
+                    "bonus": bonus,
+                }
+            if session["user_id"] != user_id:
+                return {"ok": False, "reason": "invalid_owner", "bonus": bonus}
+            if normalizar_empleo(empleo_row["empleo_actual"] or "") != normalizar_empleo(empleo):
+                return {
+                    "ok": False,
+                    "reason": "employment_changed",
+                    "bonus": bonus,
+                }
+
+            user = await conn.fetchrow(
+                "SELECT * FROM users WHERE id=$1 FOR UPDATE",
+                user_id,
+            )
+            if not user:
+                raise RuntimeError("Usuario económico inexistente")
+
+            historial = _parse_historial_jornadas(
+                empleo_row["historial_reciente_de_jornadas"]
+            )
+            historial = (historial + [now])[-10:]
+            progreso = max(
+                empleo_row["progreso_permanencia"] or 0,
+                now - (empleo_row["fecha_contratacion"] or now),
+            )
+
+            racha = empleo_row["racha_exitos"] or 0
+            nueva_xp = empleo_row["exp_laboral"] or 0
+            if exito:
+                racha += 1
+                nueva_xp += max(0, xp_ganada)
+                if racha % 5 == 0:
+                    bonus = {
+                        "coins": int(pago * RACHA_BONUS_COINS) if pago > 0 else 0,
+                        "xp": RACHA_BONUS_XP,
+                    }
+                    nueva_xp += RACHA_BONUS_XP
+                    racha = 0
+            else:
+                racha = 0
+
+            coin_delta = pago + bonus["coins"]
+            new_balance = user["balance"]
+            new_bank = user["bank"]
+            if coin_delta > 0:
+                espacio = max(0, economy_cache.MAX_BANK - new_bank)
+                aplicado_banco = min(coin_delta, espacio)
+                new_bank += aplicado_banco
+                overflow_balance = coin_delta - aplicado_banco
+                new_balance += overflow_balance
+            elif coin_delta < 0:
+                new_bank += coin_delta
+
+            user_row = await conn.fetchrow(
+                """
+                UPDATE users SET balance=$2, bank=$3
+                WHERE id=$1
+                RETURNING balance, bank, cooldown_work, cooldown_crime
+                """,
+                user_id,
+                new_balance,
+                new_bank,
+            )
+            empleo_actualizado = await conn.fetchrow(
+                """
+                UPDATE empleos_users SET
+                    ultimo_trabajo=$2,
+                    progreso_permanencia=$3,
+                    historial_reciente_de_jornadas=$4,
+                    exp_laboral=$5,
+                    racha_exitos=$6,
+                    trabajos_exitosos=COALESCE(trabajos_exitosos, 0)+$7,
+                    exitosos_empleo_actual=COALESCE(exitosos_empleo_actual, 0)+$7,
+                    trabajos_fallidos=COALESCE(trabajos_fallidos, 0)+$8,
+                    fallidos_empleo_actual=COALESCE(fallidos_empleo_actual, 0)+$8,
+                    total_generado=COALESCE(total_generado, 0)+$9,
+                    ingresos_empleo_actual=COALESCE(ingresos_empleo_actual, 0)+$9
+                WHERE user_id=$1
+                RETURNING *
+                """,
+                user_id,
+                now,
+                progreso,
+                repr(historial),
+                nueva_xp,
+                racha,
+                1 if exito else 0,
+                0 if exito else 1,
+                max(0, pago) if exito else 0,
+            )
+            await conn.execute(
+                """
+                INSERT INTO empleos_historial (
+                    user_id, empleo, timestamp, exito, pago, motivo
+                ) VALUES ($1,$2,$3,$4,$5,$6)
+                """,
+                user_id,
+                empleo,
+                now,
+                exito,
+                pago,
+                motivo,
+            )
+            await conn.execute(
+                """
+                UPDATE empleos_jornadas SET
+                    status=$2, finalized_at=$3, exito=$4, pago=$5
+                WHERE session_id=$1
+                """,
+                session_id,
+                "completed" if exito else "failed",
+                now,
+                exito,
+                pago,
+            )
+
+    if user_row:
+        economy_cache.set_cache(user_id, dict(user_row))
+    if overflow_balance:
+        economy_cache.record_evento_balance_delta(user_id, overflow_balance)
+    if empleo_actualizado:
+        data = dict(empleo_actualizado)
+        data["historial_reciente_de_jornadas"] = _parse_historial_jornadas(
+            data["historial_reciente_de_jornadas"]
+        )
+        _EMPLEOS_CACHE[user_id] = data
+    return {"ok": True, "bonus": bonus}
+
+
+async def finalizar_jornada_atomica(
+    session_id: str,
+    user_id: int,
+    empleo: str,
+    exito: bool,
+    pago: int,
+    motivo: str,
+    *,
+    xp_ganada: int = 0,
+):
+    async with _get_economy_lock(user_id):
+        # Conserva cualquier movimiento legítimo que aún estuviera dirty en RAM
+        # antes de calcular la liquidación sobre el saldo real de PostgreSQL.
+        flushed = await _flush_user_to_db_unlocked(user_id)
+        if flushed is False:
+            raise RuntimeError("No se pudo sincronizar el saldo antes de la jornada")
+        return await _finalizar_jornada_atomica_unlocked(
+            session_id,
+            user_id,
+            empleo,
+            exito,
+            pago,
+            motivo,
+            xp_ganada=xp_ganada,
+        )
 
 
 async def get_empleo_user(user_id, force_refresh=False):
@@ -564,8 +1009,8 @@ def build_empleos_maestria_embed() -> discord.Embed:
 
 async def renunciar_empleo(member: discord.Member) -> tuple[bool, str]:
     """Aplica la misma baja y cooldown que el comando !renunciar."""
-    if member.id in _JORNADAS_CHANTAJISTA_ACTIVAS:
-        return False, "⌛ Finaliza primero tu jornada de Chantajista."
+    if await get_jornada_activa(member.id):
+        return False, "⌛ Finaliza primero tu jornada laboral activa."
 
     data = await get_empleo_user(member.id)
     if not data or not data.get("empleo_actual"):
@@ -616,9 +1061,9 @@ class ConfirmarEmpleoView(ui.View):
             return
 
         async with self._interaction_lock:
-            if self.user_id in _JORNADAS_CHANTAJISTA_ACTIVAS:
+            if await get_jornada_activa(self.user_id):
                 return await interaction.followup.send(
-                    "⌛ Finaliza primero tu jornada de Chantajista.",
+                    "⌛ Finaliza primero tu jornada laboral activa.",
                     ephemeral=True,
                 )
             data = await get_empleo_user(self.user_id, force_refresh=True)
@@ -993,9 +1438,42 @@ class EmpleosMaestriaView(OficinaBaseView):
 class Empleos(commands.Cog):
     def __init__(self, bot):
         self.bot = bot
+        self._jornadas_huerfanas = []
+        self._jornadas_huerfanas_limpiadas = False
 
     async def cog_load(self):
         await init_empleos_tables()
+        self._jornadas_huerfanas = await cancelar_jornadas_de_ejecucion_anterior()
+
+    @commands.Cog.listener()
+    async def on_ready(self):
+        if self._jornadas_huerfanas_limpiadas:
+            return
+        self._jornadas_huerfanas_limpiadas = True
+        for jornada in self._jornadas_huerfanas:
+            if not jornada.get("channel_id") or not jornada.get("message_id"):
+                continue
+            try:
+                channel = self.bot.get_channel(jornada["channel_id"])
+                if channel is None:
+                    channel = await self.bot.fetch_channel(jornada["channel_id"])
+                message = await channel.fetch_message(jornada["message_id"])
+                embed = discord.Embed(
+                    title="Jornada interrumpida",
+                    description=(
+                        "Esta jornada fue cerrada de forma segura durante un reinicio. "
+                        "Puedes consultar **!trabajar** para iniciar una nueva."
+                    ),
+                    color=discord.Color.dark_grey(),
+                )
+                await message.edit(embed=embed, view=None)
+            except (discord.HTTPException, discord.NotFound, discord.Forbidden):
+                logger.warning(
+                    "No se pudo cerrar el tablero laboral huérfano %s/%s.",
+                    jornada.get("channel_id"),
+                    jornada.get("message_id"),
+                )
+        self._jornadas_huerfanas.clear()
 
     @commands.command(name="empleos", aliases=["trabajos"])
     async def empleos(self, ctx):
@@ -1103,21 +1581,46 @@ class Empleos(commands.Cog):
                         f"(más de 24h sin trabajar). Usa **!aplicar** para conseguir un nuevo empleo."
                     )
 
-        if empleo == "limpiador":
-            view = LimpiadorView(self.bot, ctx.author, info)
-        elif empleo == "ingeniero":
-            view = IngenieroView(self.bot, ctx.author, info)
-        elif empleo == "plomero":
-            view = PlomeroView(self.bot, ctx.author, info)
-        elif empleo == "chantajista":
-            if ctx.author.id in _JORNADAS_CHANTAJISTA_ACTIVAS:
+        timeout = 60 if empleo == "chantajista" else 180
+        jornada = await crear_jornada(
+            ctx.author.id,
+            empleo,
+            f"trabajar:message:{ctx.message.id}",
+            guild_id=ctx.guild.id if ctx.guild else None,
+            channel_id=ctx.channel.id,
+            timeout=timeout,
+            cooldown_seconds=info["duracion_horas"] * 3600,
+            bypass_cooldown=bypass,
+        )
+        if not jornada["ok"]:
+            if jornada["reason"] == "duplicate_request":
+                return
+            if jornada["reason"] == "cooldown":
                 return await ctx.reply(
-                    "⌛ Ya tienes una jornada de Chantajista activa.",
+                    f"⏳ Podrás volver a trabajar <t:{int(jornada['expires_at'])}:R>"
+                )
+            if jornada["reason"] == "employment_changed":
+                _EMPLEOS_CACHE.pop(ctx.author.id, None)
+                return await ctx.reply(
+                    "❌ Tu empleo cambió mientras se iniciaba la jornada. Inténtalo nuevamente.",
                     mention_author=False,
                 )
-            _JORNADAS_CHANTAJISTA_ACTIVAS.add(ctx.author.id)
-            view = ChantajistaView(self.bot, ctx.author, info)
+            return await ctx.reply(
+                "⌛ Ya tienes una jornada laboral activa. Finalízala antes de comenzar otra.",
+                mention_author=False,
+            )
+
+        session_id = jornada["session_id"]
+        if empleo == "limpiador":
+            view = LimpiadorView(self.bot, ctx.author, info, session_id)
+        elif empleo == "ingeniero":
+            view = IngenieroView(self.bot, ctx.author, info, session_id)
+        elif empleo == "plomero":
+            view = PlomeroView(self.bot, ctx.author, info, session_id)
+        elif empleo == "chantajista":
+            view = ChantajistaView(self.bot, ctx.author, info, session_id)
         else:
+            await cancelar_jornada_segura(session_id)
             return await ctx.send("🚧 Trabajo Pendiente de desarrollo.")
 
         try:
@@ -1126,22 +1629,55 @@ class Empleos(commands.Cog):
             else:
                 msg = await ctx.send(embed=view.build_embed(), view=view)
         except Exception:
-            if empleo == "chantajista":
-                _JORNADAS_CHANTAJISTA_ACTIVAS.discard(ctx.author.id)
+            await cancelar_jornada_segura(session_id)
             raise
         view.message = msg
+        try:
+            await asociar_mensaje_jornada(session_id, msg.id)
+        except Exception:
+            await cancelar_jornada_segura(session_id)
+            try:
+                await msg.edit(
+                    content="❌ No se pudo registrar la jornada. Inténtalo nuevamente.",
+                    embed=None,
+                    view=None,
+                )
+            except Exception:
+                pass
+            raise
 
 
-class ChantajistaView(ui.View):
+class JornadaView(ui.View):
+    async def interaction_check(self, interaction: Interaction) -> bool:
+        if interaction.user.id != self.author.id:
+            await interaction.response.send_message(
+                "❌ Este tablero no es tuyo.",
+                ephemeral=True,
+            )
+            return False
+        if not await renovar_jornada(
+            self.session_id,
+            int(self.timeout or 180),
+        ):
+            await interaction.response.send_message(
+                "⌛ Esta jornada ya fue cerrada. Consulta **!trabajar** nuevamente.",
+                ephemeral=True,
+            )
+            return False
+        return True
+
+
+class ChantajistaView(JornadaView):
     TRIPULANTE = discord.PartialEmoji.from_str("<:t_Enginer:1288581004914589756>")
     INCORRECTO = discord.PartialEmoji.from_str("<:n_JokerCoin:1287140438276571146>")
     MAX_VIDAS = 3
 
-    def __init__(self, bot, author, info):
+    def __init__(self, bot, author, info, session_id: str):
         super().__init__(timeout=60)
         self.bot = bot
         self.author = author
         self.info = info
+        self.session_id = session_id
         self.message = None
         self.ganador = random.randrange(6)
         self.vidas = self.MAX_VIDAS
@@ -1152,6 +1688,13 @@ class ChantajistaView(ui.View):
         self.terminado = False
         self._cleanup_programado = False
         self._interaction_lock = asyncio.Lock()
+        guild = getattr(author, "guild", None)
+        self.tripulante_emoji = (
+            guild.get_emoji(self.TRIPULANTE.id) if guild else None
+        ) or "🧑‍🚀"
+        self.incorrecto_emoji = (
+            guild.get_emoji(self.INCORRECTO.id) if guild else None
+        ) or "❌"
         self._build_buttons()
 
     def _build_buttons(self):
@@ -1162,18 +1705,18 @@ class ChantajistaView(ui.View):
 
             if es_ganador_visible:
                 button = ui.Button(
-                    emoji=self.TRIPULANTE,
+                    emoji=self.tripulante_emoji,
                     style=ButtonStyle.success,
                     row=idx // 3,
-                    custom_id=f"chant_{self.author.id}_{idx}",
+                    custom_id=f"chant_{self.session_id}_{idx}",
                     disabled=True,
                 )
             elif es_incorrecta_visible:
                 button = ui.Button(
-                    emoji=self.INCORRECTO,
+                    emoji=self.incorrecto_emoji,
                     style=ButtonStyle.danger,
                     row=idx // 3,
-                    custom_id=f"chant_{self.author.id}_{idx}",
+                    custom_id=f"chant_{self.session_id}_{idx}",
                     disabled=True,
                 )
             else:
@@ -1181,7 +1724,7 @@ class ChantajistaView(ui.View):
                     label="⬜",
                     style=ButtonStyle.secondary,
                     row=idx // 3,
-                    custom_id=f"chant_{self.author.id}_{idx}",
+                    custom_id=f"chant_{self.session_id}_{idx}",
                     disabled=self.terminado or self.bloqueado or idx in self.descartadas,
                 )
 
@@ -1207,7 +1750,10 @@ class ChantajistaView(ui.View):
                     ephemeral=True,
                 )
             if self._interaction_lock.locked():
-                return await interaction.response.defer()
+                return await interaction.response.send_message(
+                    "⏳ El tablero está actualizando la jugada anterior.",
+                    ephemeral=True,
+                )
 
             resultado = None
             async with self._interaction_lock:
@@ -1233,20 +1779,28 @@ class ChantajistaView(ui.View):
                     self.incorrecta_visible = idx
                     self.bloqueado = True
                     self._build_buttons()
-                    await interaction.response.edit_message(embed=self.build_embed(), view=self)
-                    await asyncio.sleep(1)
+                    try:
+                        await interaction.response.edit_message(
+                            embed=self.build_embed(),
+                            view=self,
+                        )
+                        await asyncio.sleep(1)
+                    finally:
+                        self.incorrecta_visible = None
+                        if self.vidas <= 0:
+                            self.terminado = True
+                            self.mostrar_ganador = True
+                            self.stop()
+                            resultado = False
+                        else:
+                            self.bloqueado = False
+                        self._build_buttons()
 
-                    self.incorrecta_visible = None
-                    if self.vidas <= 0:
-                        self.terminado = True
-                        self.mostrar_ganador = True
-                        self.stop()
-                        resultado = False
-                    else:
-                        self.bloqueado = False
-
-                    self._build_buttons()
-                    await interaction.edit_original_response(embed=self.build_embed(), view=self)
+                    await _editar_tablero_seguro(
+                        interaction,
+                        self,
+                        embed=self.build_embed(),
+                    )
 
             if resultado is not None:
                 await self._finalizar(resultado, interaction=interaction)
@@ -1262,8 +1816,8 @@ class ChantajistaView(ui.View):
                     f"Felicidades has encontrado al Tripulante Ganas "
                     f"{pago} {COIN} + {xp_ganada} Exp Laboral"
                 )
-                await update_bank(self.author.id, pago)
-                bonus = await registrar_resultado(
+                settlement = await finalizar_jornada_atomica(
+                    self.session_id,
                     self.author.id,
                     "chantajista",
                     True,
@@ -1271,8 +1825,12 @@ class ChantajistaView(ui.View):
                     mensaje,
                     xp_ganada=xp_ganada,
                 )
+                if not settlement["ok"]:
+                    raise RuntimeError(
+                        f"Jornada ya liquidada: {settlement.get('reason')}"
+                    )
+                bonus = settlement["bonus"]
                 if bonus["coins"] > 0:
-                    await update_bank(self.author.id, bonus["coins"])
                     mensaje += (
                         f"\n🌟 **¡Racha de 5!** Bono: **+{bonus['coins']}** "
                         f"{COIN} y **+{bonus['xp']} XP Laboral**"
@@ -1287,29 +1845,40 @@ class ChantajistaView(ui.View):
                     motivo = "No encontraste al Tripulante antes de finalizar el tiempo."
                 else:
                     motivo = "Perdiste tus 3 vidas sin encontrar al Tripulante."
-                await registrar_resultado(
+                settlement = await finalizar_jornada_atomica(
+                    self.session_id,
                     self.author.id,
                     "chantajista",
                     False,
                     0,
                     motivo,
                 )
+                if not settlement["ok"]:
+                    raise RuntimeError(
+                        f"Jornada ya liquidada: {settlement.get('reason')}"
+                    )
                 embed = discord.Embed(
                     title="Jornada Chantajista - Derrota",
                     description=(
                         f"{self.author.mention} {motivo}\n"
                         f"El Tripulante estaba en la casilla **{self.ganador + 1}** "
-                        f"{self.TRIPULANTE}"
+                        f"{self.tripulante_emoji}"
                     ),
                     color=discord.Color.red(),
                 )
 
             if interaction is not None:
-                await interaction.edit_original_response(embed=embed, view=None)
+                await _editar_tablero_seguro(
+                    interaction,
+                    self,
+                    embed=embed,
+                    remove_view=True,
+                )
             elif self.message is not None:
                 await self.message.edit(embed=embed, view=None)
         except Exception as error:
             _log_trabajar_error("Chantajista", error, self.author.name, "_finalizar")
+            await cancelar_jornada_segura(self.session_id, "error")
             if interaction is not None:
                 await _notificar_error_interaccion(interaction)
             elif self.message is not None:
@@ -1322,7 +1891,6 @@ class ChantajistaView(ui.View):
                 except (discord.HTTPException, discord.NotFound):
                     pass
         finally:
-            _JORNADAS_CHANTAJISTA_ACTIVAS.discard(self.author.id)
             if not self._cleanup_programado:
                 self._cleanup_programado = True
                 asyncio.create_task(self._cleanup())
@@ -1342,7 +1910,7 @@ class ChantajistaView(ui.View):
         self.terminado = True
         self.bloqueado = True
         self.stop()
-        _JORNADAS_CHANTAJISTA_ACTIVAS.discard(self.author.id)
+        await cancelar_jornada_segura(self.session_id, "error")
         _log_trabajar_error(
             "Chantajista",
             error,
@@ -1368,13 +1936,18 @@ class ChantajistaView(ui.View):
             pass
 
 
-class LimpiadorView(ui.View):
-    def __init__(self, bot, author, info):
+class LimpiadorView(JornadaView):
+    def __init__(self, bot, author, info, session_id: str):
         super().__init__(timeout=180)
         self.bot = bot
         self.author = author
         self.info = info
+        self.session_id = session_id
         self.start_time = time.time()
+        self.pago_base = random.randint(
+            self.info["salario_min"],
+            self.info["salario_max"],
+        )
         self.revelados = [False] * 16
         self.basura = 3
         self.celdas_erroneas = set()
@@ -1400,6 +1973,7 @@ class LimpiadorView(ui.View):
                 btn = ui.Button(label=emoji, style=style, row=row, custom_id=f"limp_{i}")
             else:
                 btn = ui.Button(label="⬜", style=ButtonStyle.secondary, row=row, custom_id=f"limp_{i}")
+            btn.custom_id = f"limp_{self.session_id}_{i}"
             btn.callback = self._make_callback(i)
             self.add_item(btn)
 
@@ -1408,7 +1982,10 @@ class LimpiadorView(ui.View):
             if interaction.user.id != self.author.id:
                 return await interaction.response.send_message("❌ Este tablero no es tuyo.", ephemeral=True)
             if self._interaction_lock.locked():
-                return await interaction.response.defer()
+                return await interaction.response.send_message(
+                    "⏳ El tablero está actualizando la jugada anterior.",
+                    ephemeral=True,
+                )
 
             terminar_ahora = False
             async with self._interaction_lock:
@@ -1433,11 +2010,9 @@ class LimpiadorView(ui.View):
         return callback
 
     def build_embed(self):
-        descubiertos = sum(self.revelados)
         tiempo = int(time.time() - self.start_time)
-        base = random.randint(self.info['salario_min'], self.info['salario_max'])
         ratio = 1.0 + max(0.0, 45 - tiempo) / 45.0 * 0.35
-        pago_actual = min(int(base * ratio), self.info['salario_max'])
+        pago_actual = min(int(self.pago_base * ratio), self.info['salario_max'])
 
         embed = discord.Embed(title=f"🧹 Jornada Limpiador - {self.author.nick or self.author.display_name}", color=discord.Color.yellow())
         embed.add_field(name="Objetivo", value="Descubre los 3 símbolos de reciclaje para completar la tarea.", inline=False)
@@ -1450,38 +2025,64 @@ class LimpiadorView(ui.View):
     async def _terminar(self, interaction, exito):
         try:
             tiempo = int(time.time() - self.start_time)
-            base = random.randint(self.info['salario_min'], self.info['salario_max'])
             ratio = 1.0 + max(0.0, 45 - tiempo) / 45.0 * 0.35
-            pago = min(int(base * ratio), self.info['salario_max'])
+            pago = min(int(self.pago_base * ratio), self.info['salario_max'])
             xp_ganada = self.info.get('xp_ganada', 0)
-            exito_real = True
             if random.random() < self.info['prob_fallo']:
-                exito_real = False
                 pago = self.info['penalizacion']
                 mensaje = random.choice(self.info['mensajes_fallo']).format(monto=abs(self.info['penalizacion']), COIN=COIN)
-                await update_bank(self.author.id, self.info['penalizacion'])
-                await registrar_resultado(self.author.id, 'Limpiador', False, self.info['penalizacion'], mensaje)
-                await interaction.edit_original_response(embed=discord.Embed(title="🧹 Resultado", description=f"{self.author.mention} {mensaje}", color=discord.Color.red()), view=None)
-                await self._cleanup()
+                settlement = await finalizar_jornada_atomica(
+                    self.session_id, self.author.id, "limpiador", False,
+                    self.info['penalizacion'], mensaje,
+                )
+                if not settlement["ok"]:
+                    raise RuntimeError(settlement.get("reason"))
+                await _editar_tablero_seguro(
+                    interaction,
+                    self,
+                    embed=discord.Embed(title="🧹 Resultado", description=f"{self.author.mention} {mensaje}", color=discord.Color.red()),
+                    remove_view=True,
+                )
+                _programar_eliminacion(self)
                 return
             mensaje = random.choice(self.info['mensajes_exito']).format(monto=pago, COIN=COIN)
             mensaje = f"{mensaje} (+{xp_ganada} XP Laboral)"
-            await update_bank(self.author.id, pago)
-            bonus = await registrar_resultado(self.author.id, 'Limpiador', True, pago, mensaje, xp_ganada=xp_ganada)
+            settlement = await finalizar_jornada_atomica(
+                self.session_id, self.author.id, "limpiador", True,
+                pago, mensaje, xp_ganada=xp_ganada,
+            )
+            if not settlement["ok"]:
+                raise RuntimeError(settlement.get("reason"))
+            bonus = settlement["bonus"]
             if bonus["coins"] > 0:
-                await update_bank(self.author.id, bonus["coins"])
                 mensaje += f"\n🌟 **¡Racha de 5!** Bono: **+{bonus['coins']}** {COIN} y **+{bonus['xp']} XP Laboral**"
-            await interaction.edit_original_response(embed=discord.Embed(title="🧹 Resultado", description=f"{self.author.mention} {mensaje}", color=discord.Color.green()), view=None)
-            await self._cleanup()
+            await _editar_tablero_seguro(
+                interaction,
+                self,
+                embed=discord.Embed(title="🧹 Resultado", description=f"{self.author.mention} {mensaje}", color=discord.Color.green()),
+                remove_view=True,
+            )
+            _programar_eliminacion(self)
         except Exception as e:
             _log_trabajar_error("Limpiador", e, self.author.name, "_terminar")
+            await cancelar_jornada_segura(self.session_id, "error")
+            await _notificar_error_interaccion(interaction)
 
     async def on_error(self, interaction: Interaction, error: Exception, item):
+        self.terminado = True
+        self.stop()
+        await cancelar_jornada_segura(self.session_id, "error")
         _log_trabajar_error("Limpiador", error, interaction.user.name, f"on_error — Item: {item}")
+        if self.message:
+            try:
+                await self.message.edit(view=None)
+            except (discord.HTTPException, discord.NotFound):
+                pass
         await _notificar_error_interaccion(interaction)
 
     async def on_timeout(self):
         logger.warning(f"[TRABAJAR/LIMPIADOR] on_timeout — Usuario: {self.author.name}")
+        await cancelar_jornada_segura(self.session_id, "expired")
         await _caducar_tablero(self)
 
     async def _cleanup(self):
@@ -1493,15 +2094,20 @@ class LimpiadorView(ui.View):
             pass
 
 
-class IngenieroView(ui.View):
+class IngenieroView(JornadaView):
     MAX_VIDAS = 4
 
-    def __init__(self, bot, author, info):
+    def __init__(self, bot, author, info, session_id: str):
         super().__init__(timeout=180)
         self.bot = bot
         self.author = author
         self.info = info
+        self.session_id = session_id
         self.start_time = time.time()
+        self.pago_base = random.randint(
+            self.info["salario_min"],
+            self.info["salario_max"],
+        )
         self.message = None
         self.revelados = [False] * 8
         self.seleccion = []
@@ -1550,6 +2156,7 @@ class IngenieroView(ui.View):
                     custom_id=f"ing_{i}",
                     disabled=self.terminado or self.bloqueado,
                 )
+            btn.custom_id = f"ing_{self.session_id}_{i}"
             btn.callback = self._make_callback(i)
             self.add_item(btn)
 
@@ -1558,7 +2165,10 @@ class IngenieroView(ui.View):
             if interaction.user.id != self.author.id:
                 return await interaction.response.send_message("❌ Este tablero no es tuyo.", ephemeral=True)
             if self._interaction_lock.locked():
-                return await interaction.response.defer()
+                return await interaction.response.send_message(
+                    "⏳ El tablero está actualizando la jugada anterior.",
+                    ephemeral=True,
+                )
 
             resultado = None
             async with self._interaction_lock:
@@ -1591,25 +2201,34 @@ class IngenieroView(ui.View):
                             self.terminado = True
                             self.stop()
                         self._build_buttons()
-                        await interaction.edit_original_response(embed=self.build_embed(), view=self)
-                        await asyncio.sleep(2)
-                        self.erroneas.clear()
-                        self.seleccion = []
-                        if self.terminado:
-                            resultado = False
-                        else:
-                            self.bloqueado = False
-                        self._build_buttons()
-                        await interaction.edit_original_response(embed=self.build_embed(), view=self)
+                        await _editar_tablero_seguro(
+                            interaction,
+                            self,
+                            embed=self.build_embed(),
+                        )
+                        try:
+                            await asyncio.sleep(2)
+                        finally:
+                            self.erroneas.clear()
+                            self.seleccion = []
+                            if self.terminado:
+                                resultado = False
+                            else:
+                                self.bloqueado = False
+                            self._build_buttons()
+                        await _editar_tablero_seguro(
+                            interaction,
+                            self,
+                            embed=self.build_embed(),
+                        )
             if resultado is not None:
                 await self._terminar(interaction, exito=resultado)
         return callback
 
     def build_embed(self):
         tiempo = int(time.time() - self.start_time)
-        base = random.randint(self.info['salario_min'], self.info['salario_max'])
         ratio = 1.0 + max(0.0, 45 - tiempo) / 45.0 * 0.35
-        pago_actual = min(int(base * ratio), self.info['salario_max'])
+        pago_actual = min(int(self.pago_base * ratio), self.info['salario_max'])
         corazones = "❤️" * self.vidas + "🖤" * (self.MAX_VIDAS - self.vidas)
         embed = discord.Embed(title=f"🛠️ Jornada Ingeniero - {self.author.nick or self.author.display_name}", color=discord.Color.blurple())
         embed.add_field(
@@ -1624,52 +2243,93 @@ class IngenieroView(ui.View):
         embed.set_footer(text="Trabajo de Ingeniero en progreso......")
         return embed
 
-    async def _terminar(self, interaction, exito):
+    async def _terminar(self, interaction, exito, *, por_timeout=False):
         try:
             tiempo = int(time.time() - self.start_time)
-            base = random.randint(self.info['salario_min'], self.info['salario_max'])
             ratio = 1.0 + max(0.0, 45 - tiempo) / 45.0 * 0.35
-            pago = min(int(base * ratio), self.info['salario_max'])
+            pago = min(int(self.pago_base * ratio), self.info['salario_max'])
             xp_ganada = self.info.get('xp_ganada', 0)
             if not exito:
-                await update_bank(self.author.id, self.info['penalizacion'])
-                mensaje = random.choice(self.info['mensajes_fallo']).format(monto=abs(self.info['penalizacion']), COIN=COIN)
-                await registrar_resultado(self.author.id, 'ingeniero', False, self.info['penalizacion'], mensaje)
-                await interaction.edit_original_response(embed=discord.Embed(title="🔧 Resultado", description=f"{self.author.mention} {mensaje}", color=discord.Color.red()), view=None)
+                if por_timeout:
+                    mensaje = (
+                        f"La jornada terminó por inactividad; pierdes "
+                        f"{abs(self.info['penalizacion'])} {COIN}."
+                    )
+                else:
+                    mensaje = random.choice(self.info['mensajes_fallo']).format(monto=abs(self.info['penalizacion']), COIN=COIN)
+                settlement = await finalizar_jornada_atomica(
+                    self.session_id, self.author.id, "ingeniero", False,
+                    self.info['penalizacion'], mensaje,
+                )
+                if not settlement["ok"]:
+                    raise RuntimeError(settlement.get("reason"))
+                result_embed = discord.Embed(title="🔧 Resultado", description=f"{self.author.mention} {mensaje}", color=discord.Color.red())
             else:
-                await update_bank(self.author.id, pago)
                 mensaje = random.choice(self.info['mensajes_exito']).format(monto=pago, COIN=COIN)
                 mensaje = f"{mensaje} (+{xp_ganada} XP Laboral)"
-                bonus = await registrar_resultado(self.author.id, 'ingeniero', True, pago, mensaje, xp_ganada=xp_ganada)
+                settlement = await finalizar_jornada_atomica(
+                    self.session_id, self.author.id, "ingeniero", True,
+                    pago, mensaje, xp_ganada=xp_ganada,
+                )
+                if not settlement["ok"]:
+                    raise RuntimeError(settlement.get("reason"))
+                bonus = settlement["bonus"]
                 if bonus["coins"] > 0:
-                    await update_bank(self.author.id, bonus["coins"])
                     mensaje += f"\n🌟 **¡Racha de 5!** Bono: **+{bonus['coins']}** {COIN} y **+{bonus['xp']} XP Laboral**"
-                await interaction.edit_original_response(embed=discord.Embed(title="🔧 Resultado", description=f"{self.author.mention} {mensaje}", color=discord.Color.green()), view=None)
-            await asyncio.sleep(180)
-            try:
-                if self.message:
-                    await self.message.delete()
-            except Exception:
-                pass
+                result_embed = discord.Embed(title="🔧 Resultado", description=f"{self.author.mention} {mensaje}", color=discord.Color.green())
+            if interaction is not None:
+                await _editar_tablero_seguro(
+                    interaction,
+                    self,
+                    embed=result_embed,
+                    remove_view=True,
+                )
+            elif self.message is not None:
+                await self.message.edit(embed=result_embed, view=None)
+            _programar_eliminacion(self)
         except Exception as e:
             _log_trabajar_error("Ingeniero", e, self.author.name, "_terminar")
+            await cancelar_jornada_segura(self.session_id, "error")
+            if interaction is not None:
+                await _notificar_error_interaccion(interaction)
 
     async def on_error(self, interaction: Interaction, error: Exception, item):
+        self.terminado = True
+        self.bloqueado = True
+        self.stop()
+        await cancelar_jornada_segura(self.session_id, "error")
         _log_trabajar_error("Ingeniero", error, interaction.user.name, f"on_error — Item: {item}")
+        if self.message:
+            try:
+                await self.message.edit(view=None)
+            except (discord.HTTPException, discord.NotFound):
+                pass
         await _notificar_error_interaccion(interaction)
 
     async def on_timeout(self):
         logger.warning(f"[TRABAJAR/INGENIERO] on_timeout — Usuario: {self.author.name}")
-        await _caducar_tablero(self)
+        async with self._interaction_lock:
+            if self.terminado:
+                return
+            self.terminado = True
+            self.bloqueado = True
+            self.stop()
+            self._build_buttons()
+        await self._terminar(None, exito=False, por_timeout=True)
 
 
-class PlomeroView(ui.View):
-    def __init__(self, bot, author, info):
+class PlomeroView(JornadaView):
+    def __init__(self, bot, author, info, session_id: str):
         super().__init__(timeout=180)
         self.bot = bot
         self.author = author
         self.info = info
+        self.session_id = session_id
         self.start_time = time.time()
+        self.pago_base = random.randint(
+            self.info["salario_min"],
+            self.info["salario_max"],
+        )
         self.message = None
         self.revelados = [False] * 9
         self.intentos = 0
@@ -1693,6 +2353,7 @@ class PlomeroView(ui.View):
                 btn = ui.Button(label=emoji, style=ButtonStyle.success if emoji == "💣" else ButtonStyle.danger, row=row, custom_id=f"plo_{i}")
             else:
                 btn = ui.Button(label="⬜", style=ButtonStyle.secondary, row=row, custom_id=f"plo_{i}")
+            btn.custom_id = f"plo_{self.session_id}_{i}"
             btn.callback = self._make_callback(i)
             self.add_item(btn)
 
@@ -1701,7 +2362,10 @@ class PlomeroView(ui.View):
             if interaction.user.id != self.author.id:
                 return await interaction.response.send_message("❌ Este tablero no es tuyo.", ephemeral=True)
             if self._interaction_lock.locked():
-                return await interaction.response.defer()
+                return await interaction.response.send_message(
+                    "⏳ El tablero está actualizando la jugada anterior.",
+                    ephemeral=True,
+                )
 
             terminar_exito = None
             async with self._interaction_lock:
@@ -1745,42 +2409,60 @@ class PlomeroView(ui.View):
     async def _terminar(self, interaction, exito):
         try:
             tiempo = int(time.time() - self.start_time)
-            base = random.randint(self.info['salario_min'], self.info['salario_max'])
             ratio = 1.0 + max(0.0, 45 - tiempo) / 45.0 * 0.35
-            pago = min(int(base * ratio), self.info['salario_max'])
+            pago = min(int(self.pago_base * ratio), self.info['salario_max'])
             xp_ganada = self.info.get('xp_ganada', 0)
             if not exito:
-                await update_bank(self.author.id, self.info['penalizacion'])
                 mensaje = random.choice(self.info['mensajes_fallo']).format(monto=abs(self.info['penalizacion']), COIN=COIN)
-                await registrar_resultado(self.author.id, 'plomero', False, self.info['penalizacion'], mensaje)
-                await interaction.edit_original_response(embed=discord.Embed(title="🛠️ Resultado", description=f"{self.author.mention} {mensaje}", color=discord.Color.red()), view=None)
+                settlement = await finalizar_jornada_atomica(
+                    self.session_id, self.author.id, "plomero", False,
+                    self.info['penalizacion'], mensaje,
+                )
+                if not settlement["ok"]:
+                    raise RuntimeError(settlement.get("reason"))
+                result_embed = discord.Embed(title="🛠️ Resultado", description=f"{self.author.mention} {mensaje}", color=discord.Color.red())
             else:
-                await update_bank(self.author.id, pago)
                 mensaje = random.choice(self.info['mensajes_exito']).format(monto=pago, COIN=COIN)
                 mensaje = f"{mensaje} (+{xp_ganada} XP Laboral)"
-                bonus = await registrar_resultado(self.author.id, 'plomero', True, pago, mensaje, xp_ganada=xp_ganada)
+                settlement = await finalizar_jornada_atomica(
+                    self.session_id, self.author.id, "plomero", True,
+                    pago, mensaje, xp_ganada=xp_ganada,
+                )
+                if not settlement["ok"]:
+                    raise RuntimeError(settlement.get("reason"))
+                bonus = settlement["bonus"]
                 if bonus["coins"] > 0:
-                    await update_bank(self.author.id, bonus["coins"])
                     mensaje += f"\n🌟 **¡Racha de 5!** Bono: **+{bonus['coins']}** {COIN} y **+{bonus['xp']} XP Laboral**"
-                await interaction.edit_original_response(embed=discord.Embed(title="🛠️ Resultado", description=f"{self.author.mention} {mensaje}", color=discord.Color.green()), view=None)
-            await asyncio.sleep(180)
-            try:
-                if self.message:
-                    await self.message.delete()
-            except Exception:
-                pass
+                result_embed = discord.Embed(title="🛠️ Resultado", description=f"{self.author.mention} {mensaje}", color=discord.Color.green())
+            await _editar_tablero_seguro(
+                interaction,
+                self,
+                embed=result_embed,
+                remove_view=True,
+            )
+            _programar_eliminacion(self)
         except Exception as e:
             _log_trabajar_error("Plomero", e, self.author.name, "_terminar")
+            await cancelar_jornada_segura(self.session_id, "error")
+            await _notificar_error_interaccion(interaction)
 
     async def on_error(self, interaction: Interaction, error: Exception, item):
+        self.terminado = True
+        self.stop()
+        await cancelar_jornada_segura(self.session_id, "error")
         _log_trabajar_error("Plomero", error, interaction.user.name, f"on_error — Item: {item}")
+        if self.message:
+            try:
+                await self.message.edit(view=None)
+            except (discord.HTTPException, discord.NotFound):
+                pass
         await _notificar_error_interaccion(interaction)
 
     async def on_timeout(self):
         logger.warning(f"[TRABAJAR/PLOMERO] on_timeout — Usuario: {self.author.name}")
+        await cancelar_jornada_segura(self.session_id, "expired")
         await _caducar_tablero(self)
 
 
 async def setup(bot):
-    await init_empleos_tables()
     await bot.add_cog(Empleos(bot))

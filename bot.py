@@ -76,6 +76,7 @@ async def get_prefix(bot, message):
 bot = commands.Bot(command_prefix=get_prefix, intents=intents, help_command=None)
 evento_flush_task = None
 cargos_task = None
+wager_recovery_task = None
 
 
 async def load_modules():
@@ -261,6 +262,24 @@ async def check_cargos_loop():
             await asyncio.sleep(30)
 
 
+async def recover_expired_wagers_loop():
+    """Reembolsa apuestas vencidas sin interferir con despliegues activos."""
+    while not bot.is_closed():
+        try:
+            await asyncio.sleep(30)
+            recovered = await recover_pending_wagers()
+            if recovered:
+                logger.warning(
+                    "Se reembolsaron %s apuestas vencidas.",
+                    recovered,
+                )
+        except asyncio.CancelledError:
+            raise
+        except Exception:
+            logger.exception("Error recuperando apuestas vencidas")
+            await asyncio.sleep(30)
+
+
 @bot.event
 async def on_command_error(ctx, error):
     if isinstance(error, commands.CommandNotFound):
@@ -292,7 +311,7 @@ AUTHORIZED_GUILD_ID = 980073134411644939
 
 @bot.event
 async def on_ready():
-    global evento_flush_task, cargos_task
+    global evento_flush_task, cargos_task, wager_recovery_task
     logger.info(f"Bot conectado como {bot.user}")
     logger.info("Caché iniciada | Flush cada 5 minutos")
     logger.info(f"Servidores activos: {len(bot.guilds)}")
@@ -330,6 +349,12 @@ async def on_ready():
     if evento_flush_task is None or evento_flush_task.done():
         evento_flush_task = asyncio.create_task(cache.evento_flush_loop())
         logger.info("Task de evento iniciada | Flush de ranking cada 10 minutos")
+    if wager_recovery_task is None or wager_recovery_task.done():
+        wager_recovery_task = asyncio.create_task(
+            recover_expired_wagers_loop(),
+            name="apuestas-vencidas-worker",
+        )
+        logger.info("Task de apuestas vencidas iniciada | Revisión cada 30 segundos")
     logger.info("\n⫷ 𝙋𝙐𝙍𝙋𝙇𝙀𝙅𝘼𝘾𝙆 𝙀𝙉 𝙇𝙄𝙉𝙀𝘼 ⫸\n")
 
 
@@ -356,7 +381,7 @@ def run_bot():
         reembolsadas = await recover_pending_wagers()
         if reembolsadas:
             logger.warning(
-                "Se reembolsaron %s apuestas pendientes de una ejecución anterior.",
+                "Se reembolsaron %s apuestas vencidas al iniciar.",
                 reembolsadas,
             )
         await ensure_wager_constraints()

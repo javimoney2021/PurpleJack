@@ -852,11 +852,27 @@ async def increase_wager(wager_id: str, extra_amount: int):
         return {"ok": True, "added": extra_amount}
 
 
+async def extend_wager_expiry(wager_id: str, expires_in: int = 300) -> bool:
+    """Renueva el vencimiento de una apuesta interactiva aún pendiente."""
+    async with pool.acquire() as conn:
+        result = await conn.execute(
+            """
+            UPDATE wagers
+            SET expires_at=GREATEST(expires_at, $2)
+            WHERE id=$1 AND status='pending'
+            """,
+            wager_id,
+            time.time() + max(60, expires_in),
+        )
+    return result.endswith("1")
+
+
 async def finalize_wager(
     wager_id: str,
     *,
     payout: int,
     status: str,
+    require_expired: bool = False,
 ):
     """Liquida una apuesta una sola vez y sincroniza DB, caché y evento."""
     if payout < 0 or status not in {"settled", "lost", "refunded"}:
@@ -887,6 +903,12 @@ async def finalize_wager(
                         "ok": False,
                         "reason": "already_finalized",
                         "status": wager["status"],
+                    }
+                if require_expired and wager["expires_at"] > time.time():
+                    return {
+                        "ok": False,
+                        "reason": "not_expired",
+                        "expires_at": wager["expires_at"],
                     }
 
                 source = wager["source"]
@@ -954,7 +976,7 @@ async def lose_wager(wager_id: str):
     return await finalize_wager(wager_id, payout=0, status="lost")
 
 
-async def refund_wager(wager_id: str):
+async def refund_wager(wager_id: str, *, only_if_expired: bool = False):
     async with pool.acquire() as conn:
         amount = await conn.fetchval(
             "SELECT amount FROM wagers WHERE id=$1 AND status='pending'",
@@ -962,7 +984,12 @@ async def refund_wager(wager_id: str):
         )
     if amount is None:
         return {"ok": False, "reason": "not_pending"}
-    return await finalize_wager(wager_id, payout=amount, status="refunded")
+    return await finalize_wager(
+        wager_id,
+        payout=amount,
+        status="refunded",
+        require_expired=only_if_expired,
+    )
 
 
 async def refund_wager_session(session_id: str):
@@ -1100,43 +1127,27 @@ async def settle_wager_session(session_id: str, payouts: dict[str, int]):
 
 async def recover_pending_wagers():
     """
-    Reembolsa apuestas que quedaron pendientes tras un reinicio.
-    Se ejecuta antes de cargar usuarios y el ranking del evento a RAM.
+    Reembolsa únicamente apuestas realmente vencidas.
+
+    Una instancia nueva no debe tocar apuestas frescas que todavía puede estar
+    procesando la instancia anterior durante un despliegue de SquareCloud.
     """
     async with pool.acquire() as conn:
-        async with conn.transaction():
-            rows = await conn.fetch(
-                "SELECT * FROM wagers WHERE status='pending' FOR UPDATE"
-            )
-            for wager in rows:
-                if wager["source"] == "balance":
-                    await conn.execute(
-                        "UPDATE users SET balance=balance+$1 WHERE id=$2",
-                        wager["amount"],
-                        wager["user_id"],
-                    )
-                else:
-                    user = await conn.fetchrow(
-                        "SELECT balance, bank FROM users WHERE id=$1 FOR UPDATE",
-                        wager["user_id"],
-                    )
-                    if user:
-                        espacio = max(0, cache.MAX_BANK - user["bank"])
-                        banco_aplicado = min(wager["amount"], espacio)
-                        await conn.execute(
-                            "UPDATE users SET bank=$1, balance=$2 WHERE id=$3",
-                            user["bank"] + banco_aplicado,
-                            user["balance"] + wager["amount"] - banco_aplicado,
-                            wager["user_id"],
-                        )
-                await conn.execute(
-                    """
-                    UPDATE wagers SET status='refunded', payout=amount
-                    WHERE id=$1
-                    """,
-                    wager["id"],
-                )
-    return len(rows)
+        wager_ids = await conn.fetch(
+            """
+            SELECT id FROM wagers
+            WHERE status='pending' AND expires_at <= $1
+            ORDER BY expires_at
+            """,
+            time.time(),
+        )
+
+    recovered = 0
+    for row in wager_ids:
+        result = await refund_wager(row["id"], only_if_expired=True)
+        if result.get("ok"):
+            recovered += 1
+    return recovered
 
 
 async def ensure_wager_constraints():
@@ -1147,6 +1158,24 @@ async def ensure_wager_constraints():
     durante el breve solapamiento entre la instancia vieja y la nueva al
     desplegar en SquareCloud.
     """
+    async with pool.acquire() as conn:
+        duplicates = await conn.fetch(
+            """
+            SELECT id FROM (
+                SELECT id,
+                    ROW_NUMBER() OVER (
+                        PARTITION BY user_id, game
+                        ORDER BY created_at, id
+                    ) AS position
+                FROM wagers
+                WHERE status='pending' AND game IN ('dados', 'rr')
+            ) pending
+            WHERE position > 1
+            """
+        )
+    for duplicate in duplicates:
+        await refund_wager(duplicate["id"])
+
     async with pool.acquire() as conn:
         await conn.execute(
             """
@@ -1160,6 +1189,20 @@ async def ensure_wager_constraints():
             CREATE UNIQUE INDEX IF NOT EXISTS wagers_one_pending_dados_idx
             ON wagers (user_id)
             WHERE game='dados' AND status='pending'
+            """
+        )
+        await conn.execute(
+            """
+            CREATE UNIQUE INDEX IF NOT EXISTS wagers_unique_rr_request_idx
+            ON wagers (session_id)
+            WHERE game='rr'
+            """
+        )
+        await conn.execute(
+            """
+            CREATE UNIQUE INDEX IF NOT EXISTS wagers_one_pending_rr_idx
+            ON wagers (user_id)
+            WHERE game='rr' AND status='pending'
             """
         )
 

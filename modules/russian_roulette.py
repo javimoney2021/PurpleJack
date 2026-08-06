@@ -3,16 +3,16 @@ import logging
 import random
 import time
 
+import asyncpg
 import discord
 from discord.ext import commands
 
 from core.config import COIN, rr_config
 from core.database import (
-    get_user,
-    get_game_cooldown,
     set_game_cooldown,
     reserve_wager,
     increase_wager,
+    extend_wager_expiry,
     settle_wager,
     lose_wager,
     refund_wager,
@@ -31,6 +31,8 @@ ROUND_REWARDS = [0.6, 0.8, 1.0, 1.5, 2.0]
 ROUND_LABELS  = ["1º ronda", "2º ronda", "3º ronda", "4º ronda", "5º ronda"]
 
 rr_games = {}
+_RR_START_LOCKS: dict[int, asyncio.Lock] = {}
+_SEEN_RR_MESSAGES: dict[int, float] = {}
 
 
 def format_percent(value):
@@ -76,6 +78,8 @@ class RRGameState:
         self.wager_id    = wager_id
         self.risk_amount = apuesta
         self.processing  = False
+        self.action_lock = asyncio.Lock()
+        self.current_view = None
 
 
 class RRView(discord.ui.View):
@@ -83,6 +87,7 @@ class RRView(discord.ui.View):
         super().__init__(timeout=150)
         self.game      = game
         self.author_id = author_id
+        self.game.current_view = self
 
     async def interaction_check(self, interaction: discord.Interaction) -> bool:
         if interaction.user.id != self.author_id:
@@ -98,27 +103,36 @@ class RRView(discord.ui.View):
         return True
 
     async def on_timeout(self) -> None:
-        if self.game.finished:
-            return
-        self.game.active = False
-        self.game.finished = True
-        await refund_wager(self.game.wager_id)
-        for item in self.children:
-            item.disabled = True
-        if self.game.message:
-            timeout_embed = discord.Embed(
-                title=f"**RULETA RUSA - {self.game.author_name}**",
-                description=(
-                    "⏳ La Ruleta Rusa expiró por inactividad. "
+        async with self.game.action_lock:
+            if self.game.current_view is not self:
+                return
+            if self.game.finished:
+                return
+            self.game.active = False
+            self.game.finished = True
+            refund = await refund_wager(self.game.wager_id)
+            for item in self.children:
+                item.disabled = True
+            if refund.get("ok"):
+                estado = (
                     f"Tu riesgo de **{self.game.risk_amount} {COIN}** fue reembolsado."
-                ),
-                color=discord.Color.dark_grey(),
-            )
-            timeout_embed.set_thumbnail(url=FAILURE_IMAGE)
-            try:
-                await self.game.message.edit(embed=timeout_embed, view=self)
-            except Exception:
-                pass
+                )
+            else:
+                estado = (
+                    "La apuesta ya había sido procesada; no se realizó "
+                    "ningún movimiento adicional."
+                )
+            if self.game.message:
+                timeout_embed = discord.Embed(
+                    title=f"**RULETA RUSA - {self.game.author_name}**",
+                    description=f"⏳ La Ruleta Rusa expiró por inactividad. {estado}",
+                    color=discord.Color.dark_grey(),
+                )
+                timeout_embed.set_thumbnail(url=FAILURE_IMAGE)
+                try:
+                    await self.game.message.edit(embed=timeout_embed, view=self)
+                except Exception:
+                    pass
             rr_games.pop(self.game.user_id, None)
 
     @discord.ui.button(label="Disparar", style=discord.ButtonStyle.danger, row=0)
@@ -128,8 +142,21 @@ class RRView(discord.ui.View):
                 "⏳ Ya se está procesando una acción.",
                 ephemeral=True,
             )
+        if self.game.action_lock.locked():
+            return await interaction.response.send_message(
+                "⏳ Ya se está procesando una acción.",
+                ephemeral=True,
+            )
+        await self.game.action_lock.acquire()
         self.game.processing = True
         try:
+            if not self.game.active or self.game.finished:
+                return await interaction.response.send_message(
+                    "⌛ Esta partida ya finalizó.",
+                    ephemeral=True,
+                )
+            if not await extend_wager_expiry(self.game.wager_id, 300):
+                raise RuntimeError("La apuesta ya no está pendiente")
             target_risk = None
             if self.game.round == 3:
                 target_risk = int(self.game.apuesta * 1.8)
@@ -190,10 +217,14 @@ class RRView(discord.ui.View):
                     )
                     for item in self.children:
                         item.disabled = True
-                    await settle_wager(
+                    settlement = await settle_wager(
                         self.game.wager_id,
                         self.game.risk_amount + self.game.ganancia,
                     )
+                    if not settlement.get("ok"):
+                        raise RuntimeError(
+                            f"Liquidación rechazada: {settlement.get('reason')}"
+                        )
                     self.stop()
                     await interaction.edit_original_response(embed=total_embed, view=self)
                     rr_games.pop(self.game.user_id, None)
@@ -260,7 +291,11 @@ class RRView(discord.ui.View):
             )
             for item in self.children:
                 item.disabled = True
-            await lose_wager(self.game.wager_id)
+            settlement = await lose_wager(self.game.wager_id)
+            if not settlement.get("ok"):
+                raise RuntimeError(
+                    f"Liquidación rechazada: {settlement.get('reason')}"
+                )
             self.stop()
             await interaction.edit_original_response(embed=loss_embed, view=self)
             rr_games.pop(self.game.user_id, None)
@@ -269,23 +304,41 @@ class RRView(discord.ui.View):
             logger.error(f"Error en disparar: {e}")
             self.game.active = False
             self.game.finished = True
-            await refund_wager(self.game.wager_id)
+            self.stop()
+            for item in self.children:
+                item.disabled = True
+            refund = await refund_wager(self.game.wager_id)
             rr_games.pop(self.game.user_id, None)
+            if refund.get("ok"):
+                error_message = (
+                    "❌ La partida se canceló por un error y tu apuesta fue reembolsada."
+                )
+            else:
+                error_message = (
+                    "⚠️ La partida se cerró. La apuesta ya estaba procesada y "
+                    "no se realizó ningún movimiento adicional."
+                )
             try:
                 if interaction.response.is_done():
                     await interaction.followup.send(
-                        "❌ La partida se canceló por un error y tu apuesta fue reembolsada.",
+                        error_message,
                         ephemeral=True,
                     )
                 else:
                     await interaction.response.send_message(
-                        "❌ La partida se canceló por un error y tu apuesta fue reembolsada.",
+                        error_message,
                         ephemeral=True,
                     )
             except Exception:
                 pass
+            try:
+                await interaction.edit_original_response(view=self)
+            except Exception:
+                pass
         finally:
             self.game.processing = False
+            if self.game.action_lock.locked():
+                self.game.action_lock.release()
 
     @discord.ui.button(label="Reclamar", style=discord.ButtonStyle.success, row=0)
     async def reclamar(self, interaction: discord.Interaction, button: discord.ui.Button):
@@ -294,8 +347,21 @@ class RRView(discord.ui.View):
                 "⏳ Ya se está procesando una acción.",
                 ephemeral=True,
             )
+        if self.game.action_lock.locked():
+            return await interaction.response.send_message(
+                "⏳ Ya se está procesando una acción.",
+                ephemeral=True,
+            )
+        await self.game.action_lock.acquire()
         self.game.processing = True
         try:
+            if not self.game.active or self.game.finished:
+                return await interaction.response.send_message(
+                    "⌛ Esta partida ya finalizó.",
+                    ephemeral=True,
+                )
+            if not await extend_wager_expiry(self.game.wager_id, 300):
+                raise RuntimeError("La apuesta ya no está pendiente")
             if self.game.round == 0:
                 return await interaction.response.send_message(
                     "❌ Debes sobrevivir al menos a un disparo para reclamar.",
@@ -318,10 +384,14 @@ class RRView(discord.ui.View):
             )
             for item in self.children:
                 item.disabled = True
-            await settle_wager(
+            settlement = await settle_wager(
                 self.game.wager_id,
                 self.game.risk_amount + self.game.ganancia,
             )
+            if not settlement.get("ok"):
+                raise RuntimeError(
+                    f"Liquidación rechazada: {settlement.get('reason')}"
+                )
             self.stop()
             await interaction.response.edit_message(embed=claim_embed, view=self)
             rr_games.pop(self.game.user_id, None)
@@ -330,23 +400,41 @@ class RRView(discord.ui.View):
             logger.error(f"Error en reclamar: {e}")
             self.game.active = False
             self.game.finished = True
-            await refund_wager(self.game.wager_id)
+            self.stop()
+            for item in self.children:
+                item.disabled = True
+            refund = await refund_wager(self.game.wager_id)
             rr_games.pop(self.game.user_id, None)
+            if refund.get("ok"):
+                error_message = (
+                    "❌ La partida se canceló por un error y tu apuesta fue reembolsada."
+                )
+            else:
+                error_message = (
+                    "⚠️ La partida se cerró. La apuesta ya estaba procesada y "
+                    "no se realizó ningún movimiento adicional."
+                )
             try:
                 if interaction.response.is_done():
                     await interaction.followup.send(
-                        "❌ La partida se canceló por un error y tu apuesta fue reembolsada.",
+                        error_message,
                         ephemeral=True,
                     )
                 else:
                     await interaction.response.send_message(
-                        "❌ La partida se canceló por un error y tu apuesta fue reembolsada.",
+                        error_message,
                         ephemeral=True,
                     )
             except Exception:
                 pass
+            try:
+                await interaction.edit_original_response(view=self)
+            except Exception:
+                pass
         finally:
             self.game.processing = False
+            if self.game.action_lock.locked():
+                self.game.action_lock.release()
 
 
 class RussianRoulette(commands.Cog):
@@ -355,6 +443,17 @@ class RussianRoulette(commands.Cog):
 
     @commands.command(name="rr")
     async def rr(self, ctx, monto: int = None):
+        message_id = ctx.message.id
+        if message_id in _SEEN_RR_MESSAGES:
+            return
+        now_monotonic = time.monotonic()
+        _SEEN_RR_MESSAGES[message_id] = now_monotonic
+        if len(_SEEN_RR_MESSAGES) > 2_000:
+            cutoff = now_monotonic - 600
+            for seen_id, seen_at in list(_SEEN_RR_MESSAGES.items()):
+                if seen_at < cutoff:
+                    _SEEN_RR_MESSAGES.pop(seen_id, None)
+
         if not rr_config["activa"]:
             return await ctx.send("🔧 La Ruleta Rusa se encuentra desactivada.")
 
@@ -369,49 +468,50 @@ class RussianRoulette(commands.Cog):
                 mention_author=False,
             )
 
-        # get_user garantiza usuario en cache para las actualizaciones de los botones
-        user = await get_user(ctx.author.id)
-        if monto > user["balance"]:
-            return await ctx.send(
-                f"❌ {ctx.author.mention} No tienes suficiente balance para esta apuesta."
-            )
-
-        if ctx.author.id in rr_games:
-            partida = rr_games[ctx.author.id]
-            if not partida.active:
+        start_lock = _RR_START_LOCKS.setdefault(
+            ctx.author.id,
+            asyncio.Lock(),
+        )
+        async with start_lock:
+            partida = rr_games.get(ctx.author.id)
+            if partida and partida.active:
+                return await ctx.send(
+                    f"❌ {ctx.author.mention} Ya tienes una partida activa de Ruleta Rusa."
+                )
+            if partida:
                 rr_games.pop(ctx.author.id, None)
-            else:
+
+            try:
+                wager = await reserve_wager(
+                    ctx.author.id,
+                    "rr",
+                    monto,
+                    expires_in=300,
+                    idempotency_key=f"rr:message:{message_id}",
+                    exclusive_pending=True,
+                    enforce_cooldown=True,
+                )
+            except asyncpg.UniqueViolationError:
                 return await ctx.send(
                     f"❌ {ctx.author.mention} Ya tienes una partida activa de Ruleta Rusa."
                 )
 
-        now = time.time()
-        expira_en = cache.get_game_cooldown_cache(ctx.author.id, "rr")
-        if expira_en == 0:
-            expira_en = await get_game_cooldown(ctx.author.id, "rr")
-            if expira_en:
-                cache.set_game_cooldown_cache(ctx.author.id, "rr", expira_en)
-
-        if expira_en > now:
-            return await ctx.send(
-                f"⏳ {ctx.author.mention} Espera <t:{int(expira_en)}:R> para volver a jugar Ruleta Rusa."
-            )
-
-        wager = await reserve_wager(
-            ctx.author.id,
-            "rr",
-            monto,
-            expires_in=300,
-        )
-        if not wager["ok"]:
-            return await ctx.send(
-                f"❌ {ctx.author.mention} No tienes suficiente balance para esta apuesta."
-            )
-
-        try:
-            expira_en = now + rr_config["cooldown"]
-            cache.set_game_cooldown_cache(ctx.author.id, "rr", expira_en)
-            await set_game_cooldown(ctx.author.id, "rr", expira_en)
+            if not wager["ok"]:
+                reason = wager.get("reason")
+                if reason == "duplicate_request":
+                    return
+                if reason == "already_pending":
+                    return await ctx.send(
+                        f"❌ {ctx.author.mention} Ya tienes una partida activa de Ruleta Rusa."
+                    )
+                if reason == "cooldown":
+                    return await ctx.send(
+                        f"⏳ {ctx.author.mention} Espera "
+                        f"<t:{int(wager['expires_at'])}:R> para volver a jugar Ruleta Rusa."
+                    )
+                return await ctx.send(
+                    f"❌ {ctx.author.mention} No tienes suficiente balance para esta apuesta."
+                )
 
             game = RRGameState(
                 ctx.author.id,
@@ -420,7 +520,6 @@ class RussianRoulette(commands.Cog):
                 wager["id"],
             )
             rr_games[ctx.author.id] = game
-
             initial_embed = build_rr_embed(
                 ctx.author,
                 game,
@@ -432,14 +531,36 @@ class RussianRoulette(commands.Cog):
                 ),
                 thumbnail=WAIT_IMAGE,
             )
-
             view = RRView(game, ctx.author.id)
-            message = await ctx.send(embed=initial_embed, view=view)
-            game.message = message
-        except Exception:
-            rr_games.pop(ctx.author.id, None)
-            await refund_wager(wager["id"])
-            raise
+            message = None
+            try:
+                message = await ctx.send(embed=initial_embed, view=view)
+                game.message = message
+                expira_en = time.time() + rr_config["cooldown"]
+                await set_game_cooldown(ctx.author.id, "rr", expira_en)
+                cache.set_game_cooldown_cache(ctx.author.id, "rr", expira_en)
+            except Exception as error:
+                rr_games.pop(ctx.author.id, None)
+                refund = await refund_wager(wager["id"])
+                if message is not None:
+                    try:
+                        await message.edit(
+                            content=(
+                                "❌ No se pudo registrar la partida. "
+                                "La apuesta fue reembolsada."
+                                if refund.get("ok")
+                                else "⚠️ La partida fue cerrada sin movimientos adicionales."
+                            ),
+                            embed=None,
+                            view=None,
+                        )
+                    except Exception:
+                        pass
+                logger.error("No se pudo iniciar !rr: %s", error)
+                if message is None:
+                    await ctx.send(
+                        "❌ No se pudo iniciar la partida. La apuesta fue reembolsada."
+                    )
 
 
 async def setup(bot):
