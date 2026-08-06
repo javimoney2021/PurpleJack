@@ -77,6 +77,28 @@ class Rob(commands.Cog):
         except (discord.NotFound, discord.HTTPException):
             return None
 
+    async def _get_reply_target(self, ctx):
+        """Resuelve al autor del mensaje al que se respondió, incluso sin caché."""
+        reference = ctx.message.reference
+        if reference is None or reference.message_id is None:
+            return None
+
+        message = reference.resolved
+        if not isinstance(message, discord.Message):
+            channel = ctx.guild.get_channel(reference.channel_id) or ctx.channel
+            try:
+                message = await channel.fetch_message(reference.message_id)
+            except (discord.NotFound, discord.Forbidden, discord.HTTPException):
+                return None
+
+        member = message.author
+        if isinstance(member, discord.Member):
+            return member
+        try:
+            return await ctx.guild.fetch_member(member.id)
+        except (discord.NotFound, discord.Forbidden, discord.HTTPException):
+            return None
+
     @commands.command()
     async def rob(self, ctx, target_input: str = None):
         if not rob_config["activa"]:
@@ -85,12 +107,15 @@ class Rob(commands.Cog):
                 "está siendo imposible atracar a alguien."
             )
 
+        target = None
         if target_input is None:
-            return await ctx.send(
-                f"❌ {ctx.author.mention} Formato correcto: `!rob @usuario` o `!rob <posición del top>`"
-            )
-
-        if target_input.isdigit() and len(target_input) <= 2:
+            target = await self._get_reply_target(ctx)
+            if target is None:
+                return await ctx.send(
+                    f"❌ {ctx.author.mention} Responde al mensaje de un usuario o usa "
+                    "`!rob @usuario` / `!rob <posición del top>`."
+                )
+        elif target_input.isdigit() and len(target_input) <= 2:
             position = int(target_input)
             if not 1 <= position <= 15:
                 return await ctx.send("❌ Indica una posición válida del **1** al **15**.")
@@ -99,7 +124,7 @@ class Rob(commands.Cog):
                 return await ctx.send(
                     f"❌ No se encontró un jugador disponible en la posición **{position}.**"
                 )
-        else:
+        elif target is None:
             try:
                 target = await commands.MemberConverter().convert(ctx, target_input)
             except commands.BadArgument:

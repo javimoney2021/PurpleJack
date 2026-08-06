@@ -123,6 +123,17 @@ def _es_coordinador(member: discord.Member) -> bool:
     )
 
 
+def _puede_acceder_oficina(data: dict | None, member: discord.Member) -> bool:
+    if not data:
+        return False
+    empleo_actual = normalizar_empleo(data.get("empleo_actual") or "")
+    return (
+        data.get("exp_laboral", 0) >= OFICINA_XP_MINIMA
+        or _es_coordinador(member)
+        or empleo_actual in EMPLEOS_MAESTRIA
+    )
+
+
 # ── DEBUG DE INTERACCIONES ───────────────────────────────
 def _log_trabajar_error(empleo: str, error: Exception, usuario: str = "?", contexto: str = ""):
     """Log estandarizado para errores en tableros de !trabajar."""
@@ -1197,10 +1208,7 @@ class AbrirOficinaView(ui.View):
             return await interaction.response.send_message("❌ Este panel no es tuyo.", ephemeral=True)
 
         data = await get_empleo_user(self.owner_id, force_refresh=True)
-        if not data or (
-            data.get("exp_laboral", 0) < OFICINA_XP_MINIMA
-            and not _es_coordinador(interaction.user)
-        ):
+        if not _puede_acceder_oficina(data, interaction.user):
             return await interaction.response.send_message(
                 "Para acceder a la oficina necesitas tener 30 de exp laboral, consulta **!exp** continua trabajando.",
                 ephemeral=True,
@@ -1537,10 +1545,7 @@ class Empleos(commands.Cog):
     @commands.command(name="oficina")
     async def oficina(self, ctx):
         data = await get_empleo_user(ctx.author.id, force_refresh=True)
-        if not data or (
-            data.get("exp_laboral", 0) < OFICINA_XP_MINIMA
-            and not _es_coordinador(ctx.author)
-        ):
+        if not _puede_acceder_oficina(data, ctx.author):
             return await ctx.reply(
                 "Para acceder a la oficina necesitas tener 30 de exp laboral, consulta **!exp** continua trabajando.",
                 mention_author=False,

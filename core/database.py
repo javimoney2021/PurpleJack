@@ -256,9 +256,13 @@ async def init_db():
         await conn.execute("""
         CREATE TABLE IF NOT EXISTS duel_config (
             guild_id BIGINT PRIMARY KEY,
-            cooldown INTEGER NOT NULL
+            cooldown INTEGER NOT NULL,
+            activa BOOLEAN NOT NULL DEFAULT TRUE
         )
         """)
+        await conn.execute(
+            "ALTER TABLE duel_config ADD COLUMN IF NOT EXISTS activa BOOLEAN NOT NULL DEFAULT TRUE"
+        )
 
         await conn.execute("""
         CREATE TABLE IF NOT EXISTS wagers (
@@ -622,6 +626,33 @@ async def set_duel_cooldown_config(guild_id: int, cooldown: int) -> None:
             """,
             guild_id,
             cooldown,
+        )
+
+
+async def get_duel_active_config(guild_id: int, default: bool = True) -> bool:
+    async with pool.acquire() as conn:
+        value = await conn.fetchval(
+            "SELECT activa FROM duel_config WHERE guild_id=$1",
+            guild_id,
+        )
+    return bool(value) if value is not None else default
+
+
+async def set_duel_active_config(
+    guild_id: int,
+    activa: bool,
+    default_cooldown: int,
+) -> None:
+    async with pool.acquire() as conn:
+        await conn.execute(
+            """
+            INSERT INTO duel_config (guild_id, cooldown, activa)
+            VALUES ($1, $2, $3)
+            ON CONFLICT (guild_id) DO UPDATE SET activa=EXCLUDED.activa
+            """,
+            guild_id,
+            default_cooldown,
+            activa,
         )
 
 

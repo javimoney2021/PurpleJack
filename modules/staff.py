@@ -21,7 +21,8 @@ from core.database import (
     save_game_config, save_rr_config, save_ruleta_config,
     save_rob_config, save_dados_config, save_memo_config, clear_game_cooldowns,
     activar_evento as activar_evento_db, cerrar_evento as cerrar_evento_db,
-    flush_evento_puntos, set_duel_cooldown_config, clear_command_cooldowns
+    flush_evento_puntos, set_duel_cooldown_config, get_duel_active_config,
+    set_duel_active_config, clear_command_cooldowns
 )
 from core import cache
 from core.config import (
@@ -1994,6 +1995,27 @@ class Staff(commands.Cog):
         _duel_cooldowns[interaction.guild.id] = cooldown
         await set_duel_cooldown_config(interaction.guild.id, cooldown)
         await interaction.response.send_message(f"✅ Cooldown de !retar cambiado a {cooldown} segundos.", ephemeral=True)
+
+    @app_commands.command(name="retar_alternar", description="Activa o desactiva el comando !retar")
+    @is_staff()
+    async def retar_alternar(self, interaction: discord.Interaction):
+        from modules.duels import DEFAULT_DUEL_COOLDOWN, _duel_active, _duel_cooldowns
+
+        guild_id = interaction.guild.id
+        activa = _duel_active.get(guild_id)
+        if activa is None:
+            activa = await get_duel_active_config(guild_id, True)
+
+        nueva_activa = not activa
+        cooldown = _duel_cooldowns.get(guild_id, DEFAULT_DUEL_COOLDOWN)
+        await set_duel_active_config(guild_id, nueva_activa, cooldown)
+        _duel_active[guild_id] = nueva_activa
+
+        estado = "ON" if nueva_activa else "OFF"
+        await interaction.response.send_message(
+            f"✅ Arena de batalla: **{estado}**.",
+            ephemeral=True,
+        )
 
     @app_commands.command(name="veterano_config", description="Configurar Rol Anti-Robo")
     @app_commands.describe(

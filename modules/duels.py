@@ -11,6 +11,7 @@ from core.database import (
     set_command_cooldown,
     clear_command_cooldown,
     get_duel_cooldown_config,
+    get_duel_active_config,
     reserve_wager,
     settle_wager_session,
     refund_wager_session,
@@ -31,8 +32,17 @@ NAVE_ROLE_ID = 1515377564439281726  # Miembros de la Nave
 # ── GLOBAL STATE ───────────────────────────────────────
 _active_duels = set()  # {guild_id} para evitar múltiples duelos por servidor
 _duel_cooldowns = {}  # {guild_id: cooldown_seconds}
+_duel_active = {}  # {guild_id: bool}
 DEFAULT_DUEL_COOLDOWN = 600  # 10 minutos
 _last_duel_times = {}  # {guild_id: expira_en}
+
+
+async def _is_duel_enabled(guild_id: int) -> bool:
+    activa = _duel_active.get(guild_id)
+    if activa is None:
+        activa = await get_duel_active_config(guild_id, True)
+        _duel_active[guild_id] = activa
+    return activa
 
 
 class AcceptDuelView(discord.ui.View):
@@ -488,6 +498,11 @@ class Duels(commands.Cog):
 
     @commands.command(name="retar")
     async def retar(self, ctx, usuario: discord.Member, monto: int):
+        if not await _is_duel_enabled(ctx.guild.id):
+            return await ctx.send(
+                "La Arena de batalla no se encuentra disponible por el momento."
+            )
+
         # Check cooldown
         cooldown = _duel_cooldowns.get(ctx.guild.id)
         if cooldown is None:
@@ -544,6 +559,10 @@ class Duels(commands.Cog):
 
     @retar.error
     async def retar_error(self, ctx, error):
+        if ctx.guild is not None and not await _is_duel_enabled(ctx.guild.id):
+            return await ctx.send(
+                "La Arena de batalla no se encuentra disponible por el momento."
+            )
         if isinstance(error, commands.MissingRequiredArgument):
             await ctx.send(f"{ctx.author.mention} Formato correcto **!retar usuario monto**")
         elif isinstance(error, commands.CommandOnCooldown):
