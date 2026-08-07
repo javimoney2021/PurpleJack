@@ -19,14 +19,16 @@ from core.database import (
     upsert_collect_config_db, delete_collect_config_db, delete_orphan_collect_configs_db,
     set_item_role_restrictions_db, remove_item_role_restriction_db,
     save_game_config, save_rr_config, save_ruleta_config,
-    save_rob_config, save_dados_config, save_memo_config, clear_game_cooldowns,
+    save_rob_config, save_dados_config, save_memo_config, save_blackjack_config,
+    clear_game_cooldowns,
     activar_evento as activar_evento_db, cerrar_evento as cerrar_evento_db,
     flush_evento_puntos, set_duel_cooldown_config, get_duel_active_config,
     set_duel_active_config, clear_command_cooldowns
 )
 from core import cache
 from core.config import (
-    ruleta_config, rr_config, game_config, dados_config, memo_config, COIN,
+    ruleta_config, rr_config, game_config, dados_config, memo_config,
+    blackjack_config, COIN,
     STAFF_ROLE, COORDINADOR_ROLE,
     STAFF_ROLE_ID, COORDINADOR_ROLE_ID
 )
@@ -921,6 +923,81 @@ class Staff(commands.Cog):
             "✅ Memo actualizado:\n"
             f"• Máx apuesta: **{max_apuesta}** {COIN}\n"
             f"• Cooldown: **{self.parse_cooldown_str(cooldown_segundos)}**\n"
+            "• Cooldowns activos reiniciados.",
+            ephemeral=False,
+        )
+
+    @app_commands.command(name="bj_alternar", description="Activa o desactiva la mesa de Blackjack")
+    @is_staff()
+    async def bj_alternar(self, interaction: discord.Interaction):
+        await interaction.response.defer(ephemeral=False)
+        blackjack_config["activa"] = not blackjack_config["activa"]
+        await save_blackjack_config()
+        estado = "✅ ON" if blackjack_config["activa"] else "🔴 OFF"
+        await interaction.followup.send(
+            f"🃏 Mesa de Blackjack: **{estado}**.",
+            ephemeral=False,
+        )
+
+    @app_commands.command(name="bj_edit", description="Edita la configuración del Blackjack")
+    @app_commands.describe(
+        max_apuesta="Apuesta máxima permitida",
+        cooldown="Cooldown (ej: 30s, 5m, 2h)",
+        ganancia="Ganancia neta de una victoria en porcentaje",
+        perdida="Porcentaje de la apuesta perdido en una derrota",
+    )
+    @is_staff()
+    async def bj_edit(
+        self,
+        interaction: discord.Interaction,
+        max_apuesta: int,
+        cooldown: str,
+        ganancia: float,
+        perdida: float,
+    ):
+        try:
+            cooldown_segundos = self.parse_cooldown(cooldown)
+        except (TypeError, ValueError):
+            return await interaction.response.send_message(
+                "❌ Formato inválido. Usa ejemplos como: 30s, 5m, 2h.",
+                ephemeral=True,
+            )
+
+        if max_apuesta <= 0:
+            return await interaction.response.send_message(
+                "❌ La apuesta máxima debe ser mayor a 0.",
+                ephemeral=True,
+            )
+        if cooldown_segundos <= 0:
+            return await interaction.response.send_message(
+                "❌ El cooldown debe ser mayor a 0.",
+                ephemeral=True,
+            )
+        if not 0 < ganancia <= 500:
+            return await interaction.response.send_message(
+                "❌ La ganancia debe ser mayor a 0 y no superar 500%.",
+                ephemeral=True,
+            )
+        if not 0 < perdida <= 100:
+            return await interaction.response.send_message(
+                "❌ La pérdida debe ser mayor a 0 y no superar 100%.",
+                ephemeral=True,
+            )
+
+        blackjack_config["max_apuesta"] = max_apuesta
+        blackjack_config["cooldown"] = cooldown_segundos
+        blackjack_config["ganancia_pct"] = float(ganancia)
+        blackjack_config["perdida_pct"] = float(perdida)
+        await save_blackjack_config()
+        await clear_game_cooldowns("bj")
+        cache.clear_game_cooldowns_cache("bj")
+
+        await interaction.response.send_message(
+            "✅ Blackjack actualizado:\n"
+            f"• Máx apuesta: **{max_apuesta}** {COIN}\n"
+            f"• Cooldown: **{self.parse_cooldown_str(cooldown_segundos)}**\n"
+            f"• Ganancia neta: **{ganancia:g}%**\n"
+            f"• Pérdida: **{perdida:g}%**\n"
             "• Cooldowns activos reiniciados.",
             ephemeral=False,
         )

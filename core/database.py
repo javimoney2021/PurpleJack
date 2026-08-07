@@ -1199,7 +1199,7 @@ async def ensure_wager_constraints():
                         ORDER BY created_at, id
                     ) AS position
                 FROM wagers
-                WHERE status='pending' AND game IN ('dados', 'rr')
+                WHERE status='pending' AND game IN ('dados', 'rr', 'bj')
             ) pending
             WHERE position > 1
             """
@@ -1234,6 +1234,20 @@ async def ensure_wager_constraints():
             CREATE UNIQUE INDEX IF NOT EXISTS wagers_one_pending_rr_idx
             ON wagers (user_id)
             WHERE game='rr' AND status='pending'
+            """
+        )
+        await conn.execute(
+            """
+            CREATE UNIQUE INDEX IF NOT EXISTS wagers_unique_bj_request_idx
+            ON wagers (session_id)
+            WHERE game='bj'
+            """
+        )
+        await conn.execute(
+            """
+            CREATE UNIQUE INDEX IF NOT EXISTS wagers_one_pending_bj_idx
+            ON wagers (user_id)
+            WHERE game='bj' AND status='pending'
             """
         )
 
@@ -2207,7 +2221,10 @@ async def save_collect_cooldowns(user_id, cobros: dict):
 # ── GAME CONFIG ────────────────────────────────────────
 
 async def create_game_config_table():
-    from core.config import game_config, rr_config, ruleta_config, rob_config, dados_config, memo_config
+    from core.config import (
+        game_config, rr_config, ruleta_config, rob_config, dados_config,
+        memo_config, blackjack_config,
+    )
     async with pool.acquire() as conn:
         await conn.execute("""
         CREATE TABLE IF NOT EXISTS game_config (
@@ -2350,6 +2367,36 @@ async def create_game_config_table():
         )
 
         await conn.execute("""
+        CREATE TABLE IF NOT EXISTS blackjack_config_db (
+            id SMALLINT PRIMARY KEY CHECK (id = 1),
+            max_apuesta INTEGER NOT NULL DEFAULT 100,
+            cooldown INTEGER NOT NULL,
+            ganancia_pct DOUBLE PRECISION NOT NULL,
+            perdida_pct DOUBLE PRECISION NOT NULL,
+            activa BOOLEAN NOT NULL DEFAULT TRUE
+        )
+        """)
+        await conn.execute(
+            """
+            ALTER TABLE blackjack_config_db
+            ADD COLUMN IF NOT EXISTS max_apuesta INTEGER NOT NULL DEFAULT 100
+            """
+        )
+        await conn.execute(
+            """
+            INSERT INTO blackjack_config_db (
+                id, max_apuesta, cooldown, ganancia_pct, perdida_pct, activa
+            ) VALUES (1, $1, $2, $3, $4, $5)
+            ON CONFLICT (id) DO NOTHING
+            """,
+            blackjack_config["max_apuesta"],
+            blackjack_config["cooldown"],
+            blackjack_config["ganancia_pct"],
+            blackjack_config["perdida_pct"],
+            blackjack_config["activa"],
+        )
+
+        await conn.execute("""
         CREATE TABLE IF NOT EXISTS golpear_config (
             id SERIAL PRIMARY KEY,
             canal_id BIGINT,
@@ -2404,7 +2451,10 @@ async def save_golpear_config(canal_id, min_time, max_time, min_ganancia, max_ga
         )
 
 async def load_game_config():
-    from core.config import game_config, rr_config, ruleta_config, rob_config, dados_config
+    from core.config import (
+        game_config, rr_config, ruleta_config, rob_config, dados_config,
+        blackjack_config,
+    )
     async with pool.acquire() as conn:
         row = await conn.fetchrow("SELECT * FROM game_config LIMIT 1")
         if not row:
@@ -2446,6 +2496,16 @@ async def load_game_config():
             dados_config["exito_prob"]  = dados_row["exito_prob"]
             dados_config["fallo_prob"]  = dados_row["fallo_prob"]
             dados_config["activa"]      = dados_row["activa"]
+
+        blackjack_row = await conn.fetchrow(
+            "SELECT * FROM blackjack_config_db WHERE id=1"
+        )
+        if blackjack_row:
+            blackjack_config["max_apuesta"] = blackjack_row["max_apuesta"]
+            blackjack_config["cooldown"] = blackjack_row["cooldown"]
+            blackjack_config["ganancia_pct"] = blackjack_row["ganancia_pct"]
+            blackjack_config["perdida_pct"] = blackjack_row["perdida_pct"]
+            blackjack_config["activa"] = blackjack_row["activa"]
 
 async def save_game_config():
     from core.config import game_config
@@ -2542,6 +2602,29 @@ async def save_memo_config():
         memo_config["max_apuesta"],
         memo_config["cooldown"],
         memo_config["activa"],
+        )
+
+
+async def save_blackjack_config():
+    from core.config import blackjack_config
+    async with pool.acquire() as conn:
+        await conn.execute(
+            """
+            INSERT INTO blackjack_config_db (
+                id, max_apuesta, cooldown, ganancia_pct, perdida_pct, activa
+            ) VALUES (1, $1, $2, $3, $4, $5)
+            ON CONFLICT (id) DO UPDATE SET
+                max_apuesta=EXCLUDED.max_apuesta,
+                cooldown=EXCLUDED.cooldown,
+                ganancia_pct=EXCLUDED.ganancia_pct,
+                perdida_pct=EXCLUDED.perdida_pct,
+                activa=EXCLUDED.activa
+            """,
+            blackjack_config["max_apuesta"],
+            blackjack_config["cooldown"],
+            blackjack_config["ganancia_pct"],
+            blackjack_config["perdida_pct"],
+            blackjack_config["activa"],
         )
 
 

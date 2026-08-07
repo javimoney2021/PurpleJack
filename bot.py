@@ -95,6 +95,7 @@ async def load_modules():
     await bot.load_extension("modules.carrera")
     await bot.load_extension("modules.memo")
     await bot.load_extension("modules.adivinar")
+    await bot.load_extension("modules.blackjack")
 
 
 async def _alertar_fallo_retiro_cargo(cargo: dict, error: Exception, intento: int):

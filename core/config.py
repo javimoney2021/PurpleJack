@@ -51,6 +51,14 @@ memo_config = {
     "activa": True,
 }
 
+blackjack_config = {
+    "max_apuesta": 100,
+    "cooldown": 300,
+    "ganancia_pct": 100.0,
+    "perdida_pct": 100.0,
+    "activa": True,
+}
+
 game_config = {
     "work": {
         "min": 100,
