@@ -2371,8 +2371,6 @@ async def create_game_config_table():
             id SMALLINT PRIMARY KEY CHECK (id = 1),
             max_apuesta INTEGER NOT NULL DEFAULT 100,
             cooldown INTEGER NOT NULL,
-            ganancia_pct DOUBLE PRECISION NOT NULL,
-            perdida_pct DOUBLE PRECISION NOT NULL,
             activa BOOLEAN NOT NULL DEFAULT TRUE
         )
         """)
@@ -2384,15 +2382,20 @@ async def create_game_config_table():
         )
         await conn.execute(
             """
+            ALTER TABLE blackjack_config_db
+            DROP COLUMN IF EXISTS ganancia_pct,
+            DROP COLUMN IF EXISTS perdida_pct
+            """
+        )
+        await conn.execute(
+            """
             INSERT INTO blackjack_config_db (
-                id, max_apuesta, cooldown, ganancia_pct, perdida_pct, activa
-            ) VALUES (1, $1, $2, $3, $4, $5)
+                id, max_apuesta, cooldown, activa
+            ) VALUES (1, $1, $2, $3)
             ON CONFLICT (id) DO NOTHING
             """,
             blackjack_config["max_apuesta"],
             blackjack_config["cooldown"],
-            blackjack_config["ganancia_pct"],
-            blackjack_config["perdida_pct"],
             blackjack_config["activa"],
         )
 
@@ -2503,8 +2506,6 @@ async def load_game_config():
         if blackjack_row:
             blackjack_config["max_apuesta"] = blackjack_row["max_apuesta"]
             blackjack_config["cooldown"] = blackjack_row["cooldown"]
-            blackjack_config["ganancia_pct"] = blackjack_row["ganancia_pct"]
-            blackjack_config["perdida_pct"] = blackjack_row["perdida_pct"]
             blackjack_config["activa"] = blackjack_row["activa"]
 
 async def save_game_config():
@@ -2611,19 +2612,15 @@ async def save_blackjack_config():
         await conn.execute(
             """
             INSERT INTO blackjack_config_db (
-                id, max_apuesta, cooldown, ganancia_pct, perdida_pct, activa
-            ) VALUES (1, $1, $2, $3, $4, $5)
+                id, max_apuesta, cooldown, activa
+            ) VALUES (1, $1, $2, $3)
             ON CONFLICT (id) DO UPDATE SET
                 max_apuesta=EXCLUDED.max_apuesta,
                 cooldown=EXCLUDED.cooldown,
-                ganancia_pct=EXCLUDED.ganancia_pct,
-                perdida_pct=EXCLUDED.perdida_pct,
                 activa=EXCLUDED.activa
             """,
             blackjack_config["max_apuesta"],
             blackjack_config["cooldown"],
-            blackjack_config["ganancia_pct"],
-            blackjack_config["perdida_pct"],
             blackjack_config["activa"],
         )
 

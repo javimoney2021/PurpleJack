@@ -943,8 +943,6 @@ class Staff(commands.Cog):
     @app_commands.describe(
         max_apuesta="Apuesta máxima permitida",
         cooldown="Cooldown (ej: 30s, 5m, 2h)",
-        ganancia="Ganancia neta de una victoria en porcentaje",
-        perdida="Porcentaje de la apuesta perdido en una derrota",
     )
     @is_staff()
     async def bj_edit(
@@ -952,8 +950,6 @@ class Staff(commands.Cog):
         interaction: discord.Interaction,
         max_apuesta: int,
         cooldown: str,
-        ganancia: float,
-        perdida: float,
     ):
         try:
             cooldown_segundos = self.parse_cooldown(cooldown)
@@ -973,21 +969,8 @@ class Staff(commands.Cog):
                 "❌ El cooldown debe ser mayor a 0.",
                 ephemeral=True,
             )
-        if not 0 < ganancia <= 500:
-            return await interaction.response.send_message(
-                "❌ La ganancia debe ser mayor a 0 y no superar 500%.",
-                ephemeral=True,
-            )
-        if not 0 < perdida <= 100:
-            return await interaction.response.send_message(
-                "❌ La pérdida debe ser mayor a 0 y no superar 100%.",
-                ephemeral=True,
-            )
-
         blackjack_config["max_apuesta"] = max_apuesta
         blackjack_config["cooldown"] = cooldown_segundos
-        blackjack_config["ganancia_pct"] = float(ganancia)
-        blackjack_config["perdida_pct"] = float(perdida)
         await save_blackjack_config()
         await clear_game_cooldowns("bj")
         cache.clear_game_cooldowns_cache("bj")
@@ -996,8 +979,7 @@ class Staff(commands.Cog):
             "✅ Blackjack actualizado:\n"
             f"• Máx apuesta: **{max_apuesta}** {COIN}\n"
             f"• Cooldown: **{self.parse_cooldown_str(cooldown_segundos)}**\n"
-            f"• Ganancia neta: **{ganancia:g}%**\n"
-            f"• Pérdida: **{perdida:g}%**\n"
+            "• Pago normal: **1:1** | Blackjack natural: **3:2**\n"
             "• Cooldowns activos reiniciados.",
             ephemeral=False,
         )

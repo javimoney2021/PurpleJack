@@ -1,6 +1,5 @@
 import asyncio
 import logging
-import math
 import random
 import time
 
@@ -87,8 +86,6 @@ class BlackjackGame:
         self.deck = build_deck()
         self.player: list[tuple[str, str]] = []
         self.dealer: list[tuple[str, str]] = []
-        self.gain_pct = float(blackjack_config["ganancia_pct"])
-        self.loss_pct = float(blackjack_config["perdida_pct"])
         self.cooldown = int(blackjack_config["cooldown"])
         self.message: discord.Message | None = None
         self.finished = False
@@ -118,7 +115,7 @@ class BlackjackGame:
         if player_natural or dealer_natural:
             if player_natural and dealer_natural:
                 return "push"
-            return "win" if player_natural else "loss"
+            return "blackjack" if player_natural else "loss"
         if player_value > 21:
             return "loss"
         if dealer_value > 21:
@@ -130,15 +127,13 @@ class BlackjackGame:
         return "push"
 
     def payout_for(self, outcome: str) -> tuple[int, int]:
-        if outcome == "win":
-            profit = int(self.amount * self.gain_pct / 100)
+        if outcome == "blackjack":
+            profit = self.amount * 3 // 2
             return self.amount + profit, profit
+        if outcome == "win":
+            return self.amount * 2, self.amount
         if outcome == "loss":
-            loss = min(
-                self.amount,
-                math.ceil(self.amount * self.loss_pct / 100),
-            )
-            return self.amount - loss, -loss
+            return 0, -self.amount
         return self.amount, 0
 
 
@@ -199,7 +194,7 @@ class BlackjackView(discord.ui.View):
             text=(
                 f"Dealer se planta en 17 | CD: {format_cooldown(self.game.cooldown)} | "
                 f"Máx: {blackjack_config['max_apuesta']} | "
-                f"Ganancia: {self.game.gain_pct:g}% | Pérdida: {self.game.loss_pct:g}%"
+                "Pago: 1:1 | Blackjack: 3:2"
             )
         )
         return embed
@@ -238,9 +233,10 @@ class BlackjackView(discord.ui.View):
             )
 
     def _result_description(self, outcome: str, net: int, detail: str) -> tuple[str, discord.Color]:
-        if outcome == "win":
+        if outcome in {"win", "blackjack"}:
+            result_text = "Blackjack natural" if outcome == "blackjack" else "Ganaste"
             return (
-                f"{detail}\n\n🎉 **Ganaste.** Ganancia neta: **+{net}** {COIN}.",
+                f"{detail}\n\n🎉 **{result_text}.** Ganancia neta: **+{net}** {COIN}.",
                 discord.Color.green(),
             )
         if outcome == "loss":

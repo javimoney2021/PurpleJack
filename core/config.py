@@ -54,8 +54,6 @@ memo_config = {
 blackjack_config = {
     "max_apuesta": 100,
     "cooldown": 300,
-    "ganancia_pct": 100.0,
-    "perdida_pct": 100.0,
     "activa": True,
 }
 
