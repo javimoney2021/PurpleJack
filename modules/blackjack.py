@@ -192,7 +192,8 @@ class BlackjackView(discord.ui.View):
         )
         embed.set_footer(
             text=(
-                f"Dealer se planta en 17 | CD: {format_cooldown(self.game.cooldown)} | "
+                "Dealer automático: pide con 16 o menos | finaliza con 17 o más | "
+                f"CD: {format_cooldown(self.game.cooldown)} | "
                 f"Máx: {blackjack_config['max_apuesta']} | "
                 "Pago: 1:1 | Blackjack: 3:2"
             )
