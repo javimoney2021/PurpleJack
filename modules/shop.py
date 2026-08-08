@@ -883,7 +883,7 @@ class InventarioLayout(discord.ui.LayoutView):
 
             container.add_item(discord.ui.Separator())
             container.add_item(discord.ui.TextDisplay(
-                f"-# Total: **{len(self.items)}** tipo(s) de item  •  Usa ⚡ para consumir un item usable."
+                f"-# Total: **{len(self.items)}** tipo(s) de item  •  Usa 💠 para consumir un item usable."
             ))
 
             self.add_item(container)

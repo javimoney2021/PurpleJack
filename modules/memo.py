@@ -15,7 +15,7 @@ from core.database import (
 from core.config import COIN, memo_config
 
 # ── CONFIG ─────────────────────────────────────────────
-MAX_INTENTOS  = 7
+MAX_INTENTOS  = 6
 AUTO_DELETE   = 80
 HIDDEN_EMOJI  = "🟦"
 EMOJIS_PARES  = ["🎲", "🍪", "🍇", "🔪", "💎", "🍼", "👑", "🚀"]
