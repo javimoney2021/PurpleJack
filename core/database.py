@@ -1348,10 +1348,30 @@ async def reduce_stock(item_id, cantidad=1):
 
 async def add_stock(item_id, cantidad):
     async with pool.acquire() as conn:
-        await conn.execute(
-            "UPDATE items SET stock = stock + $1 WHERE id=$2", cantidad, item_id
+        row = await conn.fetchrow(
+            """
+            WITH current AS (
+                SELECT stock AS previous_stock
+                FROM items
+                WHERE id=$2
+                FOR UPDATE
+            )
+            UPDATE items
+            SET stock = CASE
+                WHEN current.previous_stock = -1 THEN $1
+                ELSE items.stock + $1
+            END
+            FROM current
+            WHERE items.id=$2
+            RETURNING current.previous_stock, items.stock AS stock
+            """,
+            cantidad,
+            item_id,
         )
+    if not row:
+        return None
     await load_items_to_cache()
+    return row["previous_stock"], row["stock"]
 
 
 # ── INVENTARIO ─────────────────────────────────────────

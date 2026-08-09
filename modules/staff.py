@@ -1461,12 +1461,25 @@ class Staff(commands.Cog):
         item = await get_item_by_name(nombre.strip())
         if not item:
             return await interaction.followup.send(f"❌ Item **{nombre}** no encontrado.", ephemeral=True)
-        if item["stock"] == -1:
-            return await interaction.followup.send(f"❌ **{item['nombre']}** tiene stock infinito, no aplica.", ephemeral=True)
-        await add_stock(item["id"], cantidad)
-        nuevo_stock = item["stock"] + cantidad
+        stock_actualizado = await add_stock(item["id"], cantidad)
+        if stock_actualizado is None:
+            return await interaction.followup.send(
+                f"❌ Item **{item['nombre']}** no encontrado.",
+                ephemeral=True,
+            )
+        stock_anterior, nuevo_stock = stock_actualizado
+        if stock_anterior == -1:
+            mensaje = (
+                f"✅ **{item['nombre']}** cambió de stock infinito a stock limitado: "
+                f"`∞` → `{nuevo_stock}`"
+            )
+        else:
+            mensaje = (
+                f"✅ Stock de **{item['nombre']}** actualizado: "
+                f"`{stock_anterior}` → `{nuevo_stock}`"
+            )
         await interaction.followup.send(
-            f"✅ Stock de **{item['nombre']}** actualizado: `{item['stock']}` → `{nuevo_stock}`",
+            mensaje,
             ephemeral=False
         )
 
