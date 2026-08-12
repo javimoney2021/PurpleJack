@@ -100,7 +100,13 @@ EMPLEOS_MAESTRIA = {
     "cazador": {
         "nombre": "Cazador",
         "maestrias_requeridas": 2,
-        "desarrollado": False,
+        "dificultad": "Maestría",
+        "salario_min": 7000,
+        "salario_max": 7000,
+        "xp_ganada": 20,
+        "duracion_horas": 3,
+        "penalizacion": -1000,
+        "desarrollado": True,
     },
     "piromano": {
         "nombre": "Píromano",
@@ -628,6 +634,7 @@ async def _finalizar_jornada_atomica_unlocked(
     motivo: str,
     *,
     xp_ganada: int = 0,
+    penalizacion_desde_balance: bool = False,
 ):
     """Liquida banco, EXP, historial y sesión exactamente una vez."""
     now = time.time()
@@ -707,7 +714,10 @@ async def _finalizar_jornada_atomica_unlocked(
                 overflow_balance = coin_delta - aplicado_banco
                 new_balance += overflow_balance
             elif coin_delta < 0:
-                new_bank += coin_delta
+                if penalizacion_desde_balance:
+                    new_balance += coin_delta
+                else:
+                    new_bank += coin_delta
 
             user_row = await conn.fetchrow(
                 """
@@ -794,6 +804,7 @@ async def finalizar_jornada_atomica(
     motivo: str,
     *,
     xp_ganada: int = 0,
+    penalizacion_desde_balance: bool = False,
 ):
     async with _get_economy_lock(user_id):
         # Conserva cualquier movimiento legítimo que aún estuviera dirty en RAM
@@ -809,6 +820,7 @@ async def finalizar_jornada_atomica(
             pago,
             motivo,
             xp_ganada=xp_ganada,
+            penalizacion_desde_balance=penalizacion_desde_balance,
         )
 
 
@@ -899,6 +911,59 @@ async def save_empleo_user(data):
              data.get("total_generado", 0), data.get("racha_exitos", 0),
              data.get("ingresos_empleo_actual", 0), data.get("exitosos_empleo_actual", 0), data.get("fallidos_empleo_actual", 0))
     _EMPLEOS_CACHE[data["user_id"]] = data
+
+
+async def contratar_empleo_maestria_atomica(data: dict, maestrias_consumidas: int):
+    """Contrata y consume maestrías en una única operación de base de datos."""
+    if not pool or maestrias_consumidas <= 0:
+        return None
+
+    hist_json = repr(data.get("historial_reciente_de_jornadas", []))
+    async with pool.acquire() as conn:
+        row = await conn.fetchrow(
+            """
+            UPDATE empleos_users
+            SET empleo_actual=$3,
+                dificultad=$4,
+                fecha_contratacion=$5,
+                ultimo_trabajo=$6,
+                historial_reciente_de_jornadas=$7,
+                cooldown_renuncia=$8,
+                progreso_permanencia=$9,
+                despedido_inactividad=$10,
+                ingresos_empleo_actual=$11,
+                exitosos_empleo_actual=$12,
+                fallidos_empleo_actual=$13,
+                maestrias=maestrias-$2
+            WHERE user_id=$1 AND maestrias >= $2
+            RETURNING *
+            """,
+            data["user_id"],
+            maestrias_consumidas,
+            data.get("empleo_actual"),
+            data.get("dificultad"),
+            data.get("fecha_contratacion", 0),
+            data.get("ultimo_trabajo", 0),
+            hist_json,
+            data.get("cooldown_renuncia", 0),
+            data.get("progreso_permanencia", 0),
+            data.get("despedido_inactividad", False),
+            data.get("ingresos_empleo_actual", 0),
+            data.get("exitosos_empleo_actual", 0),
+            data.get("fallidos_empleo_actual", 0),
+        )
+    if not row:
+        return None
+
+    saved_data = dict(row)
+    try:
+        saved_data["historial_reciente_de_jornadas"] = ast.literal_eval(
+            saved_data["historial_reciente_de_jornadas"]
+        )
+    except Exception:
+        saved_data["historial_reciente_de_jornadas"] = []
+    _EMPLEOS_CACHE[data["user_id"]] = saved_data
+    return saved_data
 
 
 async def append_historial(user_id, empleo, exito, pago, motivo):
@@ -1113,7 +1178,7 @@ def build_maestrias_embed(data: dict) -> discord.Embed:
 
 def build_empleos_maestria_embed() -> discord.Embed:
     lineas = [
-        f"• **{info['nombre']}** - Requiere {info['maestrias_requeridas']} maestría(s)"
+        f"• **{info['nombre']}** - Consume {info['maestrias_requeridas']} maestría(s)"
         for info in EMPLEOS_MAESTRIA.values()
     ]
     embed = discord.Embed(
@@ -1224,6 +1289,7 @@ class ConfirmarEmpleoView(ui.View):
                         ephemeral=True,
                     )
                 xp_consumida = 0
+                maestrias_consumidas = 0 if bypass else requeridas
             else:
                 xp_requerida = info["xp_requisito"]
                 if data.get("exp_laboral", 0) < xp_requerida and not bypass:
@@ -1232,10 +1298,12 @@ class ConfirmarEmpleoView(ui.View):
                         ephemeral=True,
                     )
                 xp_consumida = 0 if bypass else xp_requerida
+                maestrias_consumidas = 0
 
             now = time.time()
-            data["exp_laboral"] -= xp_consumida
-            data.update({
+            nuevo_data = dict(data)
+            nuevo_data["exp_laboral"] -= xp_consumida
+            nuevo_data.update({
                 "empleo_actual": self.empleo,
                 "dificultad": info["dificultad"],
                 "cooldown_renuncia": 0,
@@ -1248,7 +1316,20 @@ class ConfirmarEmpleoView(ui.View):
                 "exitosos_empleo_actual": 0,
                 "fallidos_empleo_actual": 0,
             })
-            await save_empleo_user(data)
+            if maestrias_consumidas:
+                data_guardada = await contratar_empleo_maestria_atomica(
+                    nuevo_data,
+                    maestrias_consumidas,
+                )
+                if data_guardada is None:
+                    return await interaction.followup.send(
+                        f"❌ Ya no tienes las **{requeridas}** maestría(s) necesarias. "
+                        "Actualiza el panel e inténtalo nuevamente.",
+                        ephemeral=True,
+                    )
+                nuevo_data = data_guardada
+            else:
+                await save_empleo_user(nuevo_data)
             self.procesado = True
             self.stop()
 
@@ -1258,6 +1339,8 @@ class ConfirmarEmpleoView(ui.View):
         )
         if xp_consumida:
             mensaje += f"\n📊 Se consumieron **{xp_consumida}** XP Laboral."
+        if maestrias_consumidas:
+            mensaje += f"\n🎓 Se consumieron **{maestrias_consumidas}** maestría(s)."
         await interaction.followup.send(mensaje, ephemeral=False)
         try:
             await interaction.message.delete(delay=1)
@@ -1475,7 +1558,7 @@ class EmpleosMaestriaSelect(ui.Select):
             discord.SelectOption(
                 label=info["nombre"],
                 value=clave,
-                description=f"Requiere {info['maestrias_requeridas']} maestría(s)",
+                description=f"Consume {info['maestrias_requeridas']} maestría(s)",
             )
             for clave, info in EMPLEOS_MAESTRIA.items()
         ]
@@ -1522,6 +1605,7 @@ class EmpleosMaestriaSelect(ui.Select):
             title=f"¿Deseas aplicar como {info['nombre']}?",
             description=(
                 f"Requiere **{info['maestrias_requeridas']} maestría(s)**\n"
+                f"Al contratar se consumen **{info['maestrias_requeridas']} maestría(s)**\n"
                 f"Recompensa: **{info['salario_min']} {COIN} + {info['xp_ganada']} XP Laboral**\n"
                 f"Jornada: **{info['duracion_horas']} horas**"
             ),
@@ -1732,6 +1816,8 @@ class Empleos(commands.Cog):
             view = PlomeroView(self.bot, ctx.author, info, session_id)
         elif empleo == "chantajista":
             view = ChantajistaView(self.bot, ctx.author, info, session_id)
+        elif empleo == "cazador":
+            view = CazadorView(self.bot, ctx.author, info, session_id)
         else:
             await cancelar_jornada_segura(session_id)
             return await ctx.send("🚧 Trabajo Pendiente de desarrollo.")
@@ -1758,6 +1844,8 @@ class Empleos(commands.Cog):
             except Exception:
                 pass
             raise
+        if empleo == "cazador":
+            view.iniciar_preparacion()
 
 
 class JornadaView(ui.View):
@@ -1784,6 +1872,252 @@ class JornadaView(ui.View):
             )
             return False
         return True
+
+
+class CazadorView(JornadaView):
+    TRIPULANTE = discord.PartialEmoji.from_str("<:t_justiceiro:1410760055090970805>")
+    SUS = (
+        discord.PartialEmoji.from_str("<:i_Marionetista:1403884981108871281>"),
+        discord.PartialEmoji.from_str("<:i_apostador:1410272686004768789>"),
+        discord.PartialEmoji.from_str("<:n_JokerCoin:1287140438276571146>"),
+    )
+    REVELAR_SEGUNDOS = 3
+    MEZCLAR_SEGUNDOS = 3
+
+    def __init__(self, bot, author, info, session_id: str):
+        super().__init__(timeout=180)
+        self.bot = bot
+        self.author = author
+        self.info = info
+        self.session_id = session_id
+        self.message = None
+        self.fase = "revelando"
+        self.terminado = False
+        self.bloqueado = True
+        self._interaction_lock = asyncio.Lock()
+        self._preparacion_task = None
+
+        guild = getattr(author, "guild", None)
+        self.tripulante_emoji = (
+            guild.get_emoji(self.TRIPULANTE.id) if guild else None
+        ) or "🧑‍🚀"
+        sus_fallback = ("🎭", "🎰", "🪙")
+        self.sus_emojis = [
+            (guild.get_emoji(emoji.id) if guild else None) or fallback
+            for emoji, fallback in zip(self.SUS, sus_fallback)
+        ]
+        self.tablero = [self.tripulante_emoji] * 7 + self.sus_emojis.copy()
+        random.shuffle(self.tablero)
+        self._build_buttons()
+
+    def _build_buttons(self):
+        self.clear_items()
+        for idx, emoji in enumerate(self.tablero):
+            if self.fase == "revelando":
+                button = ui.Button(
+                    emoji=emoji,
+                    style=ButtonStyle.secondary,
+                    row=idx // 5,
+                    custom_id=f"caz_{self.session_id}_{idx}",
+                    disabled=True,
+                )
+            else:
+                button = ui.Button(
+                    label="⬜",
+                    style=ButtonStyle.secondary,
+                    row=idx // 5,
+                    custom_id=f"caz_{self.session_id}_{idx}",
+                    disabled=self.terminado or self.bloqueado,
+                )
+            button.callback = self._make_callback(idx)
+            self.add_item(button)
+
+    def build_embed(self):
+        estado = {
+            "revelando": "\n\n👁️ Memoriza las posiciones de los SUS.",
+            "preparando": "\n\n⏳ **Preparando Habilidad...**",
+            "activo": "\n\n🎯 Elige una casilla para atacar.",
+        }.get(self.fase, "")
+        embed = discord.Embed(
+            title=f"Jornada Cazador - {self.author.nick or self.author.display_name}",
+            description=(
+                "Usa tu habilidad de Cazador para llevarte contigo a uno de los SUS, "
+                "Perderas si atacas a un Tripulante."
+                f"{estado}"
+            ),
+            color=discord.Color.dark_grey(),
+        )
+        embed.set_footer(text="Las casillas se mezclaran aleatoriamente...")
+        return embed
+
+    def iniciar_preparacion(self):
+        if self._preparacion_task is None:
+            self._preparacion_task = asyncio.create_task(
+                self._ejecutar_preparacion(),
+                name=f"cazador-preparacion-{self.session_id}",
+            )
+
+    async def _actualizar_preparacion(self):
+        if self.message is not None:
+            await self.message.edit(embed=self.build_embed(), view=self)
+
+    async def _ejecutar_preparacion(self):
+        try:
+            await asyncio.sleep(self.REVELAR_SEGUNDOS)
+            async with self._interaction_lock:
+                if self.terminado:
+                    return
+                self.fase = "preparando"
+                self.bloqueado = True
+                random.shuffle(self.tablero)
+                self._build_buttons()
+                await self._actualizar_preparacion()
+
+            await asyncio.sleep(self.MEZCLAR_SEGUNDOS)
+            async with self._interaction_lock:
+                if self.terminado:
+                    return
+                self.fase = "activo"
+                self.bloqueado = False
+                self._build_buttons()
+                await self._actualizar_preparacion()
+        except asyncio.CancelledError:
+            raise
+        except Exception as error:
+            _log_trabajar_error("Cazador", error, self.author.name, "_ejecutar_preparacion")
+            await _cerrar_tablero_con_error(self, "Cazador")
+
+    def _make_callback(self, idx: int):
+        async def callback(interaction: Interaction):
+            if interaction.user.id != self.author.id:
+                return await _responder_jornada(interaction, "❌ Este tablero no es tuyo.")
+            if self._interaction_lock.locked():
+                return await _responder_jornada(
+                    interaction,
+                    "⏳ El tablero está actualizando la jugada anterior.",
+                )
+
+            async with self._interaction_lock:
+                if self.terminado:
+                    return await _responder_jornada(
+                        interaction,
+                        "⌛ Esta jornada ya finalizó.",
+                    )
+                if self.bloqueado or self.fase != "activo":
+                    return await _responder_jornada(
+                        interaction,
+                        "⏳ La habilidad de Cazador se está preparando.",
+                    )
+
+                self.terminado = True
+                self.bloqueado = True
+                self.stop()
+                exito = self.tablero[idx] in self.sus_emojis
+
+            await self._finalizar(exito, interaction=interaction)
+
+        return callback
+
+    async def _finalizar(self, exito: bool, *, interaction=None, por_timeout=False):
+        liquidada = False
+        try:
+            if exito:
+                pago = self.info["salario_max"]
+                xp_ganada = self.info["xp_ganada"]
+                mensaje = (
+                    "Buena jugada has acertado llevandote a uno de los SUS, "
+                    f"Ganas {pago} {COIN} + {xp_ganada} Exp Laboral."
+                )
+                settlement = await finalizar_jornada_atomica(
+                    self.session_id,
+                    self.author.id,
+                    "cazador",
+                    True,
+                    pago,
+                    mensaje,
+                    xp_ganada=xp_ganada,
+                )
+                color = discord.Color.green()
+                titulo = "Jornada Cazador - Victoria"
+            else:
+                pago = self.info["penalizacion"] if not por_timeout else 0
+                mensaje = (
+                    "Has fallado llevandote a un Tripulante, "
+                    f"pierdes {abs(self.info['penalizacion'])} {COIN}."
+                    if not por_timeout
+                    else "Tiempo agotado. La jornada de Cazador finalizó sin recompensa."
+                )
+                settlement = await finalizar_jornada_atomica(
+                    self.session_id,
+                    self.author.id,
+                    "cazador",
+                    False,
+                    pago,
+                    mensaje,
+                    penalizacion_desde_balance=not por_timeout,
+                )
+                color = discord.Color.red()
+                titulo = "Jornada Cazador - Derrota"
+
+            if not settlement["ok"]:
+                raise RuntimeError(settlement.get("reason", "settlement_failed"))
+            liquidada = True
+
+            if exito:
+                bonus = settlement["bonus"]
+                if bonus["coins"] > 0:
+                    mensaje += (
+                        f"\n🌟 **¡Racha de 5!** Bono: **+{bonus['coins']}** "
+                        f"{COIN} y **+{bonus['xp']} XP Laboral**"
+                    )
+            embed = discord.Embed(
+                title=titulo,
+                description=f"{self.author.mention} {mensaje}",
+                color=color,
+            )
+            if interaction is not None:
+                await _editar_tablero_seguro(
+                    interaction,
+                    self,
+                    embed=embed,
+                    remove_view=True,
+                )
+            elif self.message is not None:
+                await self.message.edit(embed=embed, view=None)
+        except Exception as error:
+            _log_trabajar_error("Cazador", error, self.author.name, "_finalizar")
+            await _cerrar_tablero_con_error(
+                self,
+                "Cazador",
+                interaction=interaction,
+                liquidada=liquidada,
+            )
+        finally:
+            _programar_eliminacion(self)
+
+    async def on_timeout(self):
+        async with self._interaction_lock:
+            if self.terminado:
+                return
+            self.terminado = True
+            self.bloqueado = True
+            self.stop()
+            self._build_buttons()
+        await _mostrar_tablero_bloqueado(self)
+        await self._finalizar(False, por_timeout=True)
+
+    async def on_error(self, interaction: Interaction, error: Exception, item):
+        self.terminado = True
+        self.bloqueado = True
+        self.stop()
+        await cancelar_jornada_segura(self.session_id, "error")
+        _log_trabajar_error("Cazador", error, interaction.user.name, f"on_error — Item: {item}")
+        if self.message is not None:
+            try:
+                await self.message.edit(view=None)
+            except (discord.HTTPException, discord.NotFound):
+                pass
+        await _notificar_error_interaccion(interaction)
 
 
 class ChantajistaView(JornadaView):
