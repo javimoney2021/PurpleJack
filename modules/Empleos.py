@@ -1934,7 +1934,7 @@ class CazadorView(JornadaView):
 
     def build_embed(self):
         estado = {
-            "revelando": "\n\n👁️ Memoriza las posiciones de los SUS.",
+            "revelando": "\n\n👁️ Preparate para llevarte a uno.",
             "preparando": "\n\n⏳ **Preparando Habilidad...**",
             "activo": "\n\n🎯 Elige una casilla para atacar.",
         }.get(self.fase, "")
