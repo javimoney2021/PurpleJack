@@ -1894,6 +1894,10 @@ class CazadorView(JornadaView):
         self.fase = "revelando"
         self.terminado = False
         self.bloqueado = True
+        self.casilla_elegida = None
+        self.resultado_exitoso = None
+        self.resultado_mensaje = None
+        self.resultado_color = discord.Color.dark_grey()
         self._interaction_lock = asyncio.Lock()
         self._preparacion_task = None
 
@@ -1913,10 +1917,18 @@ class CazadorView(JornadaView):
     def _build_buttons(self):
         self.clear_items()
         for idx, emoji in enumerate(self.tablero):
-            if self.fase == "revelando":
+            if self.fase in {"revelando", "resultado"}:
+                if self.fase == "resultado" and idx == self.casilla_elegida:
+                    estilo = (
+                        ButtonStyle.success
+                        if self.resultado_exitoso
+                        else ButtonStyle.danger
+                    )
+                else:
+                    estilo = ButtonStyle.secondary
                 button = ui.Button(
                     emoji=emoji,
-                    style=ButtonStyle.secondary,
+                    style=estilo,
                     row=idx // 5,
                     custom_id=f"caz_{self.session_id}_{idx}",
                     disabled=True,
@@ -1937,6 +1949,7 @@ class CazadorView(JornadaView):
             "revelando": "\n\n👁️ Preparate para llevarte a uno.",
             "preparando": "\n\n⏳ **Preparando Habilidad...**",
             "activo": "\n\n🎯 Elige una casilla para atacar.",
+            "resultado": f"\n\n{self.author.mention} {self.resultado_mensaje or ''}",
         }.get(self.fase, "")
         embed = discord.Embed(
             title=f"Jornada Cazador - {self.author.nick or self.author.display_name}",
@@ -1945,10 +1958,24 @@ class CazadorView(JornadaView):
                 "Perderas si atacas a un Tripulante."
                 f"{estado}"
             ),
-            color=discord.Color.dark_grey(),
+            color=self.resultado_color if self.fase == "resultado" else discord.Color.dark_grey(),
         )
         embed.set_footer(text="Las casillas se mezclaran aleatoriamente...")
         return embed
+
+    def _mensaje_resultado(self, exito: bool, *, por_timeout: bool = False) -> str:
+        if exito:
+            return (
+                "Buena jugada has acertado llevandote a uno de los SUS, "
+                f"Ganas {self.info['salario_max']} {COIN} + "
+                f"{self.info['xp_ganada']} Exp Laboral."
+            )
+        if por_timeout:
+            return "Tiempo agotado. La jornada de Cazador finalizó sin recompensa."
+        return (
+            "Has fallado llevandote a un Tripulante, "
+            f"pierdes {abs(self.info['penalizacion'])} {COIN}."
+        )
 
     def iniciar_preparacion(self):
         if self._preparacion_task is None:
@@ -2013,6 +2040,19 @@ class CazadorView(JornadaView):
                 self.bloqueado = True
                 self.stop()
                 exito = self.tablero[idx] in self.sus_emojis
+                self.fase = "resultado"
+                self.casilla_elegida = idx
+                self.resultado_exitoso = exito
+                self.resultado_mensaje = self._mensaje_resultado(exito)
+                self.resultado_color = (
+                    discord.Color.green() if exito else discord.Color.red()
+                )
+                self._build_buttons()
+                await _editar_tablero_seguro(
+                    interaction,
+                    self,
+                    embed=self.build_embed(),
+                )
 
             await self._finalizar(exito, interaction=interaction)
 
@@ -2024,10 +2064,7 @@ class CazadorView(JornadaView):
             if exito:
                 pago = self.info["salario_max"]
                 xp_ganada = self.info["xp_ganada"]
-                mensaje = (
-                    "Buena jugada has acertado llevandote a uno de los SUS, "
-                    f"Ganas {pago} {COIN} + {xp_ganada} Exp Laboral."
-                )
+                mensaje = self._mensaje_resultado(True)
                 settlement = await finalizar_jornada_atomica(
                     self.session_id,
                     self.author.id,
@@ -2038,15 +2075,9 @@ class CazadorView(JornadaView):
                     xp_ganada=xp_ganada,
                 )
                 color = discord.Color.green()
-                titulo = "Jornada Cazador - Victoria"
             else:
                 pago = self.info["penalizacion"] if not por_timeout else 0
-                mensaje = (
-                    "Has fallado llevandote a un Tripulante, "
-                    f"pierdes {abs(self.info['penalizacion'])} {COIN}."
-                    if not por_timeout
-                    else "Tiempo agotado. La jornada de Cazador finalizó sin recompensa."
-                )
+                mensaje = self._mensaje_resultado(False, por_timeout=por_timeout)
                 settlement = await finalizar_jornada_atomica(
                     self.session_id,
                     self.author.id,
@@ -2057,7 +2088,6 @@ class CazadorView(JornadaView):
                     penalizacion_desde_balance=not por_timeout,
                 )
                 color = discord.Color.red()
-                titulo = "Jornada Cazador - Derrota"
 
             if not settlement["ok"]:
                 raise RuntimeError(settlement.get("reason", "settlement_failed"))
@@ -2070,20 +2100,20 @@ class CazadorView(JornadaView):
                         f"\n🌟 **¡Racha de 5!** Bono: **+{bonus['coins']}** "
                         f"{COIN} y **+{bonus['xp']} XP Laboral**"
                     )
-            embed = discord.Embed(
-                title=titulo,
-                description=f"{self.author.mention} {mensaje}",
-                color=color,
-            )
+            self.fase = "resultado"
+            self.resultado_exitoso = exito
+            self.resultado_mensaje = mensaje
+            self.resultado_color = color
+            self._build_buttons()
+            embed = self.build_embed()
             if interaction is not None:
                 await _editar_tablero_seguro(
                     interaction,
                     self,
                     embed=embed,
-                    remove_view=True,
                 )
             elif self.message is not None:
-                await self.message.edit(embed=embed, view=None)
+                await self.message.edit(embed=embed, view=self)
         except Exception as error:
             _log_trabajar_error("Cazador", error, self.author.name, "_finalizar")
             await _cerrar_tablero_con_error(
@@ -2102,6 +2132,10 @@ class CazadorView(JornadaView):
             self.terminado = True
             self.bloqueado = True
             self.stop()
+            self.fase = "resultado"
+            self.resultado_exitoso = False
+            self.resultado_mensaje = self._mensaje_resultado(False, por_timeout=True)
+            self.resultado_color = discord.Color.red()
             self._build_buttons()
         await _mostrar_tablero_bloqueado(self)
         await self._finalizar(False, por_timeout=True)
