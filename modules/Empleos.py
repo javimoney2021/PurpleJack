@@ -11,7 +11,9 @@ from discord import ButtonStyle, Interaction, ui
 from discord.ext import commands
 
 from core.config import COIN, COORDINADOR_ROLE_ID
-from core.database import pool, _get_economy_lock, _flush_user_to_db_unlocked
+from core.database import (
+    pool, _get_economy_lock, _flush_user_to_db_unlocked, get_system_toggle,
+)
 from core import cache as economy_cache
 
 logger = logging.getLogger("purplejack.empleos")
@@ -1556,6 +1558,7 @@ class Empleos(commands.Cog):
 
     async def cog_load(self):
         await init_empleos_tables()
+        _despidos_config["activo"] = await get_system_toggle("despidos", False)
         self._jornadas_huerfanas = await cancelar_jornadas_de_ejecucion_anterior()
 
     @commands.Cog.listener()

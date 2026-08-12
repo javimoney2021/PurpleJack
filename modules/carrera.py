@@ -10,6 +10,8 @@ from core.database import (
     refund_wager,
     settle_wager_session,
     refund_wager_session,
+    get_system_toggle,
+    set_system_toggle,
 )
 from core.config import COIN, STAFF_ROLE
 
@@ -455,9 +457,12 @@ class Carrera(commands.Cog):
     @is_staff()
     async def carrera_alternar(self, interaction: discord.Interaction):
         global _carrera_activa
-        _carrera_activa = not _carrera_activa
+        await interaction.response.defer(ephemeral=False)
+        nueva_activa = not _carrera_activa
+        await set_system_toggle("carrera", nueva_activa)
+        _carrera_activa = nueva_activa
         estado = "✅ Activado" if _carrera_activa else "🔴 Desactivado"
-        await interaction.response.send_message(
+        await interaction.followup.send(
             f"🏇 Sistema de Carreras: **{estado}**", ephemeral=False
         )
 
@@ -477,4 +482,6 @@ class Carrera(commands.Cog):
 
 
 async def setup(bot):
+    global _carrera_activa
+    _carrera_activa = await get_system_toggle("carrera", True)
     await bot.add_cog(Carrera(bot))

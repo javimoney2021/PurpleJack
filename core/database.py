@@ -265,6 +265,13 @@ async def init_db():
         )
 
         await conn.execute("""
+        CREATE TABLE IF NOT EXISTS system_toggles (
+            name TEXT PRIMARY KEY,
+            active BOOLEAN NOT NULL
+        )
+        """)
+
+        await conn.execute("""
         CREATE TABLE IF NOT EXISTS wagers (
             id TEXT PRIMARY KEY,
             session_id TEXT NOT NULL,
@@ -653,6 +660,30 @@ async def set_duel_active_config(
             guild_id,
             default_cooldown,
             activa,
+        )
+
+
+async def get_system_toggle(name: str, default: bool) -> bool:
+    """Obtiene un interruptor global persistente sin alterar su valor por defecto."""
+    async with pool.acquire() as conn:
+        value = await conn.fetchval(
+            "SELECT active FROM system_toggles WHERE name=$1",
+            name,
+        )
+    return bool(value) if value is not None else default
+
+
+async def set_system_toggle(name: str, active: bool) -> None:
+    """Guarda un interruptor global para que sobreviva reinicios y redeploys."""
+    async with pool.acquire() as conn:
+        await conn.execute(
+            """
+            INSERT INTO system_toggles (name, active)
+            VALUES ($1, $2)
+            ON CONFLICT (name) DO UPDATE SET active=EXCLUDED.active
+            """,
+            name,
+            active,
         )
 
 

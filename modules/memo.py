@@ -110,7 +110,7 @@ class MemoView(discord.ui.View):
                     self.revelado[i2] = True
                     self.pares_ok += 1
                     self.racha += 1
-                    if self.racha >= 2 and self.racha % 2 == 0 and self.intentos_fail > 0:
+                    if self.racha >= 3 and self.racha % 3 == 0 and self.intentos_fail > 0:
                         self.intentos_fail -= 1
                     self.seleccion = []
                     self._build_buttons()

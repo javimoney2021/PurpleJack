@@ -23,7 +23,7 @@ from core.database import (
     clear_game_cooldowns,
     activar_evento as activar_evento_db, cerrar_evento as cerrar_evento_db,
     flush_evento_puntos, set_duel_cooldown_config, get_duel_active_config,
-    set_duel_active_config, clear_command_cooldowns
+    set_duel_active_config, clear_command_cooldowns, set_system_toggle
 )
 from core import cache
 from core.config import (
@@ -2198,15 +2198,18 @@ class Staff(commands.Cog):
     @is_staff()
     async def despidos(self, interaction: discord.Interaction, estado: app_commands.Choice[str]):
         from modules.Empleos import _despidos_config
-        _despidos_config["activo"] = (estado.value == "on")
+        await interaction.response.defer(ephemeral=False)
+        nuevo_estado = estado.value == "on"
+        await set_system_toggle("despidos", nuevo_estado)
+        _despidos_config["activo"] = nuevo_estado
         if _despidos_config["activo"]:
-            await interaction.response.send_message(
+            await interaction.followup.send(
                 "🟢 Sistema de despidos **activado**.\n"
                 "Los usuarios serán despedidos si ejecutan `!trabajar` con más de 24h de inactividad.",
                 ephemeral=False
             )
         else:
-            await interaction.response.send_message(
+            await interaction.followup.send(
                 "🔴 Sistema de despidos **desactivado**.\n"
                 "Los usuarios pueden trabajar sin riesgo de ser despedidos por inactividad.",
                 ephemeral=False
