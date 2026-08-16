@@ -22,14 +22,6 @@ ruleta_config = {
     "activa": True
 }
 
-rr_config = {
-    "max_apuesta": 100,
-    "cooldown": 120,
-    "ganar_prob": 0.7,
-    "perder_prob": 0.3,
-    "activa": True
-}
-
 rob_config = {
     "activa": True,
     "cooldown": 3600,  # segundos, default 1 hora

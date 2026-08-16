@@ -18,7 +18,7 @@ from core.database import (
     set_item_log_uso_channel,
     upsert_collect_config_db, delete_collect_config_db, delete_orphan_collect_configs_db,
     set_item_role_restrictions_db, remove_item_role_restriction_db,
-    save_game_config, save_rr_config, save_ruleta_config,
+    save_game_config, save_ruleta_config,
     save_rob_config, save_dados_config, save_memo_config, save_blackjack_config,
     clear_game_cooldowns,
     activar_evento as activar_evento_db, cerrar_evento as cerrar_evento_db,
@@ -27,7 +27,7 @@ from core.database import (
 )
 from core import cache
 from core.config import (
-    ruleta_config, rr_config, game_config, dados_config, memo_config,
+    ruleta_config, game_config, dados_config, memo_config,
     blackjack_config, COIN,
     STAFF_ROLE, COORDINADOR_ROLE,
     STAFF_ROLE_ID, COORDINADOR_ROLE_ID
@@ -787,80 +787,6 @@ class Staff(commands.Cog):
         await save_ruleta_config()
         estado = "✅ activada" if ruleta_config["activa"] else "🔧 desactivada"
         await interaction.response.send_message(f"La ruleta ha sido **{estado}**.", ephemeral=False)
-
-    @app_commands.command(name="rr_max_apuesta", description="Configura la ruleta rusa")
-    @app_commands.describe(
-        monto="Apuesta máxima",
-        cooldown="Cooldown: ej 30s, 5m, 1h",
-        ganar_prob="Probabilidad de victoria (%)",
-        perder_prob="Probabilidad de pérdida (%)"
-    )
-    @is_staff()
-    async def rr_max_apuesta(self, interaction, monto: int, cooldown: str, ganar_prob: float = None, perder_prob: float = None):
-        if monto <= 0:
-            return await interaction.response.send_message("❌ El monto debe ser mayor a 0.", ephemeral=True)
-        try:
-            cooldown_seconds = self.parse_cooldown(cooldown)
-        except ValueError:
-            return await interaction.response.send_message(
-                "❌ Formato inválido. Usa ejemplos como: 30s, 5m, 1h", ephemeral=True
-            )
-
-        def parse_probability(value: float):
-            if value is None:
-                return None
-            if value > 1:
-                if value > 100:
-                    raise ValueError
-                value = value / 100
-            if value <= 0 or value >= 1:
-                raise ValueError
-            return value
-
-        try:
-            ganar = parse_probability(ganar_prob)
-            perder = parse_probability(perder_prob)
-        except ValueError:
-            return await interaction.response.send_message(
-                "❌ Probabilidades inválidas. Usa valores en % como 70 o en fracción 0.7.", ephemeral=True
-            )
-
-        if ganar is None and perder is None:
-            ganar = rr_config["ganar_prob"]
-            perder = rr_config["perder_prob"]
-        elif ganar is None:
-            ganar = 1 - perder
-        elif perder is None:
-            perder = 1 - ganar
-
-        if abs((ganar + perder) - 1) > 0.01:
-            return await interaction.response.send_message(
-                "❌ Las probabilidades deben sumar 100%.", ephemeral=True
-            )
-
-        rr_config["max_apuesta"] = monto
-        rr_config["cooldown"] = cooldown_seconds
-        rr_config["ganar_prob"] = ganar
-        rr_config["perder_prob"] = perder
-        await save_rr_config()
-        await clear_game_cooldowns("rr")
-        cache.clear_game_cooldowns_cache("rr")
-        await interaction.response.send_message(
-            f"✅ Ruleta Rusa configurada:\n"
-            f"• Apuesta máxima: **{monto}** {COIN}\n"
-            f"• Cooldown: **{cooldown}**\n"
-            f"• Probabilidad de victoria: **{int(ganar*100)}%**\n"
-            f"• Probabilidad de pérdida: **{int(perder*100)}%**",
-            ephemeral=False
-        )
-
-    @app_commands.command(name="rr_alternar", description="Activa o desactiva la ruleta rusa")
-    @is_staff()
-    async def rr_alternar(self, interaction):
-        rr_config["activa"] = not rr_config["activa"]
-        await save_rr_config()
-        estado = "✅ activada" if rr_config["activa"] else "🔧 desactivada"
-        await interaction.response.send_message(f"La Ruleta Rusa ha sido **{estado}**.", ephemeral=False)
 
     @app_commands.command(name="dados_alternar", description="Activa o desactiva el sistema de dados")
     @is_staff()

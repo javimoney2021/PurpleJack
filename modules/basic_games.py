@@ -26,13 +26,21 @@ CRIME_SUCCESS = [
     "🔥 Un Bandido experto en robar Roles 🥸 Ganaste **{monto}** " + COIN,
     "🔥 No todos los Payasos son buenos, este se robo tu sonrisa 🤡 Ganaste **{monto}** " + COIN,
     "🔥 Has conseguido con exito acceder a la boveda del tesoro 💰 Ganaste **{monto}** " + COIN,
+    "🔥 Has liberado el Dragón en **Isla Dracónica** y ha eliminado a todos los tripulantes 🐉 Ganas **{monto}** " + COIN,
+    "🔥 Eliminaste un tripulante desde dentro de tu portal de **Vigilante** 🌀 Ganaste **{monto}** " + COIN,
+    "🔥 Como **Ejecutora** te vengaste exitosamente de varios tripulantes 🪓 Ganas **{monto}** " + COIN,
+    "🔥 Que arda la Nave, como **Pirómano** obtienes la victoria 🔥 Ganas **{monto}** " + COIN,
 ]
 
 CRIME_FAIL = [
     "🚔 El Sheriff se lleva el MVP 🤠 Pierdes **-{monto}** " + COIN,
     "🚔 Fallas al intentar secuestar al Alcalde 😭 Pierdes **-{monto}** " + COIN,
     "🚔 Te encuentran Irrumpiendo el sistema electrico 💡 Pierdes **-{monto}** " + COIN,
-    "🚔 Te pillaron eliminando evidencias en Sala de Seguridad 🎥 Pierdes **-{monto}** " + COIN,
+    "🚔 Te pillaron eliminando evidencias en **Sala de Seguridad** 🎥 Pierdes **-{monto}** " + COIN,
+    "🚔 Te has autoeliminado al liberar al **Dragón** en **Isla Dracónica** 🐉 Pierdes **-{monto}** " + COIN,
+    "🚔 Te han capturado siendo **Influencer** 📸 Pierdes **-{monto}** " + COIN,
+    "🚔 Con las manos en la masa, pierdes tu transformación de **Kaiju** frente a la tripulación 🦖 Perdiste **-{monto}** " + COIN,
+    "🚔 Invocaste a un tripulante como **Emperatriz**, pero ha huido de ti 👑 Pierdes **-{monto}** " + COIN,
 ]
 
 

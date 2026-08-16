@@ -7,7 +7,7 @@ import time
 from core.database import get_user, update_balance, update_bank
 from core import cache
 from core.config import (
-    COIN, game_config, ruleta_config, rob_config, rr_config, dados_config,
+    COIN, game_config, ruleta_config, rob_config, dados_config,
     memo_config, blackjack_config,
 )
 from core.cache import MAX_BANK
@@ -81,7 +81,6 @@ def _build_cooldowns_embed(guild_id: int) -> discord.Embed:
     crime_cd = _format_cooldown(game_config["crime"]["cooldown"])
     ruleta_cd = _format_cooldown(ruleta_config["cooldown"])
     rob_cd = _format_cooldown(rob_config["cooldown"])
-    rr_cd = _format_cooldown(rr_config["cooldown"])
     dados_cd = _format_cooldown(dados_config["cooldown"])
     memo_cd = _format_cooldown(memo_config["cooldown"])
     blackjack_cd = _format_cooldown(blackjack_config["cooldown"])
@@ -95,7 +94,6 @@ def _build_cooldowns_embed(guild_id: int) -> discord.Embed:
         f"**!work**     — Cada {work_cd}\n"
         f"**!crime**    — Cada {crime_cd}\n"
         f"**!ruleta**   — Cada {ruleta_cd}\n"
-        f"**!rr**       — Cada {rr_cd}\n"
         f"**!rob**      — Cada {rob_cd}\n"
         f"**!dados**    — Cada {dados_cd}\n"
         f"**!memo**     — Cada {memo_cd}\n"
@@ -465,8 +463,6 @@ class Economy(commands.Cog):
         crime_fallo  = int(game_config["crime"]["perder_prob"] * 100)
         rob_exito    = int(rob_config["exito_prob"] * 100)
         rob_fallo    = int(rob_config["fallo_prob"] * 100)
-        rr_exito     = int(rr_config["ganar_prob"] * 100)
-        rr_fallo     = int(rr_config["perder_prob"] * 100)
         dados_exito  = int(dados_config["exito_prob"] * 100)
         dados_fallo  = int(dados_config["fallo_prob"] * 100)
 
@@ -478,7 +474,6 @@ class Economy(commands.Cog):
             name="",
             value=(
                 f"**!crime** — Éxito: `{crime_exito}%` · Fallo: `{crime_fallo}%`\n"
-                f"**!rr** — Éxito: `{rr_exito}%` · Fallo: `{rr_fallo}%` *(por disparo)*\n"
                 f"**!rob** — Éxito: `{rob_exito}%` · Fallo: `{rob_fallo}%`\n"
                 f"**!dados** — Éxito: `{dados_exito}%` · Fallo: `{dados_fallo}%`"
             ),

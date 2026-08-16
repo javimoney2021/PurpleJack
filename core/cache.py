@@ -177,7 +177,7 @@ def set_rob_cooldown(user_id):
 def clear_rob_cooldowns_cache():
     _rob_cooldowns.clear()
 
-# ── GAME COOLDOWNS (ruleta / rr / dados) ───────────────
+# ── GAME COOLDOWNS (ruleta / dados / otros) ────────────
 _game_cooldowns = {}  # {(user_id, game): expira_en}
 
 def get_game_cooldown_cache(user_id, game):

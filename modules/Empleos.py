@@ -84,6 +84,7 @@ EMPLEOS = {
 OFICINA_XP_MINIMA = 30
 MAESTRIA_XP_COSTO = 150
 OFICINA_PANEL_SEGUNDOS = 300
+JORNADA_PERSISTENTE_SEGUNDOS = 10 * 365 * 24 * 3600
 MAESTRIA_THUMBNAIL_URL = "https://pub-a09b3609b6b34dfab5c7aa7742cd1a8a.r2.dev/Purple%20jack%20Harcode/Maestria.png"
 
 EMPLEOS_MAESTRIA = {
@@ -111,7 +112,14 @@ EMPLEOS_MAESTRIA = {
     "piromano": {
         "nombre": "Píromano",
         "maestrias_requeridas": 3,
-        "desarrollado": False,
+        "dificultad": "Maestría",
+        "salario_min": 9000,
+        "salario_max": 9000,
+        "xp_ganada": 25,
+        "duracion_horas": 3,
+        "penalizacion": -2500,
+        "xp_penalizacion": -30,
+        "desarrollado": True,
     },
 }
 
@@ -703,6 +711,7 @@ async def _finalizar_jornada_atomica_unlocked(
                     racha = 0
             else:
                 racha = 0
+                nueva_xp += min(0, xp_ganada)
 
             coin_delta = pago + bonus["coins"]
             new_balance = user["balance"]
@@ -1778,7 +1787,11 @@ class Empleos(commands.Cog):
                         f"(más de 24h sin trabajar). Usa **!aplicar** para conseguir un nuevo empleo."
                     )
 
-        timeout = 60 if empleo == "chantajista" else 180
+        timeout = (
+            JORNADA_PERSISTENTE_SEGUNDOS
+            if empleo == "piromano"
+            else (60 if empleo == "chantajista" else 180)
+        )
         jornada = await crear_jornada(
             ctx.author.id,
             empleo,
@@ -1818,6 +1831,8 @@ class Empleos(commands.Cog):
             view = ChantajistaView(self.bot, ctx.author, info, session_id)
         elif empleo == "cazador":
             view = CazadorView(self.bot, ctx.author, info, session_id)
+        elif empleo == "piromano":
+            view = PiromanoView(self.bot, ctx.author, info, session_id)
         else:
             await cancelar_jornada_segura(session_id)
             return await ctx.send("🚧 Trabajo Pendiente de desarrollo.")
@@ -1846,6 +1861,8 @@ class Empleos(commands.Cog):
             raise
         if empleo == "cazador":
             view.iniciar_preparacion()
+        elif empleo == "piromano":
+            view.iniciar_preparacion()
 
 
 class JornadaView(ui.View):
@@ -1863,7 +1880,7 @@ class JornadaView(ui.View):
 
         renovada = await _renovar_jornada_tolerante(
             self.session_id,
-            int(self.timeout or 180),
+            int(getattr(self, "session_timeout", self.timeout or 180)),
         )
         if renovada is False:
             await _responder_jornada(
@@ -2146,6 +2163,316 @@ class CazadorView(JornadaView):
         self.stop()
         await cancelar_jornada_segura(self.session_id, "error")
         _log_trabajar_error("Cazador", error, interaction.user.name, f"on_error — Item: {item}")
+        if self.message is not None:
+            try:
+                await self.message.edit(view=None)
+            except (discord.HTTPException, discord.NotFound):
+                pass
+        await _notificar_error_interaccion(interaction)
+
+
+class PiromanoView(JornadaView):
+    REVELAR_SEGUNDOS = 4
+    MEZCLAR_SEGUNDOS = 2
+    GASOLINAS_OBJETIVO = 10
+
+    def __init__(self, bot, author, info, session_id: str):
+        super().__init__(timeout=None)
+        self.bot = bot
+        self.author = author
+        self.info = info
+        self.session_id = session_id
+        self.session_timeout = JORNADA_PERSISTENTE_SEGUNDOS
+        self.message = None
+        self.fase = "revelando"
+        self.terminado = False
+        self.bloqueado = True
+        self.reveladas_gasolina = set()
+        self.gasolinas_encontradas = 0
+        self.casilla_final = None
+        self.resultado_exitoso = None
+        self.resultado_mensaje = None
+        self._interaction_lock = asyncio.Lock()
+        self._preparacion_task = None
+
+        self.tablero_gasolina = ["⛽"] * self.GASOLINAS_OBJETIVO + ["💧"] * 5
+        random.shuffle(self.tablero_gasolina)
+        self.tablero_fuego = ["🔥"] * 6 + ["💧"] * 3
+        random.shuffle(self.tablero_fuego)
+        self._build_buttons()
+
+    def _build_buttons(self):
+        self.clear_items()
+
+        if self.fase in {"revelando", "mezclando", "gasolina"}:
+            for idx, emoji in enumerate(self.tablero_gasolina):
+                revelada = idx in self.reveladas_gasolina
+                if self.fase == "revelando":
+                    button = ui.Button(
+                        emoji=emoji,
+                        style=ButtonStyle.secondary,
+                        row=idx // 5,
+                        disabled=True,
+                        custom_id=f"piro_gas_{self.session_id}_{idx}",
+                    )
+                elif self.fase == "gasolina" and revelada:
+                    button = ui.Button(
+                        emoji=emoji,
+                        style=(
+                            ButtonStyle.success if emoji == "⛽" else ButtonStyle.danger
+                        ),
+                        row=idx // 5,
+                        disabled=True,
+                        custom_id=f"piro_gas_{self.session_id}_{idx}",
+                    )
+                else:
+                    button = ui.Button(
+                        label="⬜",
+                        style=ButtonStyle.secondary,
+                        row=idx // 5,
+                        disabled=self.fase != "gasolina" or self.bloqueado,
+                        custom_id=f"piro_gas_{self.session_id}_{idx}",
+                    )
+                button.callback = self._make_callback(idx)
+                self.add_item(button)
+            return
+
+        for idx, emoji in enumerate(self.tablero_fuego):
+            if self.fase == "resultado":
+                estilo = ButtonStyle.secondary
+                if idx == self.casilla_final:
+                    estilo = (
+                        ButtonStyle.success
+                        if self.resultado_exitoso
+                        else ButtonStyle.danger
+                    )
+                button = ui.Button(
+                    emoji=emoji,
+                    style=estilo,
+                    row=idx // 3,
+                    disabled=True,
+                    custom_id=f"piro_fuego_{self.session_id}_{idx}",
+                )
+            else:
+                button = ui.Button(
+                    label="⬜",
+                    style=ButtonStyle.secondary,
+                    row=idx // 3,
+                    disabled=self.bloqueado or self.terminado,
+                    custom_id=f"piro_fuego_{self.session_id}_{idx}",
+                )
+            button.callback = self._make_callback(idx)
+            self.add_item(button)
+
+    def build_embed(self):
+        if self.fase == "revelando":
+            descripcion = (
+                "Encuentra todos los botes de gasolina...\n\n"
+                "👁️ Observa las casillas antes de que se oculten."
+            )
+        elif self.fase == "mezclando":
+            descripcion = (
+                "Encuentra todos los botes de gasolina...\n\n"
+                "⏳ **Mezclando las casillas...**"
+            )
+        elif self.fase == "gasolina":
+            descripcion = (
+                "Encuentra todos los botes de gasolina...\n\n"
+                f"⛽ Gasolina encontrada: **{self.gasolinas_encontradas}/"
+                f"{self.GASOLINAS_OBJETIVO}**"
+            )
+        elif self.fase == "fuego":
+            descripcion = "Ahora encuentra el 🔥 para Ganar, evita el 💧 o Perderas..."
+        else:
+            descripcion = self.resultado_mensaje or "Jornada finalizada."
+
+        color = discord.Color.orange()
+        if self.fase == "resultado":
+            color = (
+                discord.Color.green()
+                if self.resultado_exitoso
+                else discord.Color.red()
+            )
+        embed = discord.Embed(
+            title=f"Jornada Píromano - {self.author.nick or self.author.display_name}",
+            description=descripcion,
+            color=color,
+        )
+        footer = {
+            "revelando": "Las casillas se ocultarán en 4 segundos...",
+            "mezclando": "Las casillas se están mezclando...",
+            "gasolina": "Las casillas descubiertas permanecerán abiertas.",
+            "fuego": "Solo tienes un intento para encontrar el fuego.",
+            "resultado": "Jornada Píromano finalizada.",
+        }.get(self.fase)
+        if footer:
+            embed.set_footer(text=footer)
+        return embed
+
+    def iniciar_preparacion(self):
+        if self._preparacion_task is None:
+            self._preparacion_task = asyncio.create_task(
+                self._ejecutar_preparacion(),
+                name=f"piromano-preparacion-{self.session_id}",
+            )
+
+    async def _actualizar_tablero(self):
+        if self.message is not None:
+            await self.message.edit(embed=self.build_embed(), view=self)
+
+    async def _ejecutar_preparacion(self):
+        try:
+            await asyncio.sleep(self.REVELAR_SEGUNDOS)
+            async with self._interaction_lock:
+                if self.terminado:
+                    return
+                self.fase = "mezclando"
+                self.bloqueado = True
+                random.shuffle(self.tablero_gasolina)
+                self._build_buttons()
+                await self._actualizar_tablero()
+
+            await asyncio.sleep(self.MEZCLAR_SEGUNDOS)
+            async with self._interaction_lock:
+                if self.terminado:
+                    return
+                self.fase = "gasolina"
+                self.bloqueado = False
+                self._build_buttons()
+                await self._actualizar_tablero()
+        except asyncio.CancelledError:
+            raise
+        except Exception as error:
+            _log_trabajar_error(
+                "Píromano",
+                error,
+                self.author.name,
+                "_ejecutar_preparacion",
+            )
+            await _cerrar_tablero_con_error(self, "Píromano")
+
+    def _make_callback(self, idx: int):
+        async def callback(interaction: Interaction):
+            if interaction.user.id != self.author.id:
+                return await _responder_jornada(interaction, "❌ Este tablero no es tuyo.")
+            if self._interaction_lock.locked():
+                return await _responder_jornada(
+                    interaction,
+                    "⏳ El tablero está actualizando la jugada anterior.",
+                )
+
+            resultado = None
+            async with self._interaction_lock:
+                if self.terminado:
+                    return await _responder_jornada(
+                        interaction,
+                        "⌛ Esta jornada ya finalizó.",
+                    )
+                if self.bloqueado or self.fase not in {"gasolina", "fuego"}:
+                    return await _responder_jornada(
+                        interaction,
+                        "⏳ La jornada de Píromano se está preparando.",
+                    )
+
+                if self.fase == "gasolina":
+                    if idx in self.reveladas_gasolina:
+                        return await _responder_jornada(
+                            interaction,
+                            "✅ Esa casilla ya está abierta.",
+                        )
+                    self.reveladas_gasolina.add(idx)
+                    if self.tablero_gasolina[idx] == "⛽":
+                        self.gasolinas_encontradas += 1
+
+                    if self.gasolinas_encontradas >= self.GASOLINAS_OBJETIVO:
+                        self.fase = "fuego"
+                        self.bloqueado = False
+                    self._build_buttons()
+                    await _editar_tablero_seguro(
+                        interaction,
+                        self,
+                        embed=self.build_embed(),
+                    )
+                    return
+
+                self.terminado = True
+                self.bloqueado = True
+                self.casilla_final = idx
+                self.resultado_exitoso = self.tablero_fuego[idx] == "🔥"
+                resultado = self.resultado_exitoso
+                self.stop()
+
+            await self._finalizar(resultado, interaction)
+
+        return callback
+
+    async def _finalizar(self, exito: bool, interaction: Interaction):
+        liquidada = False
+        try:
+            if exito:
+                pago = self.info["salario_max"]
+                xp_cambio = self.info["xp_ganada"]
+                mensaje = (
+                    "Felicidades eres un estupendo Píromano, "
+                    f"Ganas {pago} {COIN} + {xp_cambio} Exp Laboral"
+                )
+            else:
+                pago = self.info["penalizacion"]
+                xp_cambio = self.info["xp_penalizacion"]
+                mensaje = (
+                    "El agua no es compatible con el fuego, "
+                    f"pierdes {abs(pago)} {COIN} y {xp_cambio} Exp Laboral"
+                )
+
+            settlement = await finalizar_jornada_atomica(
+                self.session_id,
+                self.author.id,
+                "piromano",
+                exito,
+                pago,
+                mensaje,
+                xp_ganada=xp_cambio,
+                penalizacion_desde_balance=not exito,
+            )
+            if not settlement["ok"]:
+                raise RuntimeError(settlement.get("reason", "settlement_failed"))
+            liquidada = True
+
+            if exito:
+                bonus = settlement["bonus"]
+                if bonus["coins"] > 0:
+                    mensaje += (
+                        f"\n🌟 **¡Racha de 5!** Bono: **+{bonus['coins']}** "
+                        f"{COIN} y **+{bonus['xp']} XP Laboral**"
+                    )
+            self.fase = "resultado"
+            self.resultado_mensaje = f"{self.author.mention} {mensaje}"
+            self._build_buttons()
+            await _editar_tablero_seguro(
+                interaction,
+                self,
+                embed=self.build_embed(),
+            )
+        except Exception as error:
+            _log_trabajar_error("Píromano", error, self.author.name, "_finalizar")
+            await _cerrar_tablero_con_error(
+                self,
+                "Píromano",
+                interaction=interaction,
+                liquidada=liquidada,
+            )
+
+    async def on_error(self, interaction: Interaction, error: Exception, item):
+        self.terminado = True
+        self.bloqueado = True
+        self.stop()
+        await cancelar_jornada_segura(self.session_id, "error")
+        _log_trabajar_error(
+            "Píromano",
+            error,
+            interaction.user.name,
+            f"on_error — Item: {item}",
+        )
         if self.message is not None:
             try:
                 await self.message.edit(view=None)

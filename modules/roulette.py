@@ -103,8 +103,34 @@ class Roulette(commands.Cog):
                 f"No dispones suficiente balance para esta apuesta."
             )
 
-        wager = await reserve_wager(user_id, "ruleta", apuesta, expires_in=120)
+        wager = await reserve_wager(
+            user_id,
+            "ruleta",
+            apuesta,
+            expires_in=120,
+            idempotency_key=f"ruleta:message:{ctx.message.id}",
+            exclusive_pending=True,
+            enforce_cooldown=True,
+        )
         if not wager["ok"]:
+            reason = wager.get("reason")
+            # Un mismo MessageCreate puede alcanzar dos instancias durante un
+            # despliegue. La segunda ejecución no debe crear otra ronda.
+            if reason == "duplicate_request":
+                return
+            if reason == "already_pending":
+                return await ctx.send(
+                    f"❌ {ctx.author.mention} Ya tienes una Ruleta en curso. "
+                    f"Espera a que termine antes de iniciar otra."
+                )
+            if reason == "cooldown":
+                remaining = max(0, int(wager["expires_at"] - time.time()))
+                return await ctx.send(
+                    f"⏳ {ctx.author.mention} Espera "
+                    f"**{remaining // 60}m {remaining % 60}s** "
+                    f"para jugar de nuevo.",
+                    delete_after=10,
+                )
             return await ctx.send(
                 f"❌ {ctx.author.mention} "
                 f"No dispones suficiente balance para esta apuesta."

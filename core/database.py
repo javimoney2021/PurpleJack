@@ -448,7 +448,7 @@ async def update_bank(user_id, amount, track_event=True):
         return aplicado_banco
 
 
-# ── ESCRITURAS EN RAM (mini-juegos: ruleta, rr, dados) ─
+# ── ESCRITURAS EN RAM (mini-juegos: ruleta, dados) ─────
 
 async def cache_balance(user_id, amount, track_event=True):
     """
@@ -1230,7 +1230,7 @@ async def ensure_wager_constraints():
                         ORDER BY created_at, id
                     ) AS position
                 FROM wagers
-                WHERE status='pending' AND game IN ('dados', 'rr', 'bj')
+                WHERE status='pending' AND game IN ('dados', 'bj', 'ruleta')
             ) pending
             WHERE position > 1
             """
@@ -1255,20 +1255,6 @@ async def ensure_wager_constraints():
         )
         await conn.execute(
             """
-            CREATE UNIQUE INDEX IF NOT EXISTS wagers_unique_rr_request_idx
-            ON wagers (session_id)
-            WHERE game='rr'
-            """
-        )
-        await conn.execute(
-            """
-            CREATE UNIQUE INDEX IF NOT EXISTS wagers_one_pending_rr_idx
-            ON wagers (user_id)
-            WHERE game='rr' AND status='pending'
-            """
-        )
-        await conn.execute(
-            """
             CREATE UNIQUE INDEX IF NOT EXISTS wagers_unique_bj_request_idx
             ON wagers (session_id)
             WHERE game='bj'
@@ -1279,6 +1265,20 @@ async def ensure_wager_constraints():
             CREATE UNIQUE INDEX IF NOT EXISTS wagers_one_pending_bj_idx
             ON wagers (user_id)
             WHERE game='bj' AND status='pending'
+            """
+        )
+        await conn.execute(
+            """
+            CREATE UNIQUE INDEX IF NOT EXISTS wagers_unique_ruleta_request_idx
+            ON wagers (session_id)
+            WHERE game='ruleta'
+            """
+        )
+        await conn.execute(
+            """
+            CREATE UNIQUE INDEX IF NOT EXISTS wagers_one_pending_ruleta_idx
+            ON wagers (user_id)
+            WHERE game='ruleta' AND status='pending'
             """
         )
 
@@ -2273,7 +2273,7 @@ async def save_collect_cooldowns(user_id, cobros: dict):
 
 async def create_game_config_table():
     from core.config import (
-        game_config, rr_config, ruleta_config, rob_config, dados_config,
+        game_config, ruleta_config, rob_config, dados_config,
         memo_config, blackjack_config,
     )
     async with pool.acquire() as conn:
@@ -2309,29 +2309,12 @@ async def create_game_config_table():
             game_config["crime"]["perder_prob"],
         )
 
-        await conn.execute("""
-        CREATE TABLE IF NOT EXISTS rr_config (
-            id SERIAL PRIMARY KEY,
-            max_apuesta INTEGER,
-            cooldown INTEGER,
-            ganar_prob DOUBLE PRECISION,
-            perder_prob DOUBLE PRECISION,
-            activa BOOLEAN DEFAULT TRUE
-        )
-        """)
-        rr_exists = await conn.fetchrow("SELECT * FROM rr_config LIMIT 1")
-        if not rr_exists:
-            await conn.execute("""
-            INSERT INTO rr_config (
-                max_apuesta, cooldown, ganar_prob, perder_prob, activa
-            ) VALUES ($1, $2, $3, $4, $5)
-            """,
-            rr_config["max_apuesta"],
-            rr_config["cooldown"],
-            rr_config["ganar_prob"],
-            rr_config["perder_prob"],
-            rr_config["activa"],
-        )
+        # Limpieza idempotente del juego retirado. El historial genérico de
+        # apuestas se conserva para auditoría y recuperación de saldos.
+        await conn.execute("DROP INDEX IF EXISTS wagers_unique_rr_request_idx")
+        await conn.execute("DROP INDEX IF EXISTS wagers_one_pending_rr_idx")
+        await conn.execute("DELETE FROM game_cooldowns WHERE game='rr'")
+        await conn.execute("DROP TABLE IF EXISTS rr_config")
 
         await conn.execute("""
         CREATE TABLE IF NOT EXISTS ruleta_config (
@@ -2506,7 +2489,7 @@ async def save_golpear_config(canal_id, min_time, max_time, min_ganancia, max_ga
 
 async def load_game_config():
     from core.config import (
-        game_config, rr_config, ruleta_config, rob_config, dados_config,
+        game_config, ruleta_config, rob_config, dados_config,
         blackjack_config,
     )
     async with pool.acquire() as conn:
@@ -2521,14 +2504,6 @@ async def load_game_config():
         game_config["crime"]["cooldown"]    = row["crime_cooldown"]
         game_config["crime"]["ganar_prob"]  = row["crime_ganar_prob"]
         game_config["crime"]["perder_prob"] = row["crime_perder_prob"]
-
-        rr_row = await conn.fetchrow("SELECT * FROM rr_config LIMIT 1")
-        if rr_row:
-            rr_config["max_apuesta"] = rr_row["max_apuesta"]
-            rr_config["cooldown"]    = rr_row["cooldown"]
-            rr_config["ganar_prob"]  = rr_row["ganar_prob"]
-            rr_config["perder_prob"] = rr_row["perder_prob"]
-            rr_config["activa"]      = rr_row["activa"]
 
         ruleta_row = await conn.fetchrow("SELECT * FROM ruleta_config LIMIT 1")
         if ruleta_row:
@@ -2576,21 +2551,6 @@ async def save_game_config():
         game_config["crime"]["cooldown"],
         game_config["crime"]["ganar_prob"],
         game_config["crime"]["perder_prob"],
-        )
-
-async def save_rr_config():
-    from core.config import rr_config
-    async with pool.acquire() as conn:
-        await conn.execute("""
-        UPDATE rr_config SET
-            max_apuesta=$1, cooldown=$2, ganar_prob=$3,
-            perder_prob=$4, activa=$5
-        """,
-        rr_config["max_apuesta"],
-        rr_config["cooldown"],
-        rr_config["ganar_prob"],
-        rr_config["perder_prob"],
-        rr_config["activa"],
         )
 
 async def save_ruleta_config():
