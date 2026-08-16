@@ -369,6 +369,26 @@ class Golpear(commands.Cog):
     def __init__(self, bot):
         self.bot = bot
 
+    def _asegurar_supervisor(self):
+        global _loop_task
+        if _loop_task is None or _loop_task.done():
+            _loop_task = asyncio.create_task(
+                golpear_supervisor(self.bot),
+                name="cofres-supervisor",
+            )
+
+    async def cog_load(self):
+        # En una recarga del módulo con el bot ya conectado, on_ready no tiene
+        # por qué volver a emitirse; iniciar aquí únicamente en ese escenario.
+        if self.bot.is_ready():
+            self._asegurar_supervisor()
+
+    @commands.Cog.listener()
+    async def on_ready(self):
+        # discord.py 2.7 exige que wait_until_ready se invoque después de login.
+        # La comprobación interna evita duplicar la tarea en reconexiones.
+        self._asegurar_supervisor()
+
     def cog_unload(self):
         global _loop_task
         if _loop_task and not _loop_task.done():
@@ -377,11 +397,4 @@ class Golpear(commands.Cog):
 
 
 async def setup(bot):
-    global _loop_task
     await bot.add_cog(Golpear(bot))
-    # Fix Bug #2: crear la tarea DESPUÉS de add_cog, igual que flush_loop y check_cargos_loop
-    if _loop_task is None or _loop_task.done():
-        _loop_task = asyncio.create_task(
-            golpear_supervisor(bot),
-            name="cofres-supervisor",
-        )
