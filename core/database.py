@@ -291,6 +291,13 @@ async def init_db():
         """)
 
         await conn.execute("""
+        CREATE TABLE IF NOT EXISTS rob_victim_protections (
+            user_id BIGINT PRIMARY KEY,
+            expires_at DOUBLE PRECISION NOT NULL
+        )
+        """)
+
+        await conn.execute("""
         CREATE TABLE IF NOT EXISTS duel_config (
             guild_id BIGINT PRIMARY KEY,
             cooldown INTEGER NOT NULL,
@@ -516,8 +523,9 @@ async def transfer_balance(
     *,
     track_sender_event: bool = True,
     track_recipient_event: bool = True,
+    victim_protection_seconds: int = 0,
 ):
-    """Transfiere balance entre dos usuarios de forma atómica."""
+    """Transfiere balance y, opcionalmente, protege al remitente robado."""
     if amount <= 0 or sender_id == recipient_id:
         return {"ok": False, "reason": "invalid_transfer"}
 
@@ -549,6 +557,22 @@ async def transfer_balance(
                     """,
                     user_ids,
                 )
+                now = time.time()
+                if victim_protection_seconds > 0:
+                    protected_until = await conn.fetchval(
+                        """
+                        SELECT expires_at FROM rob_victim_protections
+                        WHERE user_id=$1
+                        FOR UPDATE
+                        """,
+                        sender_id,
+                    )
+                    if protected_until and protected_until > now:
+                        return {
+                            "ok": False,
+                            "reason": "victim_protected",
+                            "expires_at": float(protected_until),
+                        }
                 await conn.execute(
                     """
                     UPDATE users SET balance=$1, bank=$2,
@@ -573,6 +597,19 @@ async def transfer_balance(
                     recipient["cooldown_crime"],
                     recipient_id,
                 )
+                protection_expires_at = 0.0
+                if victim_protection_seconds > 0:
+                    protection_expires_at = now + victim_protection_seconds
+                    await conn.execute(
+                        """
+                        INSERT INTO rob_victim_protections (user_id, expires_at)
+                        VALUES ($1, $2)
+                        ON CONFLICT (user_id) DO UPDATE SET
+                            expires_at=EXCLUDED.expires_at
+                        """,
+                        sender_id,
+                        protection_expires_at,
+                    )
 
         cache.update_cached_balance(
             sender_id,
@@ -584,7 +621,11 @@ async def transfer_balance(
             amount,
             track_event=track_recipient_event,
         )
-        return {"ok": True, "amount": amount}
+        return {
+            "ok": True,
+            "amount": amount,
+            "victim_protection_expires_at": protection_expires_at,
+        }
 
 
 async def update_cooldown(user_id, command, timestamp):
@@ -605,6 +646,15 @@ async def get_command_cooldown(scope_type: str, scope_id: int, command: str) -> 
             scope_type,
             scope_id,
             command,
+        )
+    return float(value or 0)
+
+
+async def get_rob_victim_protection(user_id: int) -> float:
+    async with pool.acquire() as conn:
+        value = await conn.fetchval(
+            "SELECT expires_at FROM rob_victim_protections WHERE user_id=$1",
+            user_id,
         )
     return float(value or 0)
 

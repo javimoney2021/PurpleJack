@@ -9,9 +9,10 @@ from core.database import (
     update_bank,
     transfer_balance,
     get_command_cooldown,
+    get_rob_victim_protection,
     set_command_cooldown,
 )
-from core.config import rob_config, COIN
+from core.config import rob_config, COIN, ROB_VICTIM_PROTECTION_SECONDS
 from core import cache
 from core.cache import get_rob_cooldown, set_rob_cooldown
 from core.cd_boost import resolve_cd_boost, send_cd_boost_notice
@@ -37,6 +38,14 @@ def _format_rob_cooldown(seconds: int) -> str:
 def _apply_event_victim_penalty(user_id: int, stolen_amount: int) -> None:
     penalty = stolen_amount * EVENT_ROB_VICTIM_PENALTY_PERCENT // 100
     cache.record_evento_balance_delta(user_id, -penalty)
+
+
+async def _reply_recent_victim(ctx) -> None:
+    await ctx.message.reply(
+        "🥺 Este usuario ha sido victima de la delincuencia recientemente, "
+        "un poquito de porfavor...",
+        mention_author=False,
+    )
 
 
 class Rob(commands.Cog):
@@ -158,6 +167,10 @@ class Rob(commands.Cog):
                 f"para robar de nuevo."
             )
 
+        protected_until = await get_rob_victim_protection(target_id)
+        if protected_until > now:
+            return await _reply_recent_victim(ctx)
+
         author_user = await get_user(author_id)
         target_user = await get_user(target_id)
 
@@ -210,8 +223,11 @@ class Rob(commands.Cog):
                     author_id,
                     monto_robo,
                     track_sender_event=False,
+                    victim_protection_seconds=ROB_VICTIM_PROTECTION_SECONDS,
                 )
                 if not transfer["ok"]:
+                    if transfer.get("reason") == "victim_protected":
+                        return await _reply_recent_victim(ctx)
                     return await ctx.send(
                         "⚠️ El saldo del objetivo cambió durante el robo. Inténtalo de nuevo."
                     )
@@ -239,8 +255,11 @@ class Rob(commands.Cog):
                     author_id,
                     monto_robo,
                     track_sender_event=False,
+                    victim_protection_seconds=ROB_VICTIM_PROTECTION_SECONDS,
                 )
                 if not transfer["ok"]:
+                    if transfer.get("reason") == "victim_protected":
+                        return await _reply_recent_victim(ctx)
                     return await ctx.send(
                         "⚠️ El saldo del objetivo cambió durante el robo. Inténtalo de nuevo."
                     )
