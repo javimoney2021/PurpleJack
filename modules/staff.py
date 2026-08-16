@@ -1012,7 +1012,8 @@ class Staff(commands.Cog):
         duracion_rol="Duración del rol: ej 30m, 12h, 7d. Vacío = permanente. Opcional.",
         cantid_por_user="Límite de compras por usuario. Vacío = ilimitado. Opcional.",
         mensaje_uso="Mensaje al usar el item en !inv. Vacío = mensaje por defecto. Opcional.",
-        limite_uso="Máximo de usos por día por usuario. Ej: 1. Vacío = sin límite. Opcional."
+        limite_uso="Máximo de usos por día por usuario. Ej: 1. Vacío = sin límite. Opcional.",
+        cd_boost="Reduce 50% los cooldowns compatibles durante 180 minutos."
     )
     @is_staff()
     async def item_new(self, interaction,
@@ -1026,7 +1027,8 @@ class Staff(commands.Cog):
                        duracion_rol: str = "",
                        cantid_por_user: int = 0,
                        mensaje_uso: str = "",
-                       limite_uso: int = 0):
+                       limite_uso: int = 0,
+                       cd_boost: bool = False):
 
         if precio <= 0:
             return await interaction.response.send_message("❌ El precio debe ser mayor a 0.", ephemeral=True)
@@ -1074,7 +1076,8 @@ class Staff(commands.Cog):
             rol_id=rol_id,
             duracion=duracion_segundos,
             limite_por_usuario=cantid_por_user if cantid_por_user > 0 else 0,
-            limite_uso=limite_uso if limite_uso > 0 else 0
+            limite_uso=limite_uso if limite_uso > 0 else 0,
+            cd_boost=cd_boost,
         )
 
         dur_txt = duracion_rol if duracion_rol else "Permanente"
@@ -1090,6 +1093,7 @@ class Staff(commands.Cog):
             f"• Stock total: **{'∞' if stock == -1 else stock}**\n"
             f"• Límite por usuario: **{limite_txt}**\n"
             f"• Usos por día: **{limite_uso_txt}**\n"
+            f"• CD Boost: **{'Sí' if cd_boost else 'No'}**\n"
             f"• Rol: {rol_txt}  •  Duración: {dur_txt}\n"
             f"• Mensaje de uso: {uso_txt}",
             ephemeral=False
@@ -1103,7 +1107,8 @@ class Staff(commands.Cog):
         nueva_desc="Nueva descripción corta. Vacío = sin cambio. Opcional.",
         nuevo_mensaje_uso="Nuevo mensaje al usar el item. Vacío = sin cambio. Opcional.",
         cantidad_por_user="Límite de compras por usuario. 0 = ilimitado. Opcional.",
-        limite_uso="Máximo de usos diarios por usuario. 0 = ilimitado. Opcional."
+        limite_uso="Máximo de usos diarios por usuario. 0 = ilimitado. Opcional.",
+        cd_boost="Activa o desactiva la reducción temporal de cooldowns."
     )
     @is_staff()
     async def editar_item(self, interaction,
@@ -1113,7 +1118,8 @@ class Staff(commands.Cog):
                           nueva_desc: str = "",
                           nuevo_mensaje_uso: str = "",
                           cantidad_por_user: int = None,
-                          limite_uso: int = None):
+                          limite_uso: int = None,
+                          cd_boost: bool = None):
 
         await interaction.response.defer()
 
@@ -1136,6 +1142,7 @@ class Staff(commands.Cog):
             if not any([
                 nuevo_nombre, nuevo_precio is not None, nueva_desc, nuevo_mensaje_uso,
                 cantidad_por_user is not None, limite_uso is not None,
+                cd_boost is not None,
             ]):
                 return await interaction.followup.send(
                     "❌ Debes cambiar al menos un campo.", ephemeral=True
@@ -1149,7 +1156,7 @@ class Staff(commands.Cog):
             await edit_item(
                 found["id"], nombre=nombre, precio=precio, descripcion=desc,
                 mensaje_uso=msg_uso, limite_por_usuario=cantidad_por_user,
-                limite_uso=limite_uso,
+                limite_uso=limite_uso, cd_boost=cd_boost,
             )
 
             cambios = []
@@ -1171,6 +1178,10 @@ class Staff(commands.Cog):
                 usos_nuevos = limite_uso if limite_uso > 0 else "∞"
                 usos_anteriores = usos_anteriores if usos_anteriores > 0 else "∞"
                 cambios.append(f"• Usos por día: **{usos_anteriores}** → **{usos_nuevos}**")
+            if cd_boost is not None:
+                boost_anterior = "Sí" if found.get("cd_boost", False) else "No"
+                boost_nuevo = "Sí" if cd_boost else "No"
+                cambios.append(f"• CD Boost: **{boost_anterior}** → **{boost_nuevo}**")
 
             icono = found["icono"] if found["icono"] else "🔹"
             await interaction.followup.send(

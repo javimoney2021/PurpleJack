@@ -6,6 +6,8 @@ from core.database import (
     update_bank, get_all_items, get_item_by_name, purchase_item,
     get_inventory, consume_inventory_item, claim_pending_item_use_logs,
     mark_item_use_log_sent, mark_item_use_log_failed,
+    claim_expired_cd_boost_notifications,
+    mark_cd_boost_notification_sent, mark_cd_boost_notification_failed,
 )
 from core import cache
 from core.config import COIN, LOG_CHANNEL_ID, TARJETA_CREDITO_ROL_ID, STAFF_ROLE_ID
@@ -85,6 +87,65 @@ async def _dispatch_item_use_logs(bot, event_ids=None, limit: int = 25) -> int:
                 "se reintentará en %ss: %s",
                 event["id"],
                 event["channel_id"],
+                retry_after,
+                error,
+            )
+    return sent
+
+
+async def _dispatch_cd_boost_expirations(bot, limit: int = 25) -> int:
+    """Publica expiraciones persistentes y conserva los fallos para reintento."""
+    pending = await claim_expired_cd_boost_notifications(limit=limit)
+    sent = 0
+    for event in pending:
+        try:
+            channel = bot.get_channel(LOG_CHANNEL_ID)
+            if channel is None:
+                channel = await bot.fetch_channel(LOG_CHANNEL_ID)
+            if not hasattr(channel, "send"):
+                raise RuntimeError(f"El canal {LOG_CHANNEL_ID} no permite mensajes")
+
+            await asyncio.wait_for(
+                channel.send(
+                    f"<@{event['user_id']}> Tu **Bebida Energetica** se ha terminado, "
+                    "tus cooldowns fueron restablecidos!",
+                    allowed_mentions=discord.AllowedMentions(
+                        everyone=False,
+                        roles=False,
+                        users=True,
+                        replied_user=False,
+                    ),
+                ),
+                timeout=10,
+            )
+            await mark_cd_boost_notification_sent(
+                event["user_id"],
+                event["notification_id"],
+            )
+            sent += 1
+        except asyncio.CancelledError:
+            raise
+        except Exception as error:
+            retry_after = min(
+                900,
+                5 * (2 ** min(event["notification_attempts"], 8)),
+            )
+            try:
+                await mark_cd_boost_notification_failed(
+                    event["user_id"],
+                    event["notification_id"],
+                    f"{type(error).__name__}: {error}",
+                    retry_after,
+                )
+            except Exception:
+                logger.exception(
+                    "No se pudo actualizar el reintento del aviso cd_boost de %s",
+                    event["user_id"],
+                )
+            logger.warning(
+                "Aviso de expiración cd_boost pendiente para %s; "
+                "se reintentará en %ss: %s",
+                event["user_id"],
                 retry_after,
                 error,
             )
@@ -786,6 +847,12 @@ class UseButton(discord.ui.Button):
                     f"\n{role.mention} activo hasta "
                     f"<t:{int(consumption['expires_at'])}:F>."
                 )
+            if consumption.get("cd_boost"):
+                mensaje += (
+                    "\n⚡ Cooldowns de **!work, !crime, !dados y !rob** "
+                    "reducidos al **50%** hasta "
+                    f"<t:{int(consumption['cd_boost']['expires_at'])}:F>."
+                )
 
             await interaction.followup.send(
                 content=f"{interaction.user.mention} {mensaje}",
@@ -935,6 +1002,7 @@ class Shop(commands.Cog):
         while not self.bot.is_closed():
             try:
                 sent = await _dispatch_item_use_logs(self.bot, limit=25)
+                sent += await _dispatch_cd_boost_expirations(self.bot, limit=25)
                 await asyncio.sleep(5 if sent else 20)
             except asyncio.CancelledError:
                 raise
@@ -1003,6 +1071,12 @@ class Shop(commands.Cog):
         embed.add_field(name="💰 Precio", value=f"{item['precio']} {COIN}", inline=True)
         embed.add_field(name="📦 Stock", value=stock_txt, inline=True)
         embed.add_field(name="🎯 Usable", value=usable_txt, inline=True)
+        if item.get("cd_boost"):
+            embed.add_field(
+                name="⚡ CD Boost",
+                value="Reduce 50% los cooldowns compatibles durante 180 minutos.",
+                inline=False,
+            )
 
         duracion = item.get("duracion", 0)
         if item["rol_id"] and duracion is not None:

@@ -14,6 +14,7 @@ from core.database import (
 from core.config import rob_config, COIN
 from core import cache
 from core.cache import get_rob_cooldown, set_rob_cooldown
+from core.cd_boost import resolve_cd_boost, send_cd_boost_notice
 
 SABOTEADOR_EXITO_PROB = 0.70
 SABOTEADOR_ROBO_PORCENTAJE = 0.20
@@ -42,10 +43,15 @@ class Rob(commands.Cog):
     def __init__(self, bot):
         self.bot = bot
 
-    async def _set_rob_cooldown(self, user_id: int) -> None:
-        expira_en = time.time() + rob_config["cooldown"]
-        set_rob_cooldown(user_id)
+    async def _set_rob_cooldown(self, user_id: int):
+        cooldown_seconds, cd_boost = await resolve_cd_boost(
+            user_id,
+            rob_config["cooldown"],
+        )
+        expira_en = time.time() + cooldown_seconds
+        set_rob_cooldown(user_id, expira_en)
         await set_command_cooldown("user", user_id, "rob", expira_en)
+        return cd_boost
 
     async def _get_top_target(self, ctx, position: int):
         """Resuelve una posición del Top 15 al miembro correspondiente."""
@@ -173,19 +179,26 @@ class Rob(commands.Cog):
                     robo_saboteador = True
                 else:
                     await update_bank(author_id, -proteccion_veterano["monto"])
-                    await self._set_rob_cooldown(author_id)
-                    await ctx.send(
+                    cd_boost = await self._set_rob_cooldown(author_id)
+                    response_message = await ctx.send(
                         f"🖐️ Lo siento tanto {ctx.author.mention} {proteccion_veterano['msj']}"
+                    )
+                    await send_cd_boost_notice(
+                        response_message,
+                        ctx.author,
+                        cd_boost,
                     )
                     return
 
         # Verificar balance mínimo del objetivo
         if target_user["balance"] < 5000:
-            await self._set_rob_cooldown(author_id)
-            return await ctx.message.reply(
+            cd_boost = await self._set_rob_cooldown(author_id)
+            response_message = await ctx.message.reply(
                 f"😳 No te avergüenza robar a alguien que no tiene ni para una Tarjeta de Rol? "
                 f"Atrévete a por los más grandes."
             )
+            await send_cd_boost_notice(response_message, ctx.author, cd_boost)
+            return
 
         if robo_saboteador:
             target_nick = target.nick or target.display_name
@@ -203,7 +216,7 @@ class Rob(commands.Cog):
                         "⚠️ El saldo del objetivo cambió durante el robo. Inténtalo de nuevo."
                     )
                 _apply_event_victim_penalty(target_id, monto_robo)
-                await ctx.message.reply(
+                response_message = await ctx.message.reply(
                     f"😈 Logras romper la Protección del **Veterano** de {target_nick} "
                     f"y le sacas **{monto_robo:,}** {COIN}.",
                     mention_author=False,
@@ -211,7 +224,7 @@ class Rob(commands.Cog):
             else:
                 penalizacion = int(target_user["balance"] * SABOTEADOR_FALLO_PORCENTAJE)
                 await update_balance(author_id, -penalizacion)
-                await ctx.message.reply(
+                response_message = await ctx.message.reply(
                     f"☠️ Ese **Veterano** de {target_nick} al parecer está en Ultra... "
                     f"Fallas el robo y pierdes **{penalizacion:,}** {COIN}.",
                     mention_author=False,
@@ -232,7 +245,7 @@ class Rob(commands.Cog):
                         "⚠️ El saldo del objetivo cambió durante el robo. Inténtalo de nuevo."
                     )
                 _apply_event_victim_penalty(target_id, monto_robo)
-                await ctx.message.reply(
+                response_message = await ctx.message.reply(
                     f"✅ Robo exitoso. Le sacaste **{monto_robo:,}** {COIN} a {target.mention} "
                     f"sin que se diera cuenta."
                 )
@@ -240,12 +253,13 @@ class Rob(commands.Cog):
                 penalizacion = int(target_user["balance"] * 0.08)
                 await update_balance(author_id, -penalizacion)
                 target_nick = target.nick or target.display_name
-                await ctx.message.reply(
+                response_message = await ctx.message.reply(
                     f"🚔 Tu robo falló. Perdiste **{penalizacion:,}** {COIN} intentando "
                     f"robar a {target_nick}."
                 )
 
-        await self._set_rob_cooldown(author_id)
+        cd_boost = await self._set_rob_cooldown(author_id)
+        await send_cd_boost_notice(response_message, ctx.author, cd_boost)
 
 
 async def setup(bot):

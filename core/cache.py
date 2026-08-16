@@ -170,9 +170,11 @@ _rob_cooldowns = {}      # {user_id: timestamp}
 def get_rob_cooldown(user_id):
     return _rob_cooldowns.get(user_id, 0)
 
-def set_rob_cooldown(user_id):
-    from core.config import rob_config
-    _rob_cooldowns[user_id] = time.time() + rob_config["cooldown"]
+def set_rob_cooldown(user_id, expira_en=None):
+    if expira_en is None:
+        from core.config import rob_config
+        expira_en = time.time() + rob_config["cooldown"]
+    _rob_cooldowns[user_id] = expira_en
 
 def clear_rob_cooldowns_cache():
     _rob_cooldowns.clear()
@@ -190,6 +192,22 @@ def clear_game_cooldowns_cache(game):
     keys = [k for k in _game_cooldowns if k[1] == game]
     for k in keys:
         del _game_cooldowns[k]
+
+
+# ── REDUCCIÓN TEMPORAL DE COOLDOWNS ────────────────────
+_cd_boosts = {}  # {user_id: {expires_at, source_item_id, source_item_name}}
+
+
+def get_cd_boost_cache(user_id):
+    return _cd_boosts.get(user_id)
+
+
+def set_cd_boost_cache(user_id, boost):
+    _cd_boosts[user_id] = dict(boost)
+
+
+def clear_cd_boost_cache(user_id):
+    _cd_boosts.pop(user_id, None)
 
 # ── ITEMS ──────────────────────────────────────────────
 _items_cache = []
@@ -378,6 +396,10 @@ def cleanup_cache():
     for key, expira_en in list(_game_cooldowns.items()):
         if expira_en <= now:
             _game_cooldowns.pop(key, None)
+
+    for uid, boost in list(_cd_boosts.items()):
+        if boost.get("expires_at", 0) <= now:
+            _cd_boosts.pop(uid, None)
 
     for uid, last in list(_top_cooldowns.items()):
         if now - last >= 300:

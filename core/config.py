@@ -1,4 +1,6 @@
 COIN = "<:PurpleCoin:1501855737842892941>"
+CD_BOOST_DURATION_SECONDS = 180 * 60
+CD_BOOST_MULTIPLIER = 0.5
 
 # ── ROLES ──────────────────────────────────────────────
 STAFF_ROLE = "Equipo de Eventos"

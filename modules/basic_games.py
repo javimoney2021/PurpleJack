@@ -5,6 +5,7 @@ import time
 from core.database import get_user
 from core.config import game_config, COIN
 from core import cache as _cache_mod
+from core.cd_boost import resolve_cd_boost, send_cd_boost_notice
 
 WORK_MESSAGES = [
     "🔧 Trabajaste duro y ganaste **{monto}** " + COIN,
@@ -51,7 +52,10 @@ class BasicGames(commands.Cog):
     @commands.command()
     async def work(self, ctx):
         now = int(time.time())
-        cooldown = game_config["work"]["cooldown"]
+        cooldown, cd_boost = await resolve_cd_boost(
+            ctx.author.id,
+            game_config["work"]["cooldown"],
+        )
 
         # Leer cooldown desde cache si ya existe, sin hit a DB
         cached = _cache_mod.get_cached(ctx.author.id)
@@ -76,12 +80,16 @@ class BasicGames(commands.Cog):
         _cache_mod.update_cached_balance(ctx.author.id, amount)
 
         nick = ctx.author.nick or ctx.author.display_name
-        await ctx.message.reply(f"{nick} {msg}", mention_author=False)
+        response = await ctx.message.reply(f"{nick} {msg}", mention_author=False)
+        await send_cd_boost_notice(response, ctx.author, cd_boost)
 
     @commands.command()
     async def crime(self, ctx):
         now = int(time.time())
-        cooldown = game_config["crime"]["cooldown"]
+        cooldown, cd_boost = await resolve_cd_boost(
+            ctx.author.id,
+            game_config["crime"]["cooldown"],
+        )
 
         cached = _cache_mod.get_cached(ctx.author.id)
         if cached:
@@ -112,7 +120,8 @@ class BasicGames(commands.Cog):
 
         # Actualizar RAM al instante — flush_loop persiste a DB cada 10 min
         nick = ctx.author.nick or ctx.author.display_name
-        await ctx.message.reply(f"{nick} {msg}", mention_author=False)
+        response = await ctx.message.reply(f"{nick} {msg}", mention_author=False)
+        await send_cd_boost_notice(response, ctx.author, cd_boost)
 
 
 async def setup(bot):

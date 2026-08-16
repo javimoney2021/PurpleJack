@@ -12,6 +12,7 @@ from core.database import (
 )
 from core.config import COIN, dados_config
 from core import cache
+from core.cd_boost import resolve_cd_boost, send_cd_boost_notice
 
 DICE_GIF = "https://pub-a09b3609b6b34dfab5c7aa7742cd1a8a.r2.dev/Purple%20jack%20Harcode/dice.gif"
 _ACTIVE_DADOS: set[int] = set()
@@ -166,7 +167,11 @@ class DadosRollView(discord.ui.View):
                     pass
                 return
 
-            expira_en = time.time() + dados_config["cooldown"]
+            cooldown_seconds, cd_boost = await resolve_cd_boost(
+                self.author_id,
+                dados_config["cooldown"],
+            )
+            expira_en = time.time() + cooldown_seconds
             cache.set_game_cooldown_cache(self.author_id, "dados", expira_en)
             await set_game_cooldown(self.author_id, "dados", expira_en)
 
@@ -184,7 +189,7 @@ class DadosRollView(discord.ui.View):
             )
             embed.set_thumbnail(url=DICE_GIF)
             embed.set_footer(
-                text=f"Cooldown: {format_cooldown(dados_config['cooldown'])} | "
+                text=f"Cooldown: {format_cooldown(cooldown_seconds)} | "
                      f"Máx apuesta: {dados_config['max_apuesta']} PurpleCoins"
             )
 
@@ -193,6 +198,11 @@ class DadosRollView(discord.ui.View):
 
             try:
                 await interaction.message.edit(embed=embed, view=self)
+                await send_cd_boost_notice(
+                    self.message or interaction.message,
+                    interaction.user,
+                    cd_boost,
+                )
                 if self.message:
                     asyncio.create_task(self.message.delete(delay=80))
             except Exception:

@@ -62,6 +62,7 @@ async def init_db():
             duracion INTEGER DEFAULT 0,
             limite_por_usuario INTEGER DEFAULT 0,
             limite_uso INTEGER DEFAULT 0,
+            cd_boost BOOLEAN NOT NULL DEFAULT FALSE,
             log_uso_channel_id BIGINT DEFAULT NULL
         )
         """)
@@ -73,6 +74,7 @@ async def init_db():
             ("duracion",             "INTEGER DEFAULT 0"),
             ("limite_por_usuario",   "INTEGER DEFAULT 0"),
             ("limite_uso",           "INTEGER DEFAULT 0"),
+            ("cd_boost",             "BOOLEAN NOT NULL DEFAULT FALSE"),
             ("log_uso_channel_id",   "BIGINT DEFAULT NULL"),
         ]:
             await conn.execute(
@@ -178,6 +180,41 @@ async def init_db():
             PRIMARY KEY (user_id, game)
         )
         """)
+
+        await conn.execute("""
+        CREATE TABLE IF NOT EXISTS user_cd_boosts (
+            user_id BIGINT PRIMARY KEY,
+            expires_at DOUBLE PRECISION NOT NULL,
+            source_item_id INTEGER NOT NULL,
+            source_item_name TEXT NOT NULL,
+            notification_id TEXT,
+            notification_sent BOOLEAN NOT NULL DEFAULT FALSE,
+            notification_attempts INTEGER NOT NULL DEFAULT 0,
+            notification_next_attempt_at DOUBLE PRECISION NOT NULL DEFAULT 0,
+            notification_locked_until DOUBLE PRECISION NOT NULL DEFAULT 0,
+            notification_last_error TEXT
+        )
+        """)
+        for column_name, column_sql in [
+            ("notification_id", "TEXT"),
+            ("notification_sent", "BOOLEAN NOT NULL DEFAULT FALSE"),
+            ("notification_attempts", "INTEGER NOT NULL DEFAULT 0"),
+            ("notification_next_attempt_at", "DOUBLE PRECISION NOT NULL DEFAULT 0"),
+            ("notification_locked_until", "DOUBLE PRECISION NOT NULL DEFAULT 0"),
+            ("notification_last_error", "TEXT"),
+        ]:
+            await conn.execute(
+                f"ALTER TABLE user_cd_boosts ADD COLUMN IF NOT EXISTS "
+                f"{column_name} {column_sql}"
+            )
+        await conn.execute(
+            """
+            UPDATE user_cd_boosts
+            SET notification_id=user_id::TEXT || ':' || expires_at::TEXT
+            WHERE notification_id IS NULL AND expires_at > $1
+            """,
+            time.time(),
+        )
 
         await conn.execute("""
         CREATE TABLE IF NOT EXISTS item_uso_diario (
@@ -611,6 +648,105 @@ async def clear_command_cooldowns(command: str) -> None:
         await conn.execute(
             "DELETE FROM command_cooldowns WHERE command=$1",
             command,
+        )
+
+
+async def get_active_cd_boost(user_id: int):
+    """Obtiene el beneficio desde RAM o Aiven sin prolongarlo."""
+    now = time.time()
+    cached = cache.get_cd_boost_cache(user_id)
+    if cached is not None and cached.get("expires_at", 0) > now:
+        return dict(cached)
+    if cached is not None:
+        cache.clear_cd_boost_cache(user_id)
+
+    async with pool.acquire() as conn:
+        row = await conn.fetchrow(
+            """
+            SELECT expires_at, source_item_id, source_item_name
+            FROM user_cd_boosts WHERE user_id=$1
+            """,
+            user_id,
+        )
+    if not row or row["expires_at"] <= now:
+        return None
+    boost = dict(row)
+    cache.set_cd_boost_cache(user_id, boost)
+    return boost
+
+
+async def claim_expired_cd_boost_notifications(limit: int = 25):
+    """Reserva avisos vencidos para que solo una instancia intente enviarlos."""
+    limit = max(1, min(int(limit), 100))
+    now = time.time()
+    async with pool.acquire() as conn:
+        async with conn.transaction():
+            rows = await conn.fetch(
+                """
+                SELECT user_id, source_item_name, notification_id,
+                       notification_attempts
+                FROM user_cd_boosts
+                WHERE expires_at <= $1
+                  AND notification_id IS NOT NULL
+                  AND notification_sent=FALSE
+                  AND notification_next_attempt_at <= $1
+                  AND notification_locked_until <= $1
+                ORDER BY expires_at ASC
+                LIMIT $2
+                FOR UPDATE SKIP LOCKED
+                """,
+                now,
+                limit,
+            )
+            for row in rows:
+                await conn.execute(
+                    """
+                    UPDATE user_cd_boosts
+                    SET notification_locked_until=$1
+                    WHERE user_id=$2 AND notification_id=$3
+                    """,
+                    now + 60,
+                    row["user_id"],
+                    row["notification_id"],
+                )
+    return [dict(row) for row in rows]
+
+
+async def mark_cd_boost_notification_sent(user_id: int, notification_id: str):
+    async with pool.acquire() as conn:
+        await conn.execute(
+            """
+            UPDATE user_cd_boosts
+            SET notification_sent=TRUE, notification_locked_until=0,
+                notification_last_error=NULL
+            WHERE user_id=$1 AND notification_id=$2
+            """,
+            user_id,
+            notification_id,
+        )
+
+
+async def mark_cd_boost_notification_failed(
+    user_id: int,
+    notification_id: str,
+    error: str,
+    retry_after: float,
+):
+    now = time.time()
+    async with pool.acquire() as conn:
+        await conn.execute(
+            """
+            UPDATE user_cd_boosts
+            SET notification_attempts=notification_attempts+1,
+                notification_next_attempt_at=$1,
+                notification_locked_until=0,
+                notification_last_error=$2
+            WHERE user_id=$3 AND notification_id=$4
+            """,
+            now + max(1, retry_after),
+            error[:1000],
+            user_id,
+            notification_id,
         )
 
 
@@ -1307,22 +1443,22 @@ async def get_item_by_name(nombre):
 
 async def add_item(nombre, descripcion, descripcion_larga, precio, cantidad,
                    stock, icono, utilizable, mensaje_uso, rol_id, duracion,
-                   limite_por_usuario=0, limite_uso=0):
+                   limite_por_usuario=0, limite_uso=0, cd_boost=False):
     async with pool.acquire() as conn:
         await conn.execute("""
             INSERT INTO items
                 (nombre, descripcion, descripcion_larga, precio, cantidad,
                  stock, icono, utilizable, mensaje_uso, rol_id, duracion,
-                 limite_por_usuario, limite_uso)
-                VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13)
+                 limite_por_usuario, limite_uso, cd_boost)
+                VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14)
         """, nombre, descripcion, descripcion_larga, precio, cantidad,
              stock, icono, utilizable, mensaje_uso, rol_id, duracion,
-             limite_por_usuario, limite_uso)
+             limite_por_usuario, limite_uso, cd_boost)
     await load_items_to_cache()
 
 async def edit_item(
     item_id, nombre=None, precio=None, stock=None, descripcion=None, mensaje_uso=None,
-    limite_por_usuario=None, limite_uso=None,
+    limite_por_usuario=None, limite_uso=None, cd_boost=None,
 ):
     async with pool.acquire() as conn:
         if nombre:
@@ -1339,6 +1475,8 @@ async def edit_item(
             await conn.execute("UPDATE items SET limite_por_usuario=$1 WHERE id=$2", limite_por_usuario, item_id)
         if limite_uso is not None:
             await conn.execute("UPDATE items SET limite_uso=$1 WHERE id=$2", limite_uso, item_id)
+        if cd_boost is not None:
+            await conn.execute("UPDATE items SET cd_boost=$1 WHERE id=$2", cd_boost, item_id)
     await load_items_to_cache()
 
 
@@ -1549,7 +1687,8 @@ async def get_inventory_from_db(user_id):
     async with pool.acquire() as conn:
         rows = await conn.fetch("""
             SELECT i.id, i.nombre, i.icono, i.utilizable, i.mensaje_uso,
-                   i.rol_id, i.duracion, i.limite_uso, i.log_uso_channel_id,
+                   i.rol_id, i.duracion, i.limite_uso, i.cd_boost,
+                   i.log_uso_channel_id,
                    inv.cantidad
             FROM inventario inv
             JOIN items i ON inv.item_id = i.id
@@ -1654,6 +1793,7 @@ async def consume_inventory_item(
 
     today = date.today()
     expires_at = None
+    cd_boost_data = None
     log_event_ids = []
     async with pool.acquire() as conn:
         async with conn.transaction():
@@ -1680,6 +1820,7 @@ async def consume_inventory_item(
                     item_id,
                     today,
                 )
+
                 usage = await conn.fetchrow(
                     """
                     SELECT usos FROM item_uso_diario
@@ -1697,6 +1838,13 @@ async def consume_inventory_item(
                         "reason": "daily_limit",
                         "uses": uses_today,
                     }
+
+            item_config = await conn.fetchrow(
+                "SELECT nombre, cd_boost FROM items WHERE id=$1 FOR SHARE",
+                item_id,
+            )
+            if not item_config:
+                return {"ok": False, "reason": "item_not_found"}
 
             remaining = row["cantidad"] - 1
             if remaining:
@@ -1767,6 +1915,77 @@ async def consume_inventory_item(
                         expires_at,
                     )
 
+            if item_config["cd_boost"]:
+                from core.config import CD_BOOST_DURATION_SECONDS
+                from uuid import uuid4
+
+                now = time.time()
+                current_boost = await conn.fetchrow(
+                    "SELECT expires_at FROM user_cd_boosts WHERE user_id=$1 FOR UPDATE",
+                    user_id,
+                )
+                previous_expiry = float(current_boost["expires_at"]) if current_boost else 0
+                was_active = previous_expiry > now
+                boost_expires_at = max(now, previous_expiry) + CD_BOOST_DURATION_SECONDS
+                await conn.execute(
+                    """
+                    INSERT INTO user_cd_boosts (
+                        user_id, expires_at, source_item_id, source_item_name,
+                        notification_id, notification_sent,
+                        notification_attempts, notification_next_attempt_at,
+                        notification_locked_until, notification_last_error
+                    ) VALUES ($1, $2, $3, $4, $5, FALSE, 0, 0, 0, NULL)
+                    ON CONFLICT (user_id) DO UPDATE SET
+                        expires_at=EXCLUDED.expires_at,
+                        source_item_id=EXCLUDED.source_item_id,
+                        source_item_name=EXCLUDED.source_item_name,
+                        notification_id=EXCLUDED.notification_id,
+                        notification_sent=FALSE,
+                        notification_attempts=0,
+                        notification_next_attempt_at=0,
+                        notification_locked_until=0,
+                        notification_last_error=NULL
+                    """,
+                    user_id,
+                    boost_expires_at,
+                    item_id,
+                    item_config["nombre"],
+                    uuid4().hex,
+                )
+                cd_boost_data = {
+                    "expires_at": boost_expires_at,
+                    "source_item_id": item_id,
+                    "source_item_name": item_config["nombre"],
+                }
+                if not was_active:
+                    dados_expiry = await conn.fetchval(
+                        """
+                        UPDATE game_cooldowns
+                        SET expira_en=$2 + GREATEST(0, expira_en-$2) * 0.5
+                        WHERE user_id=$1 AND game='dados' AND expira_en > $2
+                        RETURNING expira_en
+                        """,
+                        user_id,
+                        now,
+                    )
+                    rob_expiry = await conn.fetchval(
+                        """
+                        UPDATE command_cooldowns
+                        SET expira_en=$2 + GREATEST(0, expira_en-$2) * 0.5
+                        WHERE scope_type='user' AND scope_id=$1
+                          AND command='rob' AND expira_en > $2
+                        RETURNING expira_en
+                        """,
+                        user_id,
+                        now,
+                    )
+                    cd_boost_data["dados_cooldown"] = (
+                        float(dados_expiry) if dados_expiry else 0
+                    )
+                    cd_boost_data["rob_cooldown"] = (
+                        float(rob_expiry) if rob_expiry else 0
+                    )
+
             if log_guild_id is not None and general_log_channel_id is not None:
                 item_log = await conn.fetchrow(
                     """
@@ -1833,6 +2052,16 @@ async def consume_inventory_item(
                 )
 
     cache.invalidate_inventory_cache(user_id)
+    if cd_boost_data:
+        cache.set_cd_boost_cache(user_id, cd_boost_data)
+        if cd_boost_data.get("dados_cooldown"):
+            cache.set_game_cooldown_cache(
+                user_id,
+                "dados",
+                cd_boost_data["dados_cooldown"],
+            )
+        if cd_boost_data.get("rob_cooldown"):
+            cache.set_rob_cooldown(user_id, cd_boost_data["rob_cooldown"])
     if guild_id is not None and role_id is not None:
         if expires_at is not None:
             cache.upsert_cargo_cache(
@@ -1848,6 +2077,7 @@ async def consume_inventory_item(
         "remaining": remaining,
         "expires_at": expires_at,
         "log_event_ids": log_event_ids,
+        "cd_boost": cd_boost_data,
     }
 
 
