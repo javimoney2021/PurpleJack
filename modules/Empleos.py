@@ -2201,6 +2201,16 @@ class PiromanoView(JornadaView):
         random.shuffle(self.tablero_fuego)
         self._build_buttons()
 
+    async def interaction_check(self, interaction: Interaction) -> bool:
+        """Valida al propietario sin interponer llamadas antes del cambio visual."""
+        if interaction.user.id != self.author.id:
+            await interaction.response.send_message(
+                "❌ Este tablero no es tuyo.",
+                ephemeral=True,
+            )
+            return False
+        return True
+
     def _build_buttons(self):
         self.clear_items()
 
@@ -2317,6 +2327,16 @@ class PiromanoView(JornadaView):
         if self.message is not None:
             await self.message.edit(embed=self.build_embed(), view=self)
 
+    async def _editar_interaccion_inmediata(self, interaction: Interaction):
+        embed = self.build_embed()
+        if not interaction.response.is_done():
+            try:
+                await interaction.response.edit_message(embed=embed, view=self)
+                return
+            except (discord.HTTPException, discord.NotFound):
+                pass
+        await _editar_tablero_seguro(interaction, self, embed=embed)
+
     async def _ejecutar_preparacion(self):
         try:
             await asyncio.sleep(self.REVELAR_SEGUNDOS)
@@ -2385,11 +2405,7 @@ class PiromanoView(JornadaView):
                         self.fase = "fuego"
                         self.bloqueado = False
                     self._build_buttons()
-                    await _editar_tablero_seguro(
-                        interaction,
-                        self,
-                        embed=self.build_embed(),
-                    )
+                    await self._editar_interaccion_inmediata(interaction)
                     return
 
                 self.terminado = True
@@ -2398,6 +2414,14 @@ class PiromanoView(JornadaView):
                 self.resultado_exitoso = self.tablero_fuego[idx] == "🔥"
                 resultado = self.resultado_exitoso
                 self.stop()
+                self.fase = "resultado"
+                self.resultado_mensaje = (
+                    "🔥 Encontraste el fuego. Procesando recompensa..."
+                    if resultado
+                    else "💧 Encontraste agua. Procesando penalización..."
+                )
+                self._build_buttons()
+                await self._editar_interaccion_inmediata(interaction)
 
             await self._finalizar(resultado, interaction)
 
