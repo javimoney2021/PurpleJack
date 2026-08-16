@@ -2671,9 +2671,16 @@ async def create_game_config_table():
             max_time INTEGER DEFAULT 3600,
             min_ganancia INTEGER DEFAULT 150,
             max_ganancia INTEGER DEFAULT 800,
-            activo BOOLEAN DEFAULT FALSE
+            activo BOOLEAN DEFAULT FALSE,
+            next_spawn_at DOUBLE PRECISION DEFAULT 0
         )
         """)
+        await conn.execute(
+            """
+            ALTER TABLE golpear_config
+            ADD COLUMN IF NOT EXISTS next_spawn_at DOUBLE PRECISION DEFAULT 0
+            """
+        )
         golpear_exists = await conn.fetchrow("SELECT * FROM golpear_config LIMIT 1")
         if not golpear_exists:
             await conn.execute("""
@@ -2694,7 +2701,7 @@ async def create_game_config_table():
 async def load_golpear_config_to_cache():
     """Devuelve un dict con los valores de la DB. NO importa modules.golpear."""
     async with pool.acquire() as conn:
-        row = await conn.fetchrow("SELECT * FROM golpear_config LIMIT 1")
+        row = await conn.fetchrow("SELECT * FROM golpear_config ORDER BY id LIMIT 1")
     if row:
         return {
             "canal_id":     row["canal_id"],
@@ -2703,19 +2710,55 @@ async def load_golpear_config_to_cache():
             "min_ganancia": row["min_ganancia"],
             "max_ganancia": row["max_ganancia"],
             "activo":       row["activo"],
+            "next_spawn_at": float(row["next_spawn_at"] or 0),
         }
     return None
 
-async def save_golpear_config(canal_id, min_time, max_time, min_ganancia, max_ganancia, activo):
+async def save_golpear_config(
+    canal_id, min_time, max_time, min_ganancia, max_ganancia, activo,
+    next_spawn_at=0,
+):
     """Guarda la config en la DB. Recibe los valores explicitamente, NO importa modules.golpear."""
     async with pool.acquire() as conn:
         await conn.execute("""
         UPDATE golpear_config SET
             canal_id=$1, min_time=$2, max_time=$3,
-            min_ganancia=$4, max_ganancia=$5, activo=$6
+            min_ganancia=$4, max_ganancia=$5, activo=$6,
+            next_spawn_at=$7
+        WHERE id=(SELECT id FROM golpear_config ORDER BY id LIMIT 1)
         """,
         canal_id, min_time, max_time, min_ganancia, max_ganancia, activo,
+        next_spawn_at,
         )
+
+
+async def save_golpear_next_spawn(next_spawn_at: float):
+    async with pool.acquire() as conn:
+        await conn.execute(
+            """
+            UPDATE golpear_config SET next_spawn_at=$1
+            WHERE id=(SELECT id FROM golpear_config ORDER BY id LIMIT 1)
+            """,
+            next_spawn_at,
+        )
+
+
+async def claim_golpear_spawn(due_at: float, next_spawn_at: float) -> bool:
+    """Reserva una aparición vencida y evita duplicados entre dos instancias."""
+    async with pool.acquire() as conn:
+        row = await conn.fetchrow(
+            """
+            UPDATE golpear_config
+            SET next_spawn_at=$1
+            WHERE id=(SELECT id FROM golpear_config ORDER BY id LIMIT 1)
+              AND activo=TRUE
+              AND next_spawn_at <= $2
+            RETURNING id
+            """,
+            next_spawn_at,
+            due_at,
+        )
+    return row is not None
 
 async def load_game_config():
     from core.config import (

@@ -3,6 +3,7 @@ import logging
 import discord
 import asyncio
 import aiohttp
+import time
 from io import BytesIO
 
 logger = logging.getLogger(__name__)
@@ -917,13 +918,16 @@ class Staff(commands.Cog):
         import sys
         gmod = sys.modules["modules.golpear"]
         cfg = gmod._golpear_config
-        cfg["activo"] = not cfg["activo"]
+        nuevo_activo = not cfg["activo"]
 
         from core.database import save_golpear_config
         await save_golpear_config(
             cfg["canal_id"], cfg["min_time"], cfg["max_time"],
-            cfg["min_ganancia"], cfg["max_ganancia"], cfg["activo"],
+            cfg["min_ganancia"], cfg["max_ganancia"], nuevo_activo,
+            0,
         )
+        cfg["activo"] = nuevo_activo
+        cfg["next_spawn_at"] = 0.0
         gmod.señalar_cambio()
 
         estado = "✅ Activado" if cfg["activo"] else "🔴 Desactivado"
@@ -941,6 +945,110 @@ class Staff(commands.Cog):
             )
         )
         await interaction.followup.send(embed=embed, ephemeral=False)
+
+    @app_commands.command(
+        name="golpear_estado",
+        description="Muestra configuración, permisos y salud del sistema de cofres",
+    )
+    @is_staff()
+    async def golpear_estado(self, interaction):
+        await interaction.response.defer(ephemeral=True)
+        import sys
+
+        gmod = sys.modules["modules.golpear"]
+        cfg = gmod._golpear_config
+        health = gmod._loop_health
+        task = gmod._loop_task
+
+        canal = self.bot.get_channel(cfg["canal_id"]) if cfg["canal_id"] else None
+        canal_txt = canal.mention if canal else (
+            f"<#{cfg['canal_id']}> (no resuelto)" if cfg["canal_id"] else "No configurado"
+        )
+        permisos_txt = "No comprobables"
+        if isinstance(canal, discord.TextChannel) and canal.guild.me is not None:
+            faltantes = gmod.permisos_faltantes(canal, canal.guild.me)
+            permisos_txt = "✅ Correctos" if not faltantes else "❌ " + ", ".join(faltantes)
+
+        tarea_activa = bool(task and not task.done())
+        next_spawn_at = float(cfg.get("next_spawn_at") or 0)
+        proximo_txt = (
+            f"<t:{int(next_spawn_at)}:R>"
+            if cfg["activo"] and next_spawn_at > time.time()
+            else "Aún no programado"
+        )
+        ultimo_spawn = float(health.get("ultimo_spawn") or 0)
+        ultimo_spawn_txt = (
+            f"<t:{int(ultimo_spawn)}:R>" if ultimo_spawn else "No registrado desde este inicio"
+        )
+        ultimo_error = health.get("ultimo_error") or "Ninguno"
+
+        embed = discord.Embed(
+            title="💥 Diagnóstico del Sistema de Cofres",
+            color=discord.Color.green() if cfg["activo"] and tarea_activa else discord.Color.orange(),
+            description=(
+                f"**Sistema:** {'✅ ON' if cfg['activo'] else '🔴 OFF'}\n"
+                f"**Worker:** {'✅ Ejecutándose' if tarea_activa else '❌ Detenido'}\n"
+                f"**Estado interno:** `{health.get('estado', 'desconocido')}`\n"
+                f"**Canal:** {canal_txt}\n"
+                f"**Permisos:** {permisos_txt}\n"
+                f"**Intervalo:** {self.parse_cooldown_str(cfg['min_time'])} — "
+                f"{self.parse_cooldown_str(cfg['max_time'])}\n"
+                f"**Próximo cofre:** {proximo_txt}\n"
+                f"**Último cofre:** {ultimo_spawn_txt}\n"
+                f"**Último error:** `{str(ultimo_error)[:800]}`"
+            ),
+        )
+        await interaction.followup.send(embed=embed, ephemeral=True)
+
+    @app_commands.command(
+        name="golpear_forzar",
+        description="Publica un cofre de prueba inmediatamente en el canal configurado",
+    )
+    @is_staff()
+    async def golpear_forzar(self, interaction):
+        await interaction.response.defer(ephemeral=True)
+        import sys
+
+        gmod = sys.modules["modules.golpear"]
+        cfg = gmod._golpear_config
+        canal_id = cfg.get("canal_id")
+        if not canal_id:
+            return await interaction.followup.send(
+                "❌ No hay un canal configurado. Usa `/golpear_editar` primero.",
+                ephemeral=True,
+            )
+
+        try:
+            canal = self.bot.get_channel(canal_id) or await self.bot.fetch_channel(canal_id)
+            if not isinstance(canal, discord.TextChannel):
+                raise TypeError("el destino configurado no es un canal de texto")
+            if canal.guild.me is None:
+                raise RuntimeError("no se pudo resolver al miembro del bot")
+            faltantes = gmod.permisos_faltantes(canal, canal.guild.me)
+            if faltantes:
+                return await interaction.followup.send(
+                    "❌ No puedo publicar el cofre. Permisos faltantes: "
+                    f"**{', '.join(faltantes)}**.",
+                    ephemeral=True,
+                )
+            await gmod.spawn_cofre(canal)
+            gmod._loop_health["ultimo_spawn"] = time.time()
+            gmod._loop_health["ultimo_error"] = None
+        except Exception as error:
+            gmod._loop_health["ultimo_error"] = f"{type(error).__name__}: {error}"
+            logger.exception(
+                "[COFRES:E_FORCE] Falló la publicación manual en el canal %s",
+                canal_id,
+            )
+            return await interaction.followup.send(
+                f"❌ Falló la prueba: `{type(error).__name__}: {str(error)[:500]}`",
+                ephemeral=True,
+            )
+
+        await interaction.followup.send(
+            f"✅ Cofre de prueba publicado correctamente en {canal.mention}.",
+            ephemeral=True,
+        )
 
     @app_commands.command(name="golpear_editar", description="Configura canal, tiempos y ganancias del sistema de cofres")
     @app_commands.describe(
@@ -960,6 +1068,10 @@ class Staff(commands.Cog):
             return await interaction.followup.send(
                 "❌ Usa formatos válidos como `30s`, `2m` o `1h`.", ephemeral=True
             )
+        if min_seconds <= 0 or max_seconds <= 0:
+            return await interaction.followup.send(
+                "❌ Los tiempos deben ser mayores a cero.", ephemeral=True
+            )
         if min_seconds >= max_seconds:
             return await interaction.followup.send("❌ El tiempo mínimo debe ser menor al máximo.", ephemeral=True)
         
@@ -978,17 +1090,32 @@ class Staff(commands.Cog):
         if min_ganancia >= max_ganancia:
             return await interaction.followup.send("❌ La ganancia mínima debe ser menor a la máxima.", ephemeral=True)
 
+        bot_member = canal.guild.me
+        if bot_member is None:
+            return await interaction.followup.send(
+                "❌ No pude comprobar los permisos del bot en ese servidor.",
+                ephemeral=True,
+            )
+        faltantes = gmod.permisos_faltantes(canal, bot_member)
+        if faltantes:
+            return await interaction.followup.send(
+                "❌ No puedo usar ese canal para los cofres. Permisos faltantes: "
+                f"**{', '.join(faltantes)}**.",
+                ephemeral=True,
+            )
+
+        from core.database import save_golpear_config
+        await save_golpear_config(
+            canal.id, min_seconds, max_seconds,
+            min_ganancia, max_ganancia, cfg["activo"],
+            0,
+        )
         cfg["canal_id"] = canal.id
         cfg["min_time"] = min_seconds
         cfg["max_time"] = max_seconds
         cfg["min_ganancia"] = min_ganancia
         cfg["max_ganancia"] = max_ganancia
-
-        from core.database import save_golpear_config
-        await save_golpear_config(
-            cfg["canal_id"], cfg["min_time"], cfg["max_time"],
-            cfg["min_ganancia"], cfg["max_ganancia"], cfg["activo"],
-        )
+        cfg["next_spawn_at"] = 0.0
         gmod.señalar_cambio()
 
         await interaction.followup.send(
