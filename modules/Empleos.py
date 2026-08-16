@@ -2266,10 +2266,7 @@ class PiromanoView(JornadaView):
 
     def build_embed(self):
         if self.fase == "revelando":
-            descripcion = (
-                "Encuentra todos los botes de gasolina...\n\n"
-                "👁️ Observa las casillas antes de que se oculten."
-            )
+            descripcion = "Encuentra todos los botes de gasolina..."
         elif self.fase == "mezclando":
             descripcion = (
                 "Encuentra todos los botes de gasolina...\n\n"
