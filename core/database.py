@@ -2741,12 +2741,9 @@ async def create_game_config_table():
             None, 600, 3600, 150, 800, False,
         )
 
-        await conn.execute("""
-        CREATE TABLE IF NOT EXISTS nave_config (
-            id INTEGER PRIMARY KEY DEFAULT 1,
-            contenido TEXT
-        )
-        """)
+        # /ayuda_nave usa contenido interno desde 2026-08. Esta limpieza es
+        # idempotente y elimina el texto configurable heredado de /nave_edit.
+        await conn.execute("DROP TABLE IF EXISTS nave_config")
 
 async def load_golpear_config_to_cache():
     """Devuelve un dict con los valores de la DB. NO importa modules.golpear."""
@@ -2968,19 +2965,6 @@ async def load_memo_config():
         memo_config["max_apuesta"] = row["max_apuesta"]
         memo_config["cooldown"] = row["cooldown"]
         memo_config["activa"] = row["activa"]
-
-async def get_nave_contenido():
-    async with pool.acquire() as conn:
-        row = await conn.fetchrow("SELECT contenido FROM nave_config WHERE id=1")
-    return row["contenido"] if row else None
-
-async def save_nave_contenido(contenido: str):
-    async with pool.acquire() as conn:
-        await conn.execute("""
-            INSERT INTO nave_config (id, contenido)
-            VALUES (1, $1)
-            ON CONFLICT (id) DO UPDATE SET contenido=$1
-        """, contenido)
 
 async def get_game_cooldown(user_id, game):
     async with pool.acquire() as conn:

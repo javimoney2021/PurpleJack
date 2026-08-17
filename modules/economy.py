@@ -17,6 +17,150 @@ EVENTO_THUMBNAIL_URL = "https://pub-a09b3609b6b34dfab5c7aa7742cd1a8a.r2.dev/Purp
 EVENTO_TASA_DEPOSITO = 30
 EVENTO_TOP_ICON = "<:ygoldstar:1004555717610590258>"
 
+NAVE_INFO_DESCRIPTION = (
+    "PurpleJack es una experiencia de economía y entretenimiento donde puedes "
+    "trabajar, competir, jugar, coleccionar artículos y progresar junto a la comunidad.\n\n"
+    "Antes de comenzar, consulta nuestros "
+    "[Términos de Servicio](https://purplejack.online/Terms.html) y nuestra "
+    "[Política de Privacidad](https://purplejack.online/Privacy.html) para conocer "
+    "las reglas y el tratamiento de tus datos."
+)
+
+NAVE_COMMAND_PAGES = (
+    (
+        "💰 Economía",
+        "Consulta tus recursos, posiciones y tiempos dentro de PurpleJack.",
+        (
+            "!bal       Consulta tu balance y banco.\n"
+            "!cd        Muestra tus cooldowns activos.\n"
+            "!top       Consulta la clasificación económica.\n"
+            "!evento    Consulta el ranking del evento.\n"
+            "!prob      Muestra las probabilidades actuales.\n"
+            "!collect   Reclama la recompensa de tu rol."
+        ),
+    ),
+    (
+        "🧰 Empleos, tienda e inventario",
+        "Trabaja, progresa y administra tus artículos.",
+        (
+            "!work      Realiza un trabajo económico básico.\n"
+            "!crime     Intenta cometer un crimen.\n"
+            "!empleos   Consulta los empleos disponibles.\n"
+            "!aplicar   Solicita un empleo.\n"
+            "!renunciar Abandona tu empleo actual.\n"
+            "!exp       Consulta tu experiencia laboral.\n"
+            "!oficina   Accede a empleos avanzados.\n"
+            "!trabajar  Cumple la jornada de tu empleo.\n"
+            "!tienda    Abre la tienda.\n"
+            "!info      Consulta un artículo.\n"
+            "!inv       Abre tu inventario.\n"
+            "!time      Consulta la duración de tus artículos."
+        ),
+    ),
+    (
+        "🎮 Juegos y competición",
+        "Participa en los juegos y desafíos disponibles.",
+        (
+            "!dados     Juega una partida de dados.\n"
+            "!ruleta    Realiza una apuesta en la ruleta.\n"
+            "!bj        Juega Blackjack.\n"
+            "!memo      Inicia el juego de memoria.\n"
+            "!carrera   Participa en una carrera.\n"
+            "!retar     Desafía a otro jugador.\n"
+            "!rob       Intenta robar a otro miembro."
+        ),
+    ),
+)
+
+
+def _build_nave_inicio_embed() -> discord.Embed:
+    embed = discord.Embed(
+        title="🚀 PurpleJack - Info",
+        description=NAVE_INFO_DESCRIPTION,
+        color=discord.Color.purple(),
+    )
+    embed.set_footer(text="Selecciona una categoría para explorar PurpleJack.")
+    return embed
+
+
+def _build_nave_commands_embed(page: int) -> discord.Embed:
+    title, description, commands_text = NAVE_COMMAND_PAGES[page]
+    embed = discord.Embed(
+        title=f"📚 PurpleJack - Comandos | {title}",
+        description=description,
+        color=discord.Color.blurple(),
+    )
+    embed.add_field(name="Comandos disponibles", value=f"```text\n{commands_text}\n```", inline=False)
+    embed.set_footer(text=f"Página {page + 1}/{len(NAVE_COMMAND_PAGES)} · Prefijo de usuario: !")
+    return embed
+
+
+class NaveHelpView(ui.View):
+    def __init__(self, author_id: int):
+        super().__init__(timeout=300)
+        self.author_id = author_id
+        self.page: int | None = None
+        self._sync_pagination()
+
+    async def interaction_check(self, interaction: Interaction) -> bool:
+        if interaction.user.id == self.author_id:
+            return True
+        await interaction.response.send_message(
+            "❌ Este panel pertenece a otro usuario. Usa `/ayuda_nave` para abrir el tuyo.",
+            ephemeral=True,
+        )
+        return False
+
+    def _sync_pagination(self) -> None:
+        showing_commands = self.page is not None
+        self.previous.disabled = not showing_commands or self.page == 0
+        self.page_indicator.disabled = True
+        self.page_indicator.label = (
+            f"Página {self.page + 1}/{len(NAVE_COMMAND_PAGES)}"
+            if showing_commands
+            else "Inicio"
+        )
+        self.next.disabled = not showing_commands or self.page == len(NAVE_COMMAND_PAGES) - 1
+
+    @ui.select(
+        placeholder="Selecciona una categoría",
+        min_values=1,
+        max_values=1,
+        options=[
+            discord.SelectOption(label="Inicio", value="inicio", emoji="🚀"),
+            discord.SelectOption(label="Comandos", value="comandos", emoji="📚"),
+        ],
+    )
+    async def category(self, interaction: Interaction, select: ui.Select):
+        if select.values[0] == "inicio":
+            self.page = None
+            embed = _build_nave_inicio_embed()
+        else:
+            self.page = 0
+            embed = _build_nave_commands_embed(self.page)
+        self._sync_pagination()
+        await interaction.response.edit_message(embed=embed, view=self)
+
+    @ui.button(label="◀ Anterior", style=ButtonStyle.primary, row=1)
+    async def previous(self, interaction: Interaction, button: ui.Button):
+        if self.page is None:
+            return await interaction.response.defer()
+        self.page = max(0, self.page - 1)
+        self._sync_pagination()
+        await interaction.response.edit_message(embed=_build_nave_commands_embed(self.page), view=self)
+
+    @ui.button(label="Inicio", style=ButtonStyle.secondary, disabled=True, row=1)
+    async def page_indicator(self, interaction: Interaction, button: ui.Button):
+        pass
+
+    @ui.button(label="Siguiente ▶", style=ButtonStyle.primary, row=1)
+    async def next(self, interaction: Interaction, button: ui.Button):
+        if self.page is None:
+            return await interaction.response.defer()
+        self.page = min(len(NAVE_COMMAND_PAGES) - 1, self.page + 1)
+        self._sync_pagination()
+        await interaction.response.edit_message(embed=_build_nave_commands_embed(self.page), view=self)
+
 
 def _format_cooldown(seconds: int) -> str:
     if seconds >= 3600:
@@ -440,21 +584,13 @@ class Economy(commands.Cog):
         message = await ctx.send(embed=embed)
         asyncio.create_task(_finalizar_consulta_evento(message))
 
-    @app_commands.command(name="ayuda_nave", description="Muestra la guía de la Nave-Sus")
+    @app_commands.command(name="ayuda_nave", description="Presentación y guía de comandos de PurpleJack")
     async def ayuda_nave(self, interaction: discord.Interaction):
-        from core.database import get_nave_contenido
-        contenido = await get_nave_contenido()
-        if not contenido:
-            return await interaction.response.send_message(
-                "❌ La guía aún no ha sido configurada.", ephemeral=True
-            )
-        embed = discord.Embed(
-            title="🚀 Guía de la Nave-Sus",
-            description=contenido,
-            color=discord.Color.teal(),
+        await interaction.response.send_message(
+            embed=_build_nave_inicio_embed(),
+            view=NaveHelpView(interaction.user.id),
+            ephemeral=True,
         )
-        embed.set_footer(text="Usa los comandos de economía para crecer en la nave.")
-        await interaction.response.send_message(embed=embed, ephemeral=True, delete_after=25)
 
     @commands.command(name="prob")
     @commands.cooldown(1, 60, commands.BucketType.user)

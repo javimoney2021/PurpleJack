@@ -47,11 +47,6 @@ EVENTO_TOP_ICON = "<:ygoldstar:1004555717610590258>"
 _pending_announcements = {}
 # {user_id: {"channel": channel_obj, "source_channel_id": int, "expires": float, "content": str|None}}
 
-# ── NAVE EDIT (RAM only) ───────────────────────────────
-_pending_nave = {}
-# {user_id: {"channel": channel_obj, "expires": float, "content": str|None}}
-
-
 def is_staff():
     async def predicate(interaction: discord.Interaction):
         user_role_ids = {r.id for r in interaction.user.roles}
@@ -223,60 +218,6 @@ class AnuncioConfirmView(discord.ui.View):
             view=self
         )
         _pending_announcements.pop(self.user_id, None)
-
-# ── NAVE CONFIRM VIEW ──────────────────────────────────
-
-class NaveConfirmView(discord.ui.View):
-    def __init__(self, user_id, contenido, author_message):
-        super().__init__(timeout=60)
-        self.user_id = user_id
-        self.contenido = contenido
-        self.author_message = author_message
-
-    @discord.ui.button(label="✅ Enviar", style=discord.ButtonStyle.success)
-    async def enviar(self, interaction: discord.Interaction, button: discord.ui.Button):
-        if interaction.user.id != self.user_id:
-            return await interaction.response.send_message("❌ No es tu confirmación.", ephemeral=True)
-        from core.database import save_nave_contenido
-        await save_nave_contenido(self.contenido)
-        for item in self.children:
-            item.disabled = True
-        await interaction.response.edit_message(
-            embed=discord.Embed(
-                description="⏳ Guardando...",
-                color=discord.Color.teal()
-            ),
-            view=self
-        )
-        await asyncio.sleep(5)
-        try:
-            await self.author_message.delete()
-        except Exception:
-            pass
-        _pending_nave.pop(self.user_id, None)
-        await interaction.channel.send(
-            embed=discord.Embed(
-                title="📋 Guía de la Nave-Sus Actualizada",
-                description="✅ **Comando de la Nave Actualizado!**",
-                color=discord.Color.teal()
-            )
-        )
-
-    @discord.ui.button(label="❌ Cancelar", style=discord.ButtonStyle.danger)
-    async def cancelar(self, interaction: discord.Interaction, button: discord.ui.Button):
-        if interaction.user.id != self.user_id:
-            return await interaction.response.send_message("❌ No es tu confirmación.", ephemeral=True)
-        for item in self.children:
-            item.disabled = True
-        _pending_nave.pop(self.user_id, None)
-        await interaction.response.edit_message(
-            embed=discord.Embed(
-                description="🚫 Edición cancelada. No se guardó nada.",
-                color=discord.Color.red()
-            ),
-            view=self
-        )
-
 
 class SaldosPaginationView(discord.ui.View):
     def __init__(self, author_id, users):
@@ -1992,53 +1933,6 @@ class Staff(commands.Cog):
             except Exception:
                 pass
 
-    @app_commands.command(name="nave_edit", description="Actualiza la Guía de la Nave-Sus")
-    @is_staff()
-    async def nave_edit(self, interaction: discord.Interaction):
-        try:
-            role = discord.utils.get(interaction.user.roles, name=COORDINADOR_ROLE)
-            if not role:
-                return await interaction.response.send_message(
-                    "❌ No tienes permisos para usar este comando.", ephemeral=True
-                )
-            import time
-            user_id = interaction.user.id
-            ahora = time.time()
-
-            _pending_nave[user_id] = {
-                "channel": interaction.channel,
-                "expires": ahora + 300,
-                "content": None
-            }
-
-            await interaction.response.send_message(
-                embed=discord.Embed(
-                    title="📋 Guía de la Nave-Sus — Edición",
-                    description=(
-                        "Escribe el contenido de la guía **en este canal**.\n\n"
-                        "⏳ Tienes **5 minutos**. Tu mensaje será borrado automáticamente."
-                    ),
-                    color=discord.Color.teal()
-                ),
-                ephemeral=True
-            )
-
-            async def auto_clear():
-                await asyncio.sleep(300)
-                entry = _pending_nave.get(user_id)
-                if entry and entry["content"] is None:
-                    _pending_nave.pop(user_id, None)
-
-            asyncio.create_task(auto_clear())
-
-        except Exception as e:
-            import traceback
-            traceback.print_exc()
-            try:
-                await interaction.response.send_message(f"❌ Error interno: {e}", ephemeral=True)
-            except Exception:
-                pass
-
     @commands.Cog.listener()
     async def on_message(self, message: discord.Message):
         if message.author.bot:
@@ -2046,26 +1940,6 @@ class Staff(commands.Cog):
 
         import time
         user_id = message.author.id
-
-        # ── Nave edit listener ─────────────────────────
-        nave_entry = _pending_nave.get(user_id)
-        if nave_entry and nave_entry["content"] is None:
-            if time.time() > nave_entry["expires"]:
-                _pending_nave.pop(user_id, None)
-            elif message.channel.id == nave_entry["channel"].id:
-                nave_entry["content"] = message.content
-                confirm_embed = discord.Embed(
-                    title="📋 Confirma el contenido de la Guía",
-                    description=f"**Contenido a guardar:**\n\n{message.content}",
-                    color=discord.Color.teal()
-                )
-                confirm_embed.set_footer(text="Tienes 60 segundos para confirmar.")
-                await message.channel.send(
-                    embed=confirm_embed,
-                    view=NaveConfirmView(user_id, message.content, message),
-                    delete_after=65
-                )
-                return
 
         # ── Anuncio listener ───────────────────────────
         entry = _pending_announcements.get(user_id)
