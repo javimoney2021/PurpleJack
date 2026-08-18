@@ -1,6 +1,8 @@
 import discord
 import asyncio
+import logging
 import random
+import time
 import uuid
 from discord.ext import commands
 from discord import app_commands
@@ -10,10 +12,15 @@ from core.database import (
     refund_wager,
     settle_wager_session,
     refund_wager_session,
+    get_game_cooldown,
+    set_game_cooldown,
     get_system_toggle,
     set_system_toggle,
 )
 from core.config import COIN, STAFF_ROLE
+from core import cache
+
+logger = logging.getLogger(__name__)
 
 # ── CONFIG ─────────────────────────────────────────────
 JOIN_TIMEOUT  = 12
@@ -26,6 +33,8 @@ MIN_RACE_TICKS = 6
 MAX_RACE_TICKS = 10
 RACE_TICK_SECONDS = 1.2
 FINISH_HOLD_SECONDS = 1.5
+RACE_CHANNEL_COOLDOWN = 120
+RACE_CHANNEL_COOLDOWN_KEY = "carrera_canal"
 
 # Nombre del bot de relleno
 BOT_NAME = "Jack"
@@ -435,6 +444,30 @@ async def run_race(
             pass
         return
 
+    cooldown_expiry = time.time() + RACE_CHANNEL_COOLDOWN
+    cache.set_game_cooldown_cache(
+        channel_id,
+        RACE_CHANNEL_COOLDOWN_KEY,
+        cooldown_expiry,
+    )
+    try:
+        await set_game_cooldown(
+            channel_id,
+            RACE_CHANNEL_COOLDOWN_KEY,
+            cooldown_expiry,
+        )
+    except Exception:
+        # El pago ya fue liquidado: el fallback en RAM evita bloquear o
+        # revertir incorrectamente una carrera válida si falla esta escritura.
+        logger.exception(
+            "No se pudo persistir el cooldown de carrera para el canal %s",
+            channel_id,
+        )
+
+    # La carrera económica ya terminó. Liberar el canal antes de conservar
+    # el resultado visible evita bloquear nuevas carreras durante 60 segundos.
+    _active_races.discard(channel_id)
+
     # ── Embed de resultado final ───────────────────────────────────
     result_embed = build_result_embed(winner_id, monto, real_players, has_bot)
     try:
@@ -447,9 +480,6 @@ async def run_race(
         await message.delete()
     except Exception:
         pass
-
-    _active_races.discard(channel_id)
-
 
 # ── COG ────────────────────────────────────────────────
 class Carrera(commands.Cog):
@@ -472,6 +502,29 @@ class Carrera(commands.Cog):
 
         if ctx.channel.id in _active_races:
             return await ctx.send(f"❌ {ctx.author.mention} Ya hay una carrera activa en este canal.")
+
+        now = time.time()
+        cooldown_expiry = cache.get_game_cooldown_cache(
+            ctx.channel.id,
+            RACE_CHANNEL_COOLDOWN_KEY,
+        )
+        if cooldown_expiry <= now:
+            cooldown_expiry = await get_game_cooldown(
+                ctx.channel.id,
+                RACE_CHANNEL_COOLDOWN_KEY,
+            )
+            if cooldown_expiry > now:
+                cache.set_game_cooldown_cache(
+                    ctx.channel.id,
+                    RACE_CHANNEL_COOLDOWN_KEY,
+                    cooldown_expiry,
+                )
+
+        if cooldown_expiry > now:
+            return await ctx.message.reply(
+                "🏁 La pista de carreras está ocupada por otros corredores, "
+                f"tiempo de liberación <t:{int(cooldown_expiry)}:R>."
+            )
 
         await get_user(ctx.author.id)
         session_id = str(uuid.uuid4())
