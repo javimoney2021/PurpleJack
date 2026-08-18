@@ -339,6 +339,22 @@ async def init_db():
         ON wagers (user_id, game, status)
         """)
 
+        await conn.execute("""
+        CREATE TABLE IF NOT EXISTS user_activity (
+            user_id BIGINT PRIMARY KEY,
+            last_activity DOUBLE PRECISION NOT NULL
+        )
+        """)
+        await conn.execute("""
+        INSERT INTO user_activity (user_id, last_activity)
+        SELECT id, $1 FROM users
+        ON CONFLICT (user_id) DO NOTHING
+        """, time.time())
+        await conn.execute("""
+        CREATE INDEX IF NOT EXISTS user_activity_last_activity_idx
+        ON user_activity (last_activity)
+        """)
+
     logger.info("Base de datos conectada y tablas verificadas.")
 
 
@@ -430,8 +446,141 @@ async def get_user(user_id):
                 "cooldown_work":  user["cooldown_work"],
                 "cooldown_crime": user["cooldown_crime"],
             }
+        await conn.execute("""
+            INSERT INTO user_activity (user_id, last_activity)
+            VALUES ($1, $2)
+            ON CONFLICT (user_id) DO NOTHING
+        """, user_id, time.time())
         cache.set_cache(user_id, data)
         return data
+
+
+async def touch_user_activity(user_id: int, timestamp: float | None = None):
+    activity_at = timestamp if timestamp is not None else time.time()
+    async with pool.acquire() as conn:
+        await conn.execute("""
+            INSERT INTO user_activity (user_id, last_activity)
+            VALUES ($1, $2)
+            ON CONFLICT (user_id) DO UPDATE
+            SET last_activity=GREATEST(user_activity.last_activity, EXCLUDED.last_activity)
+        """, user_id, activity_at)
+
+
+async def get_inactive_user_ids(cutoff: float, limit: int = 100):
+    async with pool.acquire() as conn:
+        rows = await conn.fetch("""
+            SELECT user_id
+            FROM user_activity
+            WHERE last_activity < $1
+            ORDER BY last_activity ASC
+            LIMIT $2
+        """, cutoff, limit)
+    return [row["user_id"] for row in rows]
+
+
+async def get_user_temporary_roles(user_id: int):
+    async with pool.acquire() as conn:
+        rows = await conn.fetch("""
+            SELECT guild_id, rol_id
+            FROM cargos_temporales
+            WHERE user_id=$1
+        """, user_id)
+    return [dict(row) for row in rows]
+
+
+async def get_user_deletion_blocker(user_id: int):
+    async with pool.acquire() as conn:
+        pending_wager = await conn.fetchval("""
+            SELECT EXISTS(
+                SELECT 1 FROM wagers
+                WHERE user_id=$1 AND status='pending'
+            )
+        """, user_id)
+        active_job = False
+        if await conn.fetchval("SELECT to_regclass('public.empleos_jornadas') IS NOT NULL"):
+            active_job = await conn.fetchval("""
+                SELECT EXISTS(
+                    SELECT 1 FROM empleos_jornadas
+                    WHERE user_id=$1 AND status='active'
+                )
+            """, user_id)
+    if pending_wager:
+        return "apuesta pendiente"
+    if active_job:
+        return "jornada laboral activa"
+    return None
+
+
+async def purge_user_data(user_id: int, inactive_before: float | None = None):
+    """Elimina en una transacción todos los datos funcionales de un usuario."""
+    economy_lock = _get_economy_lock(user_id)
+    async with economy_lock:
+        async with pool.acquire() as conn:
+            async with conn.transaction():
+                if inactive_before is not None:
+                    eligible = await conn.fetchval("""
+                        SELECT EXISTS(
+                            SELECT 1 FROM user_activity
+                            WHERE user_id=$1 AND last_activity < $2
+                        )
+                    """, user_id, inactive_before)
+                    if not eligible:
+                        return False
+
+                pending_wager = await conn.fetchval("""
+                    SELECT EXISTS(
+                        SELECT 1 FROM wagers
+                        WHERE user_id=$1 AND status='pending'
+                    )
+                """, user_id)
+                if pending_wager:
+                    return False
+
+                if await conn.fetchval("SELECT to_regclass('public.empleos_jornadas') IS NOT NULL"):
+                    active_job = await conn.fetchval("""
+                        SELECT EXISTS(
+                            SELECT 1 FROM empleos_jornadas
+                            WHERE user_id=$1 AND status='active'
+                        )
+                    """, user_id)
+                    if active_job:
+                        return False
+                    await conn.execute("DELETE FROM empleos_jornadas WHERE user_id=$1", user_id)
+                    await conn.execute("DELETE FROM empleos_historial WHERE user_id=$1", user_id)
+                    await conn.execute("DELETE FROM empleos_users WHERE user_id=$1", user_id)
+
+                await conn.execute("DELETE FROM item_use_log_outbox WHERE user_id=$1", user_id)
+                await conn.execute("DELETE FROM item_uso_diario WHERE user_id=$1", user_id)
+                await conn.execute("DELETE FROM inventario WHERE user_id=$1", user_id)
+                await conn.execute("DELETE FROM cargos_temporales WHERE user_id=$1", user_id)
+                await conn.execute("DELETE FROM collect_cooldowns WHERE user_id=$1", user_id)
+                await conn.execute("DELETE FROM game_cooldowns WHERE user_id=$1", user_id)
+                await conn.execute("DELETE FROM user_cd_boosts WHERE user_id=$1", user_id)
+                await conn.execute("DELETE FROM evento_puntos WHERE user_id=$1", user_id)
+                await conn.execute("DELETE FROM rob_victim_protections WHERE user_id=$1", user_id)
+                await conn.execute("DELETE FROM wagers WHERE user_id=$1", user_id)
+                await conn.execute("""
+                    DELETE FROM command_cooldowns
+                    WHERE scope_type='user' AND scope_id=$1
+                """, user_id)
+                await conn.execute("DELETE FROM users WHERE id=$1", user_id)
+                await conn.execute("DELETE FROM user_activity WHERE user_id=$1", user_id)
+
+        cache.purge_user_cache(user_id)
+        _purchase_locks.pop(user_id, None)
+        try:
+            from modules.Empleos import (
+                _CONFIRMACION_EMPLEO_LOCKS,
+                _EMPLEOS_CACHE,
+            )
+            _EMPLEOS_CACHE.pop(user_id, None)
+            _CONFIRMACION_EMPLEO_LOCKS.pop(user_id, None)
+        except ImportError:
+            pass
+
+    if _economy_locks.get(user_id) is economy_lock:
+        _economy_locks.pop(user_id, None)
+    return True
 
 
 async def _flush_user_to_db_unlocked(user_id):

@@ -4,7 +4,14 @@ import discord
 import asyncio
 import time
 
-from core.database import get_user, update_balance, update_bank
+from core.database import (
+    get_user,
+    get_user_deletion_blocker,
+    get_user_temporary_roles,
+    purge_user_data,
+    update_balance,
+    update_bank,
+)
 from core import cache
 from core.config import (
     COIN, game_config, ruleta_config, rob_config, dados_config,
@@ -16,6 +23,7 @@ TOP_COOLDOWN = 300
 EVENTO_THUMBNAIL_URL = "https://pub-a09b3609b6b34dfab5c7aa7742cd1a8a.r2.dev/Purple%20jack%20Harcode/PurpleThumb.png"
 EVENTO_TASA_DEPOSITO = 30
 EVENTO_TOP_ICON = "<:ygoldstar:1004555717610590258>"
+NAVE_SUPPORT_URL = "https://canary.discord.com/channels/980073134411644939/1399742637426081913"
 
 NAVE_INFO_DESCRIPTION = (
     "PurpleJack es una experiencia de economía y entretenimiento donde puedes "
@@ -23,7 +31,9 @@ NAVE_INFO_DESCRIPTION = (
     "Antes de comenzar, consulta nuestros "
     "[Términos de Servicio](https://purplejack.online/Terms.html) y nuestra "
     "[Política de Privacidad](https://purplejack.online/Privacy.html) para conocer "
-    "las reglas y el tratamiento de tus datos."
+    "las reglas y el tratamiento de tus datos.\n\n"
+    "Para dudas o reportes de errores, visita nuestro "
+    f"[#soporte]({NAVE_SUPPORT_URL})."
 )
 
 NAVE_COMMAND_PAGES = (
@@ -95,10 +105,25 @@ def _build_nave_commands_embed(page: int) -> discord.Embed:
     return embed
 
 
+def _build_nave_support_embed() -> discord.Embed:
+    embed = discord.Embed(
+        title="🛟 PurpleJack - Soporte",
+        description=(
+            "¿Tienes una duda, encontraste un error o necesitas realizar una solicitud "
+            "relacionada con tus datos?\n\n"
+            f"Dirígete al canal oficial [#soporte]({NAVE_SUPPORT_URL}) para recibir ayuda."
+        ),
+        color=discord.Color.teal(),
+    )
+    embed.set_footer(text="Nunca compartas contraseñas, tokens ni credenciales.")
+    return embed
+
+
 class NaveHelpView(ui.View):
     def __init__(self, author_id: int):
         super().__init__(timeout=300)
         self.author_id = author_id
+        self.section = "inicio"
         self.page: int | None = None
         self._sync_pagination()
 
@@ -118,7 +143,7 @@ class NaveHelpView(ui.View):
         self.page_indicator.label = (
             f"Página {self.page + 1}/{len(NAVE_COMMAND_PAGES)}"
             if showing_commands
-            else "Inicio"
+            else ("Soporte" if self.section == "soporte" else "Inicio")
         )
         self.next.disabled = not showing_commands or self.page == len(NAVE_COMMAND_PAGES) - 1
 
@@ -129,15 +154,22 @@ class NaveHelpView(ui.View):
         options=[
             discord.SelectOption(label="Inicio", value="inicio", emoji="🚀"),
             discord.SelectOption(label="Comandos", value="comandos", emoji="📚"),
+            discord.SelectOption(label="Soporte", value="soporte", emoji="🛟"),
         ],
     )
     async def category(self, interaction: Interaction, select: ui.Select):
         if select.values[0] == "inicio":
+            self.section = "inicio"
             self.page = None
             embed = _build_nave_inicio_embed()
-        else:
+        elif select.values[0] == "comandos":
+            self.section = "comandos"
             self.page = 0
             embed = _build_nave_commands_embed(self.page)
+        else:
+            self.section = "soporte"
+            self.page = None
+            embed = _build_nave_support_embed()
         self._sync_pagination()
         await interaction.response.edit_message(embed=embed, view=self)
 
@@ -160,6 +192,190 @@ class NaveHelpView(ui.View):
         self.page = min(len(NAVE_COMMAND_PAGES) - 1, self.page + 1)
         self._sync_pagination()
         await interaction.response.edit_message(embed=_build_nave_commands_embed(self.page), view=self)
+
+
+def _deletion_summary_embed(final: bool = False) -> discord.Embed:
+    if final:
+        title = "⚠️ Confirmación definitiva"
+        intro = "Esta es la última confirmación. La eliminación no se puede deshacer."
+        color = discord.Color.red()
+    else:
+        title = "🗑️ Eliminar mis datos"
+        intro = "Puedes eliminar toda la información funcional asociada a tu usuario."
+        color = discord.Color.orange()
+
+    embed = discord.Embed(title=title, description=intro, color=color)
+    embed.add_field(
+        name="Información que será eliminada",
+        value=(
+            "• Balance, banco y posición en rankings.\n"
+            "• Inventario, artículos y registros de uso.\n"
+            "• Empleo, experiencia, maestrías e historial laboral.\n"
+            "• Cooldowns, protecciones, boosts y progreso de juegos.\n"
+            "• Apuestas finalizadas, jornadas y registros funcionales.\n"
+            "• Registros de roles temporales asociados a tus artículos."
+        ),
+        inline=False,
+    )
+    embed.add_field(
+        name="Importante",
+        value=(
+            "No se elimina tu cuenta, tus mensajes ni datos administrados directamente "
+            "por la plataforma. Si vuelves a utilizar PurpleJack, comenzarás con un perfil nuevo."
+        ),
+        inline=False,
+    )
+    return embed
+
+
+async def _remove_roles_for_user(bot, user_id: int) -> bool:
+    for cargo in await get_user_temporary_roles(user_id):
+        guild = bot.get_guild(cargo["guild_id"])
+        if guild is None:
+            continue
+        role = guild.get_role(cargo["rol_id"])
+        if role is None:
+            continue
+        try:
+            member = guild.get_member(user_id) or await guild.fetch_member(user_id)
+        except discord.NotFound:
+            continue
+        try:
+            if role in member.roles:
+                await member.remove_roles(
+                    role,
+                    reason="Eliminación de datos solicitada por el usuario",
+                )
+        except (discord.Forbidden, discord.HTTPException):
+            return False
+    return True
+
+
+class DeleteDataFinalView(ui.View):
+    def __init__(self, bot, user_id: int):
+        super().__init__(timeout=120)
+        self.bot = bot
+        self.user_id = user_id
+        self.processing = False
+
+    async def interaction_check(self, interaction: Interaction) -> bool:
+        if interaction.user.id == self.user_id:
+            return True
+        await interaction.response.send_message("❌ Esta solicitud no te pertenece.", ephemeral=True)
+        return False
+
+    @ui.button(label="Eliminar definitivamente", emoji="🗑️", style=ButtonStyle.danger)
+    async def delete_permanently(self, interaction: Interaction, button: ui.Button):
+        if self.processing:
+            return await interaction.response.send_message(
+                "⌛ La eliminación ya está en proceso.", ephemeral=True
+            )
+        self.processing = True
+        for child in self.children:
+            child.disabled = True
+        await interaction.response.defer()
+
+        blocker = await get_user_deletion_blocker(self.user_id)
+        if blocker:
+            self.processing = False
+            return await interaction.edit_original_response(
+                embed=discord.Embed(
+                    title="⌛ Eliminación pendiente",
+                    description=(
+                        f"No se puede eliminar el perfil mientras tengas una **{blocker}**. "
+                        "Finalízala o espera su recuperación y vuelve a intentarlo."
+                    ),
+                    color=discord.Color.orange(),
+                ),
+                view=None,
+            )
+
+        if not await _remove_roles_for_user(self.bot, self.user_id):
+            self.processing = False
+            return await interaction.edit_original_response(
+                embed=discord.Embed(
+                    title="❌ No se pudo completar la eliminación",
+                    description=(
+                        "No pude retirar uno de tus roles temporales de forma segura. "
+                        f"Solicita asistencia en [#soporte]({NAVE_SUPPORT_URL}) y vuelve a intentarlo."
+                    ),
+                    color=discord.Color.red(),
+                ),
+                view=None,
+            )
+
+        deleted = await purge_user_data(self.user_id)
+        if not deleted:
+            self.processing = False
+            return await interaction.edit_original_response(
+                embed=discord.Embed(
+                    title="⌛ Eliminación pendiente",
+                    description="Se detectó una operación activa. Finalízala y vuelve a intentarlo.",
+                    color=discord.Color.orange(),
+                ),
+                view=None,
+            )
+
+        activity_cache = getattr(self.bot, "_user_activity_writes", None)
+        if activity_cache is not None:
+            activity_cache.pop(self.user_id, None)
+        await interaction.edit_original_response(
+            embed=discord.Embed(
+                title="✅ Datos eliminados",
+                description=(
+                    "Tu información funcional fue eliminada del sistema. "
+                    "Si vuelves a utilizar PurpleJack, comenzarás con un perfil nuevo."
+                ),
+                color=discord.Color.green(),
+            ),
+            view=None,
+        )
+
+    @ui.button(label="Cancelar", style=ButtonStyle.secondary)
+    async def cancel(self, interaction: Interaction, button: ui.Button):
+        for child in self.children:
+            child.disabled = True
+        await interaction.response.edit_message(
+            embed=discord.Embed(
+                title="Eliminación cancelada",
+                description="No se eliminó ninguna información.",
+                color=discord.Color.green(),
+            ),
+            view=self,
+        )
+
+
+class DeleteDataFirstView(ui.View):
+    def __init__(self, bot, user_id: int):
+        super().__init__(timeout=120)
+        self.bot = bot
+        self.user_id = user_id
+
+    async def interaction_check(self, interaction: Interaction) -> bool:
+        if interaction.user.id == self.user_id:
+            return True
+        await interaction.response.send_message("❌ Esta solicitud no te pertenece.", ephemeral=True)
+        return False
+
+    @ui.button(label="Continuar", style=ButtonStyle.danger)
+    async def continue_deletion(self, interaction: Interaction, button: ui.Button):
+        await interaction.response.edit_message(
+            embed=_deletion_summary_embed(final=True),
+            view=DeleteDataFinalView(self.bot, self.user_id),
+        )
+
+    @ui.button(label="Cancelar", style=ButtonStyle.secondary)
+    async def cancel(self, interaction: Interaction, button: ui.Button):
+        for child in self.children:
+            child.disabled = True
+        await interaction.response.edit_message(
+            embed=discord.Embed(
+                title="Eliminación cancelada",
+                description="No se eliminó ninguna información.",
+                color=discord.Color.green(),
+            ),
+            view=self,
+        )
 
 
 def _format_cooldown(seconds: int) -> str:
@@ -589,6 +805,17 @@ class Economy(commands.Cog):
         await interaction.response.send_message(
             embed=_build_nave_inicio_embed(),
             view=NaveHelpView(interaction.user.id),
+            ephemeral=True,
+        )
+
+    @app_commands.command(
+        name="eliminar_mis_datos",
+        description="Solicita la eliminación de tus datos funcionales de PurpleJack",
+    )
+    async def eliminar_mis_datos(self, interaction: discord.Interaction):
+        await interaction.response.send_message(
+            embed=_deletion_summary_embed(),
+            view=DeleteDataFirstView(self.bot, interaction.user.id),
             ephemeral=True,
         )
 

@@ -1,4 +1,5 @@
 import logging
+import time
 import unicodedata
 from dataclasses import dataclass
 
@@ -7,6 +8,7 @@ from discord import app_commands
 from discord.ext import commands
 
 from core.config import COORDINADOR_ROLE_ID, STAFF_ROLE_ID
+from core.database import touch_user_activity
 
 
 logger = logging.getLogger("purplejack.adivinar")
@@ -42,6 +44,7 @@ class Adivinar(commands.Cog):
         self.bot = bot
         self.pending_setups: dict[tuple[int, int], PendingSetup] = {}
         self.active_guesses: dict[tuple[int, int], ActiveGuess] = {}
+        self.activity_writes: dict[int, float] = {}
 
     @app_commands.command(
         name="adivinar",
@@ -164,7 +167,19 @@ class Adivinar(commands.Cog):
     async def _handle_guess_message(self, message: discord.Message):
         active_key = (message.guild.id, message.channel.id)
         guess = self.active_guesses.get(active_key)
-        if guess is None or normalize_text(message.content) != guess.word:
+        if guess is None:
+            return
+
+        now = time.time()
+        if now - self.activity_writes.get(message.author.id, 0) >= 3600:
+            self.activity_writes[message.author.id] = now
+            try:
+                await touch_user_activity(message.author.id, now)
+            except Exception:
+                self.activity_writes.pop(message.author.id, None)
+                logger.exception("No se pudo registrar actividad de un participante.")
+
+        if normalize_text(message.content) != guess.word:
             return
 
         self.active_guesses.pop(active_key, None)

@@ -164,6 +164,25 @@ def clear_dirty(user_id):
 def get_all_cache():
     return _cache
 
+
+def purge_user_cache(user_id: int) -> None:
+    """Retira toda referencia personal del usuario conservada en RAM."""
+    _cache.pop(user_id, None)
+    _dirty.discard(user_id)
+    _last_activity.pop(user_id, None)
+    _rob_cooldowns.pop(user_id, None)
+    _cd_boosts.pop(user_id, None)
+    _inventory_cache.pop(user_id, None)
+    _cargos_cache.pop(user_id, None)
+    _collect_cooldowns.pop(user_id, None)
+    _top_cooldowns.pop(user_id, None)
+    _evento_puntos.pop(user_id, None)
+    _evento_dirty.discard(user_id)
+    for key in [key for key in _game_cooldowns if key[0] == user_id]:
+        _game_cooldowns.pop(key, None)
+    for key in [key for key in _role_assignment_locks if key[0] == user_id]:
+        _role_assignment_locks.pop(key, None)
+
 # ── ROB ────────────────────────────────────────────────
 _rob_cooldowns = {}      # {user_id: timestamp}
 

@@ -60,7 +60,9 @@ from core.database import (
     create_game_config_table, load_game_config, load_dados_config, load_memo_config,
     load_veterano_config_to_cache, load_saboteador_config_to_cache, load_item_role_restrictions_to_cache,
     save_collect_cooldowns, load_evento_to_cache, flush_evento_puntos,
-    recover_pending_wagers, ensure_wager_constraints
+    recover_pending_wagers, ensure_wager_constraints,
+    get_inactive_user_ids, get_user_deletion_blocker,
+    get_user_temporary_roles, purge_user_data, touch_user_activity,
 )
 from core import cache
 from core.config import AYUDA_CHANNEL_ID, LOG_CHANNEL_ID, STAFF_ROLE_ID
@@ -77,6 +79,37 @@ bot = commands.Bot(command_prefix=get_prefix, intents=intents, help_command=None
 evento_flush_task = None
 cargos_task = None
 wager_recovery_task = None
+inactive_purge_task = None
+_activity_writes = {}
+bot._user_activity_writes = _activity_writes
+
+USER_INACTIVITY_RETENTION = 60 * 24 * 60 * 60
+USER_ACTIVITY_WRITE_INTERVAL = 60 * 60
+INACTIVE_PURGE_INTERVAL = 6 * 60 * 60
+
+
+async def record_user_activity(user_id: int) -> None:
+    now = time.time()
+    if now - _activity_writes.get(user_id, 0) < USER_ACTIVITY_WRITE_INTERVAL:
+        return
+    _activity_writes[user_id] = now
+    try:
+        await touch_user_activity(user_id, now)
+    except Exception:
+        _activity_writes.pop(user_id, None)
+        logger.exception("No se pudo registrar actividad para el usuario %s", user_id)
+
+
+@bot.listen("on_command")
+async def track_prefix_command_activity(ctx):
+    if not ctx.author.bot:
+        await record_user_activity(ctx.author.id)
+
+
+@bot.listen("on_interaction")
+async def track_interaction_activity(interaction: discord.Interaction):
+    if interaction.user and not interaction.user.bot:
+        await record_user_activity(interaction.user.id)
 
 
 async def load_modules():
@@ -280,6 +313,62 @@ async def recover_expired_wagers_loop():
             await asyncio.sleep(30)
 
 
+async def _remove_temporary_roles_before_purge(user_id: int) -> bool:
+    for cargo in await get_user_temporary_roles(user_id):
+        guild = bot.get_guild(cargo["guild_id"])
+        if guild is None:
+            continue
+        role = guild.get_role(cargo["rol_id"])
+        if role is None:
+            continue
+        try:
+            member = guild.get_member(user_id) or await guild.fetch_member(user_id)
+        except discord.NotFound:
+            continue
+        try:
+            if role in member.roles:
+                await member.remove_roles(
+                    role,
+                    reason="Purga de datos por inactividad o solicitud del usuario",
+                )
+        except (discord.Forbidden, discord.HTTPException):
+            logger.exception(
+                "No se pudo retirar el rol %s antes de purgar al usuario %s",
+                cargo["rol_id"],
+                user_id,
+            )
+            return False
+    return True
+
+
+async def purge_inactive_users_loop():
+    await bot.wait_until_ready()
+    while not bot.is_closed():
+        try:
+            cutoff = time.time() - USER_INACTIVITY_RETENTION
+            user_ids = await get_inactive_user_ids(cutoff, limit=100)
+            purged = 0
+            for user_id in user_ids:
+                if await get_user_deletion_blocker(user_id):
+                    continue
+                if not await _remove_temporary_roles_before_purge(user_id):
+                    continue
+                if await purge_user_data(user_id, inactive_before=cutoff):
+                    _activity_writes.pop(user_id, None)
+                    purged += 1
+            if purged:
+                logger.info(
+                    "Purga automática: %s usuario(s) eliminado(s) tras 60 días de inactividad.",
+                    purged,
+                )
+            await asyncio.sleep(60 if len(user_ids) >= 100 else INACTIVE_PURGE_INTERVAL)
+        except asyncio.CancelledError:
+            raise
+        except Exception:
+            logger.exception("Error en la purga automática de usuarios inactivos")
+            await asyncio.sleep(300)
+
+
 @bot.event
 async def on_command_error(ctx, error):
     if isinstance(error, commands.CommandNotFound):
@@ -307,26 +396,12 @@ async def shutdown():
     logger.info("Caché flusheada correctamente.")
     await bot.close()
 
-AUTHORIZED_GUILD_ID = 980073134411644939
-
 @bot.event
 async def on_ready():
-    global evento_flush_task, cargos_task, wager_recovery_task
+    global evento_flush_task, cargos_task, wager_recovery_task, inactive_purge_task
     logger.info(f"Bot conectado como {bot.user}")
     logger.info("Caché iniciada | Flush cada 5 minutos")
     logger.info(f"Servidores activos: {len(bot.guilds)}")
-
-    # ── Verificar guilds autorizadas al inicio ─────────────
-    for guild in bot.guilds:
-        if guild.id != AUTHORIZED_GUILD_ID:
-            logger.warning(
-                f"Guild no autorizada detectada al iniciar | "
-                f"Nombre: {guild.name} | ID: {guild.id} | "
-                f"Miembros: {guild.member_count} | "
-                f"Fecha: {discord.utils.utcnow().strftime('%Y-%m-%d %H:%M:%S')} UTC"
-            )
-            logger.warning(f"Abandonando guild no autorizada: {guild.name} ({guild.id})")
-            await guild.leave()
 
     try:
         if GUILD_ID:
@@ -355,21 +430,13 @@ async def on_ready():
             name="apuestas-vencidas-worker",
         )
         logger.info("Task de apuestas vencidas iniciada | Revisión cada 30 segundos")
-    logger.info("\n⫷ 𝙋𝙐𝙍𝙋𝙇𝙀𝙅𝘼𝘾𝙆 𝙀𝙉 𝙇𝙄𝙉𝙀𝘼 ⫸\n")
-
-
-@bot.event
-async def on_guild_join(guild: discord.Guild):
-    if guild.id != AUTHORIZED_GUILD_ID:
-        logger.warning(
-            f"Intento de instalación no autorizado detectado | "
-            f"Nombre: {guild.name} | ID: {guild.id} | "
-            f"Miembros: {guild.member_count} | "
-            f"Fecha: {discord.utils.utcnow().strftime('%Y-%m-%d %H:%M:%S')} UTC"
+    if inactive_purge_task is None or inactive_purge_task.done():
+        inactive_purge_task = asyncio.create_task(
+            purge_inactive_users_loop(),
+            name="purga-usuarios-inactivos-worker",
         )
-        logger.warning(f"Abandonando guild no autorizada: {guild.name} ({guild.id})")
-        await guild.leave()
-
+        logger.info("Task de privacidad iniciada | Purga tras 60 días de inactividad")
+    logger.info("\n⫷ 𝙋𝙐𝙍𝙋𝙇𝙀𝙅𝘼𝘾𝙆 𝙀𝙉 𝙇𝙄𝙉𝙀𝘼 ⫸\n")
 
 def run_bot():
     async def main():

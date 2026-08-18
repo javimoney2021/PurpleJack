@@ -444,6 +444,11 @@ async def init_empleos_tables():
         CREATE INDEX IF NOT EXISTS empleos_jornadas_estado_idx
         ON empleos_jornadas (status, expires_at)
         """)
+        await conn.execute("""
+        INSERT INTO user_activity (user_id, last_activity)
+        SELECT user_id, $1 FROM empleos_users
+        ON CONFLICT (user_id) DO NOTHING
+        """, time.time())
 
 
 async def get_jornada_activa(user_id: int):
