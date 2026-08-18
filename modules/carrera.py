@@ -26,7 +26,6 @@ logger = logging.getLogger(__name__)
 JOIN_TIMEOUT  = 12
 MAX_PLAYERS   = 5
 MAX_BET       = 5_000
-RESULT_DELETE = 60   # segundos antes de borrar el embed final
 TRACK_LENGTH = 24
 VISUAL_TRACK_LENGTH = 20
 MIN_RACE_TICKS = 6
@@ -472,12 +471,6 @@ async def run_race(
     result_embed = build_result_embed(winner_id, monto, real_players, has_bot)
     try:
         await message.edit(embed=result_embed)
-    except Exception:
-        pass
-
-    await asyncio.sleep(RESULT_DELETE)
-    try:
-        await message.delete()
     except Exception:
         pass
 

@@ -40,9 +40,9 @@ def _apply_event_victim_penalty(user_id: int, stolen_amount: int) -> None:
     cache.record_evento_balance_delta(user_id, -penalty)
 
 
-async def _reply_recent_victim(ctx) -> None:
+async def _reply_recent_victim(ctx, target: discord.Member) -> None:
     await ctx.message.reply(
-        "🥺 Este usuario ha sido victima de la delincuencia recientemente, "
+        f"🥺 **{target.display_name}** fue víctima de la delincuencia recientemente, "
         "un poquito de porfavor...",
         mention_author=False,
     )
@@ -169,7 +169,7 @@ class Rob(commands.Cog):
 
         protected_until = await get_rob_victim_protection(target_id)
         if protected_until > now:
-            return await _reply_recent_victim(ctx)
+            return await _reply_recent_victim(ctx, target)
 
         author_user = await get_user(author_id)
         target_user = await get_user(target_id)
@@ -227,7 +227,7 @@ class Rob(commands.Cog):
                 )
                 if not transfer["ok"]:
                     if transfer.get("reason") == "victim_protected":
-                        return await _reply_recent_victim(ctx)
+                        return await _reply_recent_victim(ctx, target)
                     return await ctx.send(
                         "⚠️ El saldo del objetivo cambió durante el robo. Inténtalo de nuevo."
                     )
@@ -259,7 +259,7 @@ class Rob(commands.Cog):
                 )
                 if not transfer["ok"]:
                     if transfer.get("reason") == "victim_protected":
-                        return await _reply_recent_victim(ctx)
+                        return await _reply_recent_victim(ctx, target)
                     return await ctx.send(
                         "⚠️ El saldo del objetivo cambió durante el robo. Inténtalo de nuevo."
                     )
