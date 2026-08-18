@@ -1,3 +1,4 @@
+# Deployment refresh: 2026-08-17
 from discord.ext import commands
 from discord import app_commands, ui, ButtonStyle, Interaction
 import discord
