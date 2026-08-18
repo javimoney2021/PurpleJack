@@ -232,7 +232,7 @@ def _build_cooldowns_embed(guild_id: int) -> discord.Embed:
 
     embed = discord.Embed(title="⏱️ Cooldowns de Juegos", color=discord.Color.purple())
     embed.set_thumbnail(
-        url="https://raw.githubusercontent.com/javimoney2021/PurpleJack/main/Thumbs/CD.png"
+        url="https://pub-a09b3609b6b34dfab5c7aa7742cd1a8a.r2.dev/Purple%20jack%20Harcode/cdPJ.png"
     )
     embed.description = (
         f"**!work**     — Cada {work_cd}\n"

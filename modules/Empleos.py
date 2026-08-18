@@ -85,7 +85,7 @@ OFICINA_XP_MINIMA = 30
 MAESTRIA_XP_COSTO = 150
 OFICINA_PANEL_SEGUNDOS = 300
 JORNADA_PERSISTENTE_SEGUNDOS = 10 * 365 * 24 * 3600
-MAESTRIA_THUMBNAIL_URL = "https://pub-a09b3609b6b34dfab5c7aa7742cd1a8a.r2.dev/Purple%20jack%20Harcode/Maestria.png"
+MAESTRIA_THUMBNAIL_URL = "https://pub-a09b3609b6b34dfab5c7aa7742cd1a8a.r2.dev/Purple%20jack%20Harcode/MaestriaPJ.png"
 
 EMPLEOS_MAESTRIA = {
     "chantajista": {
@@ -1155,7 +1155,7 @@ def build_exp_embed(member: discord.Member, data: dict) -> discord.Embed:
     embed.add_field(name="Trabajos fallidos", value=str(data.get("trabajos_fallidos", 0)), inline=True)
     embed.add_field(name="Total generado", value=f"{data.get('total_generado', 0)} {COIN}", inline=False)
     embed.set_footer(text="Tu progreso laboral se actualiza al terminar cada jornada.")
-    embed.set_thumbnail(url="https://pub-a09b3609b6b34dfab5c7aa7742cd1a8a.r2.dev/Purple%20jack%20Harcode/exp%20thumb.png")
+    embed.set_thumbnail(url="https://pub-a09b3609b6b34dfab5c7aa7742cd1a8a.r2.dev/Purple%20jack%20Harcode/ExpPJ.png")
     return embed
 
 
@@ -1698,7 +1698,7 @@ class Empleos(commands.Cog):
                 ),
                 inline=False,
             )
-        embed.set_thumbnail(url="https://pub-a09b3609b6b34dfab5c7aa7742cd1a8a.r2.dev/Purple%20jack%20Harcode/Empleos%20thumb.png")
+        embed.set_thumbnail(url="https://pub-a09b3609b6b34dfab5c7aa7742cd1a8a.r2.dev/Purple%20jack%20Harcode/EmpleosPJ.png")
         embed.set_footer(text="Aplica con: !aplicar <empleo>")
         await ctx.send(embed=embed)
 
@@ -2875,7 +2875,7 @@ class LimpiadorView(JornadaView):
         embed.add_field(name="Objetivo", value="Descubre los 3 símbolos de reciclaje para completar la tarea.", inline=False)
         embed.add_field(name="Símbolos de 🗑️ restantes", value=str(self.basura), inline=True)
         embed.add_field(name="Pago estimado actual", value=f"{pago_actual} {COIN}", inline=False)
-        embed.set_thumbnail(url="https://pub-a09b3609b6b34dfab5c7aa7742cd1a8a.r2.dev/Purple%20jack%20Harcode/Limpia%20Thumb.webp")
+        embed.set_thumbnail(url="https://pub-a09b3609b6b34dfab5c7aa7742cd1a8a.r2.dev/Purple%20jack%20Harcode/LimpiadorPJ.png")
         embed.set_footer(text="Trabajo de Limpiador en progreso......")
         return embed
 
@@ -3131,7 +3131,7 @@ class IngenieroView(JornadaView):
         embed.add_field(name="Vidas restantes", value=corazones, inline=False)
         embed.add_field(name="Pares encontrados", value=str(self.pares), inline=True)
         embed.add_field(name="Pago estimado actual", value=f"{pago_actual} {COIN}", inline=True)
-        embed.set_thumbnail(url="https://pub-a09b3609b6b34dfab5c7aa7742cd1a8a.r2.dev/Purple%20jack%20Harcode/Inge%20thumb.png")
+        embed.set_thumbnail(url="https://pub-a09b3609b6b34dfab5c7aa7742cd1a8a.r2.dev/Purple%20jack%20Harcode/IngePJ.png")
         embed.set_footer(text="Trabajo de Ingeniero en progreso......")
         return embed
 
@@ -3318,7 +3318,7 @@ class PlomeroView(JornadaView):
         )
         embed.add_field(name="Vidas restantes", value=corazones, inline=False)
         embed.add_field(name="Ductos Sellados", value=str(self.hallazgos), inline=True)
-        embed.set_thumbnail(url="https://pub-a09b3609b6b34dfab5c7aa7742cd1a8a.r2.dev/Purple%20jack%20Harcode/Plomero%20Thumb.webp")
+        embed.set_thumbnail(url="https://pub-a09b3609b6b34dfab5c7aa7742cd1a8a.r2.dev/Purple%20jack%20Harcode/PlomeroPJ.png")
         embed.set_footer(text="Trabajo de Plomero en progreso......")
         return embed
 

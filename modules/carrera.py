@@ -19,9 +19,12 @@ from core.config import COIN, STAFF_ROLE
 JOIN_TIMEOUT  = 12
 MAX_PLAYERS   = 5
 MAX_BET       = 5_000
-GIF_URL       = "https://pub-a09b3609b6b34dfab5c7aa7742cd1a8a.r2.dev/Purple%20jack%20Harcode/carrera.gif"
-GIF_DURATION  = 12    # segundos que se muestra el gif antes del resultado
 RESULT_DELETE = 60   # segundos antes de borrar el embed final
+TRACK_LENGTH = 24
+MIN_RACE_TICKS = 6
+MAX_RACE_TICKS = 10
+RACE_TICK_SECONDS = 1.2
+FINISH_HOLD_SECONDS = 1.5
 
 # Nombre del bot de relleno
 BOT_NAME = "Jack"
@@ -268,6 +271,113 @@ def build_result_embed(winner_id, monto, players, has_bot: bool):
 
 
 # ── RACE LOGIC ─────────────────────────────────────────
+def build_race_progress_embed(
+    real_players,
+    progress,
+    monto,
+    has_bot,
+    tick,
+    winner_key=None,
+):
+    """Construye la pista animada sin alterar el resultado económico elegido."""
+    racers = [(player.id, player.mention) for player in real_players]
+    if has_bot:
+        racers.append(("jack", f"**{BOT_NAME}** 🤖"))
+
+    lines = []
+    for racer_key, label in racers:
+        distance = progress[racer_key]
+        trail = "•" * distance
+        remaining = "·" * (TRACK_LENGTH - distance)
+        finish = " 🏁" if distance >= TRACK_LENGTH else ""
+        lines.append(f"{label}\n🏎️ `{trail}{remaining}`{finish}")
+
+    if winner_key is not None:
+        if winner_key == "jack":
+            status = f"🏁 **{BOT_NAME} cruzó la meta!**"
+        else:
+            status = f"🏁 <@{winner_key}> **cruzó la meta!**"
+        color = discord.Color.green()
+    else:
+        lead = max(progress.values())
+        leaders = [key for key, distance in progress.items() if distance == lead]
+        if len(leaders) > 1:
+            status = "⚡ ¡La carrera está muy reñida!"
+        elif leaders[0] == "jack":
+            status = f"💨 **{BOT_NAME}** lleva la delantera."
+        else:
+            status = f"🔥 <@{leaders[0]}> lleva la delantera."
+        color = discord.Color.gold()
+
+    n_total = len(real_players) + (1 if has_bot else 0)
+    embed = discord.Embed(
+        title="🏎️ Carrera PurpleJack",
+        description=f"{status}\n\n" + "\n\n".join(lines),
+        color=color,
+    )
+    embed.set_footer(
+        text=(
+            f"Apuesta: {monto} · Pozo total: {monto * n_total} · "
+            f"Avance {min(tick, MAX_RACE_TICKS)}/{MAX_RACE_TICKS}"
+        )
+    )
+    return embed
+
+
+async def animate_race(message, real_players, monto, has_bot, winner_id):
+    """Anima una sola publicación y garantiza que el ganador previsto llegue primero."""
+    racer_keys = [player.id for player in real_players]
+    if has_bot:
+        racer_keys.append("jack")
+    winner_key = winner_id if winner_id is not None else "jack"
+    progress = {key: 0 for key in racer_keys}
+
+    try:
+        await message.edit(
+            embed=build_race_progress_embed(
+                real_players, progress, monto, has_bot, tick=0
+            ),
+            view=None,
+        )
+    except discord.HTTPException:
+        pass
+
+    for tick in range(1, MAX_RACE_TICKS + 1):
+        await asyncio.sleep(RACE_TICK_SECONDS)
+
+        for racer_key in racer_keys:
+            step = random.randint(1, 5)
+            if racer_key == winner_key:
+                step += random.randint(0, 2)
+            # Ningún corredor puede cruzar antes del ganador programado.
+            progress[racer_key] = min(TRACK_LENGTH - 1, progress[racer_key] + step)
+
+        winner_finished = tick >= MIN_RACE_TICKS and (
+            progress[winner_key] >= TRACK_LENGTH - 3 or tick == MAX_RACE_TICKS
+        )
+        if winner_finished:
+            progress[winner_key] = TRACK_LENGTH
+
+        try:
+            await message.edit(
+                embed=build_race_progress_embed(
+                    real_players,
+                    progress,
+                    monto,
+                    has_bot,
+                    tick,
+                    winner_key=winner_key if winner_finished else None,
+                ),
+                view=None,
+            )
+        except discord.HTTPException:
+            pass
+
+        if winner_finished:
+            await asyncio.sleep(FINISH_HOLD_SECONDS)
+            return
+
+
 async def run_race(
     message,
     real_players,
@@ -288,23 +398,10 @@ async def run_race(
     else:
         winner_id = random.choice(real_players).id
 
-    # ── Mostrar embed con GIF mientras "corre" la carrera ─────────
-    gif_embed = discord.Embed(
-        title="🏎️ ¡La carrera ha comenzado!",
-        color=discord.Color.gold()
-    )
-    gif_embed.set_image(url=GIF_URL)
     n_total = len(real_players) + (1 if has_bot else 0)
-    pot = monto * n_total
-    gif_embed.set_footer(text=f"Apuesta: {monto} • Pozo Total {pot}.")
 
     try:
-        await message.edit(embed=gif_embed, view=None)
-    except Exception:
-        pass
-
-    try:
-        await asyncio.sleep(GIF_DURATION)
+        await animate_race(message, real_players, monto, has_bot, winner_id)
 
         # El ganador recupera su apuesta y recibe 150% de las apuestas rivales.
         payouts = {}

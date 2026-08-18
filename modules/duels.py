@@ -25,8 +25,8 @@ DUEL_TIMEOUT = 20  # segundos para aceptar/rechazar
 ROUND_TIMEOUT = 5  # segundos que la espada está visible
 TOTAL_ROUNDS = 9
 GRID_SIZE = 5
-RETAL_THUMBNAIL = "https://pub-a09b3609b6b34dfab5c7aa7742cd1a8a.r2.dev/Purple%20jack%20Harcode/Kill.png"
-WIN_THUMBNAIL = "https://pub-a09b3609b6b34dfab5c7aa7742cd1a8a.r2.dev/Purple%20jack%20Harcode/win.png"
+RETAL_THUMBNAIL = "https://pub-a09b3609b6b34dfab5c7aa7742cd1a8a.r2.dev/Purple%20jack%20Harcode/Kill_pj.png"
+WIN_THUMBNAIL = "https://pub-a09b3609b6b34dfab5c7aa7742cd1a8a.r2.dev/Purple%20jack%20Harcode/winpj.png"
 NAVE_ROLE_ID = 1515377564439281726  # Miembros de la Nave
 
 # ── GLOBAL STATE ───────────────────────────────────────

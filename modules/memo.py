@@ -19,7 +19,7 @@ MAX_INTENTOS  = 6
 AUTO_DELETE   = 80
 HIDDEN_EMOJI  = "🟦"
 EMOJIS_PARES  = ["🎲", "🍪", "🍇", "🔪", "💎", "🍼", "👑", "🚀"]
-MEMO_WIN_THUMBNAIL = "https://pub-a09b3609b6b34dfab5c7aa7742cd1a8a.r2.dev/Purple%20jack%20Harcode/mvp.png"
+MEMO_WIN_THUMBNAIL = "https://pub-a09b3609b6b34dfab5c7aa7742cd1a8a.r2.dev/Purple%20jack%20Harcode/MvpPJ.png"
 MEMO_LOSS_THUMBNAIL = "https://pub-a09b3609b6b34dfab5c7aa7742cd1a8a.r2.dev/Purple%20jack%20Harcode/perdi.png"
 
 # ── ESTADO GLOBAL ──────────────────────────────────────
