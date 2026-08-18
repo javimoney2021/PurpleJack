@@ -21,6 +21,7 @@ MAX_PLAYERS   = 5
 MAX_BET       = 5_000
 RESULT_DELETE = 60   # segundos antes de borrar el embed final
 TRACK_LENGTH = 24
+VISUAL_TRACK_LENGTH = 20
 MIN_RACE_TICKS = 6
 MAX_RACE_TICKS = 10
 RACE_TICK_SECONDS = 1.2
@@ -287,10 +288,16 @@ def build_race_progress_embed(
     lines = []
     for racer_key, label in racers:
         distance = progress[racer_key]
-        trail = "•" * distance
-        remaining = "·" * (TRACK_LENGTH - distance)
+        visible_position = min(
+            VISUAL_TRACK_LENGTH - 1,
+            (
+                distance * (VISUAL_TRACK_LENGTH - 1) + TRACK_LENGTH // 2
+            ) // TRACK_LENGTH,
+        )
+        trail = "▫️" * visible_position
+        remaining = "▫️" * (VISUAL_TRACK_LENGTH - visible_position - 1)
         finish = " 🏁" if distance >= TRACK_LENGTH else ""
-        lines.append(f"{label}\n🏎️ `{trail}{remaining}`{finish}")
+        lines.append(f"{label}\n{trail}🚗{remaining}{finish}")
 
     if winner_key is not None:
         if winner_key == "jack":
@@ -560,7 +567,7 @@ class Carrera(commands.Cog):
         _carrera_activa = nueva_activa
         estado = "✅ Activado" if _carrera_activa else "🔴 Desactivado"
         await interaction.followup.send(
-            f"🏇 Sistema de Carreras: **{estado}**", ephemeral=False
+            f"🏎️ Sistema de Carreras: **{estado}**", ephemeral=False
         )
 
     @carrera.error
