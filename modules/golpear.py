@@ -11,6 +11,7 @@ logger = logging.getLogger(__name__)
 
 # ── CONFIG BASE ────────────────────────────────────────
 GOLPEAR_GIF = "https://pub-a09b3609b6b34dfab5c7aa7742cd1a8a.r2.dev/Purple%20jack%20Harcode/cofre1.gif"
+COFRE_ROTO_IMAGE = "https://pub-a09b3609b6b34dfab5c7aa7742cd1a8a.r2.dev/Purple%20jack%20Harcode/CofreRoto.png"
 MAX_GOLPES = 3
 COFRE_TIMEOUT = 6
 
@@ -94,8 +95,8 @@ class GolpearView(discord.ui.View):
                 description=f"Los aventureros que golpearon primero:\n\n{lineas}",
                 color=discord.Color.gold()
             )
-            embed.set_image(url=GOLPEAR_GIF)
-            embed.set_footer(text="Este mensaje se eliminará en breve.")
+            embed.set_image(url=COFRE_ROTO_IMAGE)
+            embed.set_footer(text="Drop de Cofres - Aprovecha!")
         else:
             embed = discord.Embed(
                 title="💨 Cofre Vencido",
@@ -179,8 +180,8 @@ class GolpearView(discord.ui.View):
             description=f"Los aventureros que golpearon primero:\n\n{lineas}",
             color=discord.Color.gold()
         )
-        embed.set_image(url=GOLPEAR_GIF)
-        embed.set_footer(text="Ganancias entregadas....")
+        embed.set_image(url=COFRE_ROTO_IMAGE)
+        embed.set_footer(text="Drop de Cofres - Aprovecha!")
 
         try:
             await message.edit(embed=embed, view=self)
