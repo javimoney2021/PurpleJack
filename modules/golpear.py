@@ -103,7 +103,8 @@ class GolpearView(discord.ui.View):
                 description="El cofre desapareció... Nadie golpeó a tiempo.",
                 color=discord.Color.dark_gray()
             )
-            embed.set_image(url=GOLPEAR_GIF)
+            embed.set_image(url=COFRE_ROTO_IMAGE)
+            embed.set_footer(text="Drop de Cofres - Aprovecha!")
 
         try:
             await self.message.edit(embed=embed, view=self)
@@ -113,7 +114,7 @@ class GolpearView(discord.ui.View):
                 error,
             )
 
-        await asyncio.sleep(240)
+        await asyncio.sleep(4)
         try:
             await self.message.delete()
         except discord.NotFound:
