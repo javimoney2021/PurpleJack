@@ -150,23 +150,38 @@ class JoinRaceView(discord.ui.View):
 
     @discord.ui.button(label="🏎️ Unirse", style=discord.ButtonStyle.primary)
     async def unirse(self, interaction: discord.Interaction, button: discord.ui.Button):
+        # Confirmar de inmediato evita que Discord marque la interacción como
+        # fallida mientras Aiven valida y reserva la apuesta.
+        await interaction.response.defer()
+
         async with self.join_lock:
             if self.started:
-                return await interaction.response.send_message("❌ La carrera ya comenzó.", ephemeral=True)
+                return await interaction.followup.send("❌ La carrera ya comenzó.", ephemeral=True)
             if interaction.user.id in self.wagers:
-                return await interaction.response.send_message("❌ Ya estás inscrito.", ephemeral=True)
+                return await interaction.followup.send("❌ Ya estás inscrito.", ephemeral=True)
             if len(self.players) >= MAX_PLAYERS:
-                return await interaction.response.send_message("❌ La carrera está llena.", ephemeral=True)
+                return await interaction.followup.send("❌ La carrera está llena.", ephemeral=True)
 
-            wager = await reserve_wager(
-                interaction.user.id,
-                "carrera",
-                self.monto,
-                session_id=self.session_id,
-                expires_in=180,
-            )
+            try:
+                wager = await reserve_wager(
+                    interaction.user.id,
+                    "carrera",
+                    self.monto,
+                    session_id=self.session_id,
+                    expires_in=180,
+                )
+            except Exception:
+                logger.exception(
+                    "No se pudo reservar la apuesta al unirse a la carrera %s",
+                    self.session_id,
+                )
+                return await interaction.followup.send(
+                    "⚠️ No se pudo procesar tu entrada. Intenta unirte nuevamente.",
+                    ephemeral=True,
+                )
+
             if not wager["ok"]:
-                return await interaction.response.send_message(
+                return await interaction.followup.send(
                     f"❌ No tienes suficiente balance. Necesitas **{self.monto}** {COIN}.",
                     ephemeral=True,
                 )
@@ -174,7 +189,7 @@ class JoinRaceView(discord.ui.View):
             self.players.append(interaction.user)
             self.wagers[interaction.user.id] = wager["id"]
             try:
-                await interaction.response.edit_message(
+                await interaction.message.edit(
                     embed=self.build_embed(countdown=None),
                     view=self,
                 )
@@ -182,7 +197,14 @@ class JoinRaceView(discord.ui.View):
                 self.players.remove(interaction.user)
                 self.wagers.pop(interaction.user.id, None)
                 await refund_wager(wager["id"])
-                raise
+                logger.exception(
+                    "No se pudo actualizar el panel de la carrera %s",
+                    self.session_id,
+                )
+                await interaction.followup.send(
+                    "⚠️ No se pudo confirmar tu entrada; tu apuesta fue reembolsada.",
+                    ephemeral=True,
+                )
 
     async def on_timeout(self):
         async with self.join_lock:

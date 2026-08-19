@@ -19,6 +19,7 @@ from core.config import (
     memo_config, blackjack_config,
 )
 from core.cache import MAX_BANK
+from core.rankings import get_guild_balance_ranking
 
 TOP_COOLDOWN = 300
 EVENTO_THUMBNAIL_URL = "https://pub-a09b3609b6b34dfab5c7aa7742cd1a8a.r2.dev/Purple%20jack%20Harcode/PurpleThumb.png"
@@ -714,35 +715,13 @@ class Economy(commands.Cog):
             )
 
         cache.set_top_cooldown(user_id)
-        await cache.flush_to_db()
-
-        from core.database import pool
-
-        async with pool.acquire() as conn:
-            rows = await conn.fetch(
-                "SELECT id, balance FROM users ORDER BY balance DESC LIMIT 15"
-            )
-
-        # Usar la función pública get_all_cache() en lugar de importar _cache
-        user_cache = cache.get_all_cache()
-
-        resultados = []
-        for row in rows:
-            uid = row["id"]
-            if uid in user_cache:
-                total = user_cache[uid]["balance"]
-            else:
-                total = row["balance"]
-            resultados.append((uid, total))
-
-        resultados.sort(key=lambda x: x[1], reverse=True)
+        resultados = await get_guild_balance_ranking(ctx.guild, limit=15)
 
         medallas    = ["🥇", "🥈", "🥉"]
         descripcion = ""
 
-        for i, (uid, balance) in enumerate(resultados):
-            member = ctx.guild.get_member(uid)
-            nombre = member.display_name if member else f"<@{uid}>"
+        for i, (member, balance) in enumerate(resultados):
+            nombre = member.display_name
             posicion     = medallas[i] if i < 3 else f"**{i+1}.**"
             descripcion += f"{posicion} {nombre} —— {COIN} **{balance}**\n"
 

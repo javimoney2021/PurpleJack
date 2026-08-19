@@ -16,6 +16,7 @@ from core.config import rob_config, COIN, ROB_VICTIM_PROTECTION_SECONDS
 from core import cache
 from core.cache import get_rob_cooldown, set_rob_cooldown
 from core.cd_boost import resolve_cd_boost, send_cd_boost_notice
+from core.rankings import get_guild_balance_ranking
 
 SABOTEADOR_EXITO_PROB = 0.70
 SABOTEADOR_ROBO_PORCENTAJE = 0.20
@@ -64,33 +65,11 @@ class Rob(commands.Cog):
 
     async def _get_top_target(self, ctx, position: int):
         """Resuelve una posición del Top 15 al miembro correspondiente."""
-        await cache.flush_to_db()
-
-        from core.database import pool
-
-        async with pool.acquire() as conn:
-            rows = await conn.fetch(
-                "SELECT id, balance FROM users ORDER BY balance DESC LIMIT 15"
-            )
-
-        user_cache = cache.get_all_cache()
-        rankings = [
-            (row["id"], user_cache.get(row["id"], {}).get("balance", row["balance"]))
-            for row in rows
-        ]
-        rankings.sort(key=lambda entry: entry[1], reverse=True)
+        rankings = await get_guild_balance_ranking(ctx.guild, limit=15)
 
         if position > len(rankings):
             return None
-
-        target_id = rankings[position - 1][0]
-        member = ctx.guild.get_member(target_id)
-        if member is not None:
-            return member
-        try:
-            return await ctx.guild.fetch_member(target_id)
-        except (discord.NotFound, discord.HTTPException):
-            return None
+        return rankings[position - 1][0]
 
     async def _get_reply_target(self, ctx):
         """Resuelve al autor del mensaje al que se respondió, incluso sin caché."""
