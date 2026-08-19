@@ -14,7 +14,7 @@ from core.config import COIN, dados_config
 from core import cache
 from core.cd_boost import resolve_cd_boost, send_cd_boost_notice
 
-DICE_GIF = "https://pub-a09b3609b6b34dfab5c7aa7742cd1a8a.r2.dev/Purple%20jack%20Harcode/dice.gif"
+DICE_GIF = "https://pub-a09b3609b6b34dfab5c7aa7742cd1a8a.r2.dev/Purple%20jack%20Harcode/DadosPJ.gif"
 _ACTIVE_DADOS: set[int] = set()
 _DADOS_START_LOCKS: dict[int, asyncio.Lock] = {}
 _SEEN_DADOS_MESSAGES: dict[int, float] = {}
@@ -253,9 +253,9 @@ class Dados(commands.Cog):
                 "🔧 El sistema de dados está en mantenimiento. Intenta después."
             )
 
-        if monto <= 0:
-            return await ctx.send(
-                f"❌ {ctx.author.mention} La apuesta debe ser mayor a 0."
+        if monto < 100:
+            return await ctx.message.reply(
+                f"Apuesta minima es 100 {COIN} no querras vivir de migajas?"
             )
 
         if monto > dados_config["max_apuesta"]:

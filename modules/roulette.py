@@ -62,9 +62,9 @@ class Roulette(commands.Cog):
                 f"o un número del `0` al `36`."
             )
 
-        if apuesta <= 0:
-            return await ctx.send(
-                f"❌ {ctx.author.mention} La apuesta debe ser mayor a 0."
+        if apuesta < 100:
+            return await ctx.message.reply(
+                f"Apuesta minima es 100 {COIN} no querras vivir de migajas?"
             )
 
         if apuesta > ruleta_config["max_apuesta"]:

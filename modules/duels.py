@@ -526,8 +526,10 @@ class Duels(commands.Cog):
         if ctx.guild.id in _active_duels:
             return await ctx.send("❌ La arena de duelo está ocupada. Espera a que termine el duelo actual.")
 
-        if monto <= 0:
-            return await ctx.send("❌ El monto debe ser mayor a 0.")
+        if monto < 100:
+            return await ctx.message.reply(
+                f"Apuesta minima es 100 {COIN} no querras vivir de migajas?"
+            )
 
         # Verificar saldo del retador
         retador_data = await get_user(ctx.author.id)

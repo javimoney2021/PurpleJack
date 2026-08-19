@@ -296,9 +296,9 @@ class Memo(commands.Cog):
         if not memo_config["activa"]:
             return await ctx.send("🔧 El sistema de Memo está desactivado. Intenta después.")
 
-        if monto <= 0:
-            return await ctx.send(
-                f"❌ {ctx.author.mention} El monto debe ser mayor a 0."
+        if monto < 100:
+            return await ctx.message.reply(
+                f"Apuesta minima es 100 {COIN} no querras vivir de migajas?"
             )
         if user_id in _active_memo:
             return await ctx.send(

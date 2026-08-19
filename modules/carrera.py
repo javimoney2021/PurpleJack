@@ -32,16 +32,72 @@ MIN_RACE_TICKS = 6
 MAX_RACE_TICKS = 10
 RACE_TICK_SECONDS = 1.2
 FINISH_HOLD_SECONDS = 1.5
-RACE_CHANNEL_COOLDOWN = 120
-RACE_CHANNEL_COOLDOWN_KEY = "carrera_canal"
+RACE_GLOBAL_COOLDOWN = 120
+RACE_GLOBAL_SCOPE_ID = 0
+RACE_GLOBAL_COOLDOWN_KEY = "carrera_global"
 
 # Nombre del bot de relleno
 BOT_NAME = "Jack"
 JACK_PLAYER_WIN_PROBABILITY = 0.30
 
 # ── ESTADO GLOBAL ──────────────────────────────────────
-_active_races   = set()
+_race_session_lock = asyncio.Lock()
+_active_race_session = None
 _carrera_activa = True
+
+
+async def _claim_race_session(session_id, channel_id, author_id):
+    """Reserva atómicamente la única pista global y consulta su cooldown."""
+    global _active_race_session
+
+    async with _race_session_lock:
+        if _active_race_session is not None:
+            return {"ok": False, "reason": "active"}
+
+        now = time.time()
+        cooldown_expiry = cache.get_game_cooldown_cache(
+            RACE_GLOBAL_SCOPE_ID,
+            RACE_GLOBAL_COOLDOWN_KEY,
+        )
+        if cooldown_expiry <= now:
+            cooldown_expiry = await get_game_cooldown(
+                RACE_GLOBAL_SCOPE_ID,
+                RACE_GLOBAL_COOLDOWN_KEY,
+            )
+            if cooldown_expiry > now:
+                cache.set_game_cooldown_cache(
+                    RACE_GLOBAL_SCOPE_ID,
+                    RACE_GLOBAL_COOLDOWN_KEY,
+                    cooldown_expiry,
+                )
+
+        if cooldown_expiry > now:
+            return {
+                "ok": False,
+                "reason": "cooldown",
+                "expires_at": cooldown_expiry,
+            }
+
+        _active_race_session = {
+            "session_id": session_id,
+            "channel_id": channel_id,
+            "author_id": author_id,
+        }
+        return {"ok": True}
+
+
+async def _release_race_session(session_id):
+    """Libera la pista solo si sigue perteneciendo a esta sesión."""
+    global _active_race_session
+
+    async with _race_session_lock:
+        if (
+            _active_race_session is not None
+            and _active_race_session["session_id"] == session_id
+        ):
+            _active_race_session = None
+            return True
+        return False
 
 
 def is_staff():
@@ -197,7 +253,7 @@ class SoloVsJackView(discord.ui.View):
             )
         except Exception:
             await refund_wager_session(self.session_id)
-            _active_races.discard(self.channel_id)
+            await _release_race_session(self.session_id)
             raise
 
     @discord.ui.button(label="NO", style=discord.ButtonStyle.danger)
@@ -211,7 +267,7 @@ class SoloVsJackView(discord.ui.View):
 
         self.resolved = True
         await refund_wager_session(self.session_id)
-        _active_races.discard(self.channel_id)
+        await _release_race_session(self.session_id)
         for item in self.children:
             item.disabled = True
         await interaction.response.edit_message(
@@ -228,7 +284,7 @@ class SoloVsJackView(discord.ui.View):
             return
         self.resolved = True
         await refund_wager_session(self.session_id)
-        _active_races.discard(self.channel_id)
+        await _release_race_session(self.session_id)
         for item in self.children:
             item.disabled = True
         if self.message:
@@ -429,7 +485,7 @@ async def run_race(
             raise RuntimeError("No se pudo liquidar el pozo de la carrera.")
     except Exception:
         await refund_wager_session(session_id)
-        _active_races.discard(channel_id)
+        await _release_race_session(session_id)
         try:
             await message.edit(
                 embed=discord.Embed(
@@ -443,29 +499,29 @@ async def run_race(
             pass
         return
 
-    cooldown_expiry = time.time() + RACE_CHANNEL_COOLDOWN
+    cooldown_expiry = time.time() + RACE_GLOBAL_COOLDOWN
     cache.set_game_cooldown_cache(
-        channel_id,
-        RACE_CHANNEL_COOLDOWN_KEY,
+        RACE_GLOBAL_SCOPE_ID,
+        RACE_GLOBAL_COOLDOWN_KEY,
         cooldown_expiry,
     )
     try:
         await set_game_cooldown(
-            channel_id,
-            RACE_CHANNEL_COOLDOWN_KEY,
+            RACE_GLOBAL_SCOPE_ID,
+            RACE_GLOBAL_COOLDOWN_KEY,
             cooldown_expiry,
         )
     except Exception:
         # El pago ya fue liquidado: el fallback en RAM evita bloquear o
         # revertir incorrectamente una carrera válida si falla esta escritura.
         logger.exception(
-            "No se pudo persistir el cooldown de carrera para el canal %s",
-            channel_id,
+            "No se pudo persistir el cooldown global de carrera para la sesión %s",
+            session_id,
         )
 
-    # La carrera económica ya terminó. Liberar el canal antes de conservar
-    # el resultado visible evita bloquear nuevas carreras durante 60 segundos.
-    _active_races.discard(channel_id)
+    # La carrera económica ya terminó. La sesión deja de estar activa, pero
+    # el cooldown global mantiene la pista cerrada durante dos minutos.
+    await _release_race_session(session_id)
 
     # ── Embed de resultado final ───────────────────────────────────
     result_embed = build_result_embed(winner_id, monto, real_players, has_bot)
@@ -487,53 +543,48 @@ class Carrera(commands.Cog):
         if monto is None:
             return await ctx.send(f"❌ {ctx.author.mention} Formato correcto: `!carrera {{monto}}`")
 
-        if monto <= 0:
-            return await ctx.send(f"❌ {ctx.author.mention} El monto debe ser mayor a 0.")
+        if monto < 100:
+            return await ctx.message.reply(
+                f"Apuesta minima es 100 {COIN} no querras vivir de migajas?"
+            )
 
         if monto > MAX_BET:
             return await ctx.message.reply(f"No puedes apostar mas de {MAX_BET} {COIN}")
 
-        if ctx.channel.id in _active_races:
-            return await ctx.send(f"❌ {ctx.author.mention} Ya hay una carrera activa en este canal.")
-
-        now = time.time()
-        cooldown_expiry = cache.get_game_cooldown_cache(
+        session_id = str(uuid.uuid4())
+        claim = await _claim_race_session(
+            session_id,
             ctx.channel.id,
-            RACE_CHANNEL_COOLDOWN_KEY,
+            ctx.author.id,
         )
-        if cooldown_expiry <= now:
-            cooldown_expiry = await get_game_cooldown(
-                ctx.channel.id,
-                RACE_CHANNEL_COOLDOWN_KEY,
+        if not claim["ok"] and claim["reason"] == "active":
+            return await ctx.message.reply(
+                "🏁 La pista de carreras está ocupada por otros corredores."
             )
-            if cooldown_expiry > now:
-                cache.set_game_cooldown_cache(
-                    ctx.channel.id,
-                    RACE_CHANNEL_COOLDOWN_KEY,
-                    cooldown_expiry,
-                )
-
-        if cooldown_expiry > now:
+        if not claim["ok"] and claim["reason"] == "cooldown":
             return await ctx.message.reply(
                 "🏁 La pista de carreras está ocupada por otros corredores, "
-                f"tiempo de liberación <t:{int(cooldown_expiry)}:R>."
+                f"tiempo de liberación <t:{int(claim['expires_at'])}:R>."
             )
 
-        await get_user(ctx.author.id)
-        session_id = str(uuid.uuid4())
-        author_wager = await reserve_wager(
-            ctx.author.id,
-            "carrera",
-            monto,
-            session_id=session_id,
-            expires_in=180,
-        )
+        try:
+            await get_user(ctx.author.id)
+            author_wager = await reserve_wager(
+                ctx.author.id,
+                "carrera",
+                monto,
+                session_id=session_id,
+                expires_in=180,
+            )
+        except Exception:
+            await _release_race_session(session_id)
+            raise
+
         if not author_wager["ok"]:
+            await _release_race_session(session_id)
             return await ctx.send(
                 f"❌ {ctx.author.mention} No tienes suficiente balance. Necesitas **{monto}** {COIN}."
             )
-
-        _active_races.add(ctx.channel.id)
 
         view = JoinRaceView(
             ctx.author,
@@ -545,8 +596,8 @@ class Carrera(commands.Cog):
         try:
             message = await ctx.send(embed=embed, view=view)
         except Exception:
-            _active_races.discard(ctx.channel.id)
             await refund_wager_session(session_id)
+            await _release_race_session(session_id)
             raise
         view.message = message
 
@@ -583,8 +634,8 @@ class Carrera(commands.Cog):
                     view=solo_view,
                 )
             except discord.HTTPException:
-                _active_races.discard(ctx.channel.id)
                 await refund_wager_session(session_id)
+                await _release_race_session(session_id)
             return
 
         # ── Mostrar inscritos finales antes de arrancar ─────────────

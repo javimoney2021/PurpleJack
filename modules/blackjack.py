@@ -493,9 +493,13 @@ class Blackjack(commands.Cog):
             return await ctx.send(
                 "🃏 La mesa de Blackjack no se encuentra disponible por el momento."
             )
-        if apuesta is None or apuesta <= 0:
+        if apuesta is None:
             return await ctx.send(
                 f"❌ {ctx.author.mention} Formato correcto: `!bj {{apuesta}}`."
+            )
+        if apuesta < 100:
+            return await ctx.message.reply(
+                f"Apuesta minima es 100 {COIN} no querras vivir de migajas?"
             )
         if apuesta > blackjack_config["max_apuesta"]:
             return await ctx.send(

@@ -704,8 +704,8 @@ class Staff(commands.Cog):
     @app_commands.describe(monto="Apuesta máxima", cooldown="Cooldown: ej 30s, 5m, 1h")
     @is_staff()
     async def ruleta_apuesta_max(self, interaction, monto: int, cooldown: str):
-        if monto <= 0:
-            return await interaction.response.send_message("❌ El monto debe ser mayor a 0.", ephemeral=True)
+        if monto < 100:
+            return await interaction.response.send_message("❌ La apuesta máxima debe ser al menos 100.", ephemeral=True)
         try:
             cooldown_seconds = self.parse_cooldown(cooldown)
         except ValueError:
@@ -763,9 +763,9 @@ class Staff(commands.Cog):
     )
     @is_staff()
     async def memo_edit(self, interaction: discord.Interaction, max_apuesta: int, cooldown: str):
-        if max_apuesta <= 0:
+        if max_apuesta < 100:
             return await interaction.response.send_message(
-                "❌ La apuesta máxima debe ser mayor a 0.",
+                "❌ La apuesta máxima debe ser al menos 100.",
                 ephemeral=True,
             )
         try:
@@ -827,9 +827,9 @@ class Staff(commands.Cog):
                 ephemeral=True,
             )
 
-        if max_apuesta <= 0:
+        if max_apuesta < 100:
             return await interaction.response.send_message(
-                "❌ La apuesta máxima debe ser mayor a 0.",
+                "❌ La apuesta máxima debe ser al menos 100.",
                 ephemeral=True,
             )
         if cooldown_segundos <= 0:
@@ -1786,9 +1786,9 @@ class Staff(commands.Cog):
                 "❌ Las probabilidades deben sumar 100%.", ephemeral=True
             )
 
-        if cooldown_seconds <= 0 or max_apuesta <= 0:
+        if cooldown_seconds <= 0 or max_apuesta < 100:
             return await interaction.response.send_message(
-                "❌ Cooldown y apuesta máxima deben ser mayores a 0.", ephemeral=True
+                "❌ El cooldown debe ser mayor a 0 y la apuesta máxima al menos 100.", ephemeral=True
             )
 
         dados_config["cooldown"] = cooldown_seconds
