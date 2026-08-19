@@ -305,7 +305,7 @@ def build_race_progress_embed(
         trail = "▫️" * visible_position
         remaining = "▫️" * (VISUAL_TRACK_LENGTH - visible_position - 1)
         finish = " 🏁" if distance >= TRACK_LENGTH else ""
-        lines.append(f"{label}\n{trail}🚗{remaining}{finish}")
+        lines.append(f"{label}\n{trail}<:Car44:1539437229666078861>{remaining}{finish}")
 
     if winner_key is not None:
         if winner_key == "jack":
