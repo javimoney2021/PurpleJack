@@ -16,7 +16,7 @@ from core.database import (
 from core.config import game_config, ruleta_config, COIN   # ← COIN desde config (no duplicar)
 from core import cache
 
-ROULETTE_THUMBNAIL_URL = "https://pub-a09b3609b6b34dfab5c7aa7742cd1a8a.r2.dev/Purple%20jack%20Harcode/BlackjackPJ.png"
+ROULETTE_THUMBNAIL_URL = "https://pub-a09b3609b6b34dfab5c7aa7742cd1a8a.r2.dev/Purple%20jack%20Harcode/RuletaPJ.gif"
 ROULETTE_WIN_THUMBNAIL_URL = "https://pub-a09b3609b6b34dfab5c7aa7742cd1a8a.r2.dev/Purple%20jack%20Harcode/RuletaWinPJ.png"
 ROULETTE_LOSE_THUMBNAIL_URL = "https://pub-a09b3609b6b34dfab5c7aa7742cd1a8a.r2.dev/Purple%20jack%20Harcode/RuletaLosePJ.png"
 
