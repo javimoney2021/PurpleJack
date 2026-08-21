@@ -161,6 +161,7 @@ class NaveHelpView(ui.View):
         showing_commands = self.page is not None
         self.previous.disabled = not showing_commands or self.page == 0
         self.next.disabled = not showing_commands or self.page == len(NAVE_COMMAND_PAGES) - 1
+        self.back_to_start.disabled = self.section == "inicio"
 
     @ui.select(
         placeholder="Selecciona una categoría",
@@ -203,6 +204,13 @@ class NaveHelpView(ui.View):
         self.page = min(len(NAVE_COMMAND_PAGES) - 1, self.page + 1)
         self._sync_pagination()
         await interaction.response.edit_message(embed=_build_nave_commands_embed(self.page), view=self)
+
+    @ui.button(label="Volver al Inicio", style=ButtonStyle.success, row=1)
+    async def back_to_start(self, interaction: Interaction, button: ui.Button):
+        self.section = "inicio"
+        self.page = None
+        self._sync_pagination()
+        await interaction.response.edit_message(embed=_build_nave_inicio_embed(), view=self)
 
 
 def _deletion_summary_embed(final: bool = False) -> discord.Embed:
