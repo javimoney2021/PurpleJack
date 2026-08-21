@@ -15,6 +15,8 @@ from core.database import (
     settle_wager,
 )
 
+BLACKJACK_THUMBNAIL_URL = "https://pub-a09b3609b6b34dfab5c7aa7742cd1a8a.r2.dev/Purple%20jack%20Harcode/BlackjackPJ.png"
+
 logger = logging.getLogger(__name__)
 
 SUITS = ("♠️", "♥️", "♦️", "♣️")
@@ -198,6 +200,7 @@ class BlackjackView(discord.ui.View):
                 "Pago: 1:1 | Blackjack: 3:2"
             )
         )
+        embed.set_thumbnail(url=BLACKJACK_THUMBNAIL_URL)
         return embed
 
     async def _edit(

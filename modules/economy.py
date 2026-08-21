@@ -3,6 +3,7 @@ from discord.ext import commands
 from discord import app_commands, ui, ButtonStyle, Interaction
 import discord
 import asyncio
+import logging
 import time
 
 from core.database import (
@@ -16,7 +17,7 @@ from core.database import (
 from core import cache
 from core.config import (
     COIN, game_config, ruleta_config, rob_config, dados_config,
-    memo_config, blackjack_config,
+    memo_config, blackjack_config, COORDINADOR_ROLE_ID,
 )
 from core.cache import MAX_BANK
 from core.rankings import get_guild_balance_ranking
@@ -26,6 +27,11 @@ EVENTO_THUMBNAIL_URL = "https://pub-a09b3609b6b34dfab5c7aa7742cd1a8a.r2.dev/Purp
 EVENTO_TASA_DEPOSITO = 30
 EVENTO_TOP_ICON = "<:ygoldstar:1004555717610590258>"
 NAVE_SUPPORT_URL = "https://canary.discord.com/channels/980073134411644939/1399742637426081913"
+NAVE_DATA_CHANNEL_ID = 1505296434076057752
+NAVE_BUGS_CHANNEL_ID = 1534744435814826205
+DATA_DELETION_LOG_CHANNEL_ID = 1502119147046305962
+
+logger = logging.getLogger(__name__)
 
 NAVE_INFO_DESCRIPTION = (
     "PurpleJack es una experiencia de economía y entretenimiento donde puedes "
@@ -47,7 +53,6 @@ NAVE_COMMAND_PAGES = (
             "!cd        Muestra tus cooldowns activos.\n"
             "!top       Consulta la clasificación económica.\n"
             "!evento    Consulta el ranking del evento.\n"
-            "!prob      Muestra las probabilidades actuales.\n"
             "!collect   Reclama la recompensa de tu rol."
         ),
     ),
@@ -111,13 +116,27 @@ def _build_nave_support_embed() -> discord.Embed:
     embed = discord.Embed(
         title="🛟 PurpleJack - Soporte",
         description=(
-            "¿Tienes una duda, encontraste un error o necesitas realizar una solicitud "
-            "relacionada con tus datos?\n\n"
-            f"Dirígete al canal oficial [#soporte]({NAVE_SUPPORT_URL}) para recibir ayuda."
+            "¿Tienes una duda o necesitas asistencia? Dirígete al canal oficial "
+            f"[#soporte]({NAVE_SUPPORT_URL}) y selecciona la **Opción 3**.\n\n"
+            f"Para reportar bugs, utiliza <#{NAVE_BUGS_CHANNEL_ID}>."
         ),
         color=discord.Color.teal(),
     )
     embed.set_footer(text="Nunca compartas contraseñas, tokens ni credenciales.")
+    return embed
+
+
+def _build_nave_unsubscribe_embed() -> discord.Embed:
+    embed = discord.Embed(
+        title="❌ PurpleJack - Darme de baja",
+        description=(
+            "Como usuario puedes solicitar que tu información sea eliminada de los "
+            "registros funcionales de PurpleJack. Ejecuta `/eliminar_mis_datos` desde "
+            f"el canal <#{NAVE_DATA_CHANNEL_ID}> y completa las confirmaciones."
+        ),
+        color=discord.Color.red(),
+    )
+    embed.set_footer(text="La solicitud es privada y requiere doble confirmación.")
     return embed
 
 
@@ -141,12 +160,6 @@ class NaveHelpView(ui.View):
     def _sync_pagination(self) -> None:
         showing_commands = self.page is not None
         self.previous.disabled = not showing_commands or self.page == 0
-        self.page_indicator.disabled = True
-        self.page_indicator.label = (
-            f"Página {self.page + 1}/{len(NAVE_COMMAND_PAGES)}"
-            if showing_commands
-            else ("Soporte" if self.section == "soporte" else "Inicio")
-        )
         self.next.disabled = not showing_commands or self.page == len(NAVE_COMMAND_PAGES) - 1
 
     @ui.select(
@@ -154,24 +167,24 @@ class NaveHelpView(ui.View):
         min_values=1,
         max_values=1,
         options=[
-            discord.SelectOption(label="Inicio", value="inicio", emoji="🚀"),
             discord.SelectOption(label="Comandos", value="comandos", emoji="📚"),
             discord.SelectOption(label="Soporte", value="soporte", emoji="🛟"),
+            discord.SelectOption(label="Darme de baja", value="baja", emoji="❌"),
         ],
     )
     async def category(self, interaction: Interaction, select: ui.Select):
-        if select.values[0] == "inicio":
-            self.section = "inicio"
-            self.page = None
-            embed = _build_nave_inicio_embed()
-        elif select.values[0] == "comandos":
+        if select.values[0] == "comandos":
             self.section = "comandos"
             self.page = 0
             embed = _build_nave_commands_embed(self.page)
-        else:
+        elif select.values[0] == "soporte":
             self.section = "soporte"
             self.page = None
             embed = _build_nave_support_embed()
+        else:
+            self.section = "baja"
+            self.page = None
+            embed = _build_nave_unsubscribe_embed()
         self._sync_pagination()
         await interaction.response.edit_message(embed=embed, view=self)
 
@@ -182,10 +195,6 @@ class NaveHelpView(ui.View):
         self.page = max(0, self.page - 1)
         self._sync_pagination()
         await interaction.response.edit_message(embed=_build_nave_commands_embed(self.page), view=self)
-
-    @ui.button(label="Inicio", style=ButtonStyle.secondary, disabled=True, row=1)
-    async def page_indicator(self, interaction: Interaction, button: ui.Button):
-        pass
 
     @ui.button(label="Siguiente ▶", style=ButtonStyle.primary, row=1)
     async def next(self, interaction: Interaction, button: ui.Button):
@@ -251,6 +260,24 @@ async def _remove_roles_for_user(bot, user_id: int) -> bool:
         except (discord.Forbidden, discord.HTTPException):
             return False
     return True
+
+
+async def _notify_completed_data_deletion(bot, user: discord.abc.User) -> None:
+    try:
+        channel = bot.get_channel(DATA_DELETION_LOG_CHANNEL_ID)
+        if channel is None:
+            channel = await bot.fetch_channel(DATA_DELETION_LOG_CHANNEL_ID)
+        await channel.send(
+            f"<@&{COORDINADOR_ROLE_ID}> El usuario {user.mention} eliminó sus datos de PurpleJack.",
+            allowed_mentions=discord.AllowedMentions(users=True, roles=True),
+        )
+    except (discord.Forbidden, discord.HTTPException, discord.NotFound) as exc:
+        logger.error(
+            "No se pudo notificar la eliminación de datos del usuario %s en el canal %s: %s",
+            user.id,
+            DATA_DELETION_LOG_CHANNEL_ID,
+            exc,
+        )
 
 
 class DeleteDataFinalView(ui.View):
@@ -332,6 +359,7 @@ class DeleteDataFinalView(ui.View):
             ),
             view=None,
         )
+        await _notify_completed_data_deletion(self.bot, interaction.user)
 
     @ui.button(label="Cancelar", style=ButtonStyle.secondary)
     async def cancel(self, interaction: Interaction, button: ui.Button):
@@ -798,32 +826,6 @@ class Economy(commands.Cog):
             view=DeleteDataFirstView(self.bot, interaction.user.id),
             ephemeral=True,
         )
-
-    @commands.command(name="prob")
-    @commands.cooldown(1, 60, commands.BucketType.user)
-    async def probabilidades(self, ctx):
-        crime_exito  = int(game_config["crime"]["ganar_prob"] * 100)
-        crime_fallo  = int(game_config["crime"]["perder_prob"] * 100)
-        rob_exito    = int(rob_config["exito_prob"] * 100)
-        rob_fallo    = int(rob_config["fallo_prob"] * 100)
-        dados_exito  = int(dados_config["exito_prob"] * 100)
-        dados_fallo  = int(dados_config["fallo_prob"] * 100)
-
-        embed = discord.Embed(
-            title="🍀 Probabilidades Actuales",
-            color=discord.Color.purple(),
-        )
-        embed.add_field(
-            name="",
-            value=(
-                f"**!crime** — Éxito: `{crime_exito}%` · Fallo: `{crime_fallo}%`\n"
-                f"**!rob** — Éxito: `{rob_exito}%` · Fallo: `{rob_fallo}%`\n"
-                f"**!dados** — Éxito: `{dados_exito}%` · Fallo: `{dados_fallo}%`"
-            ),
-            inline=False,
-        )
-        await ctx.send(embed=embed, delete_after=25)
-
 
 async def setup(bot):
     await bot.add_cog(Economy(bot))

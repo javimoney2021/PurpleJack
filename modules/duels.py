@@ -25,6 +25,7 @@ DUEL_TIMEOUT = 20  # segundos para aceptar/rechazar
 ROUND_TIMEOUT = 5  # segundos que la espada está visible
 TOTAL_ROUNDS = 9
 GRID_SIZE = 5
+MAX_DUEL_BET = 3_000
 RETAL_THUMBNAIL = "https://pub-a09b3609b6b34dfab5c7aa7742cd1a8a.r2.dev/Purple%20jack%20Harcode/Kill_pj.png"
 WIN_THUMBNAIL = "https://pub-a09b3609b6b34dfab5c7aa7742cd1a8a.r2.dev/Purple%20jack%20Harcode/winpj.png"
 NAVE_ROLE_ID = 1515377564439281726  # Miembros de la Nave
@@ -529,6 +530,10 @@ class Duels(commands.Cog):
         if monto < 100:
             return await ctx.message.reply(
                 f"Apuesta minima es 100 {COIN} no querras vivir de migajas?"
+            )
+        if monto > MAX_DUEL_BET:
+            return await ctx.message.reply(
+                f"La apuesta máxima para `!retar` es {MAX_DUEL_BET} {COIN}."
             )
 
         # Verificar saldo del retador

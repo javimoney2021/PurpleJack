@@ -16,6 +16,10 @@ from core.database import (
 from core.config import game_config, ruleta_config, COIN   # ← COIN desde config (no duplicar)
 from core import cache
 
+ROULETTE_THUMBNAIL_URL = "https://pub-a09b3609b6b34dfab5c7aa7742cd1a8a.r2.dev/Purple%20jack%20Harcode/BlackjackPJ.png"
+ROULETTE_WIN_THUMBNAIL_URL = "https://pub-a09b3609b6b34dfab5c7aa7742cd1a8a.r2.dev/Purple%20jack%20Harcode/RuletaWinPJ.png"
+ROULETTE_LOSE_THUMBNAIL_URL = "https://pub-a09b3609b6b34dfab5c7aa7742cd1a8a.r2.dev/Purple%20jack%20Harcode/RuletaLosePJ.png"
+
 # cooldowns de juego manejados via cache + DB (game_cooldowns table)
 
 SLOTS = {
@@ -149,7 +153,7 @@ class Roulette(commands.Cog):
                 color=discord.Color.purple(),
             )
             embed.set_footer(text="🌀 Girando la ruleta... Espera 6 segundos")
-            embed.set_thumbnail(url=ctx.author.display_avatar.url)
+            embed.set_thumbnail(url=ROULETTE_THUMBNAIL_URL)
             await ctx.send(embed=embed)
 
             await asyncio.sleep(6)
@@ -192,6 +196,7 @@ class Roulette(commands.Cog):
                     ),
                     color=discord.Color.green(),
                 )
+                embed_resultado.set_thumbnail(url=ROULETTE_WIN_THUMBNAIL_URL)
             else:
                 await lose_wager(wager["id"])
                 embed_resultado = discord.Embed(
@@ -204,6 +209,7 @@ class Roulette(commands.Cog):
                     ),
                     color=discord.Color.red(),
                 )
+                embed_resultado.set_thumbnail(url=ROULETTE_LOSE_THUMBNAIL_URL)
 
             await ctx.send(embed=embed_resultado)
         except Exception:
