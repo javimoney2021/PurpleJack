@@ -17,7 +17,7 @@ from core.database import (
     get_system_toggle,
     set_system_toggle,
 )
-from core.config import COIN, STAFF_ROLE
+from core.config import COIN, STAFF_ROLE, PUNISHMENT_ROLE_ID
 from core import cache
 
 logger = logging.getLogger(__name__)
@@ -150,6 +150,18 @@ class JoinRaceView(discord.ui.View):
 
     @discord.ui.button(label="🏎️ Unirse", style=discord.ButtonStyle.primary)
     async def unirse(self, interaction: discord.Interaction, button: discord.ui.Button):
+        expires_at = cache.get_active_cargo_expiry(
+            interaction.user.id,
+            interaction.guild_id,
+            PUNISHMENT_ROLE_ID,
+        )
+        if expires_at:
+            return await interaction.response.send_message(
+                "Tu acceso está **Restringido** debido a un uso incorrecto del canal. "
+                f"Podrás volver a interactuar en <t:{int(expires_at)}:R>",
+                ephemeral=True,
+            )
+
         # Confirmar de inmediato evita que Discord marque la interacción como
         # fallida mientras Aiven valida y reserva la apuesta.
         await interaction.response.defer()

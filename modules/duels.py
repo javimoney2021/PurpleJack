@@ -16,7 +16,8 @@ from core.database import (
     settle_wager_session,
     refund_wager_session,
 )
-from core.config import COIN
+from core.config import COIN, PUNISHMENT_ROLE_ID
+from core import cache
 
 logger = logging.getLogger(__name__)
 
@@ -36,6 +37,21 @@ _duel_cooldowns = {}  # {guild_id: cooldown_seconds}
 _duel_active = {}  # {guild_id: bool}
 DEFAULT_DUEL_COOLDOWN = 600  # 10 minutos
 _last_duel_times = {}  # {guild_id: expira_en}
+
+
+def _get_punishment_expiry(user_id: int, guild_id: int) -> float:
+    return cache.get_active_cargo_expiry(
+        user_id,
+        guild_id,
+        PUNISHMENT_ROLE_ID,
+    )
+
+
+def _restriction_message(expires_at: float) -> str:
+    return (
+        "Tu acceso está **Restringido** debido a un uso incorrecto del canal. "
+        f"Podrás volver a interactuar en <t:{int(expires_at)}:R>"
+    )
 
 
 async def _is_duel_enabled(guild_id: int) -> bool:
@@ -83,6 +99,27 @@ class AcceptDuelView(discord.ui.View):
         if self.resolved:
             return await interaction.response.send_message(
                 "❌ Este reto ya fue resuelto.",
+                ephemeral=True,
+            )
+
+        expires_at = _get_punishment_expiry(
+            interaction.user.id,
+            interaction.guild_id,
+        )
+        if expires_at:
+            return await interaction.response.send_message(
+                _restriction_message(expires_at),
+                ephemeral=True,
+            )
+
+        challenger_expires_at = _get_punishment_expiry(
+            self.retador_id,
+            interaction.guild_id,
+        )
+        if challenger_expires_at:
+            return await interaction.response.send_message(
+                "❌ El retador tiene el acceso restringido actualmente. "
+                "El duelo no puede comenzar.",
                 ephemeral=True,
             )
         self.resolved = True
@@ -248,6 +285,16 @@ class DuelButton(discord.ui.Button):
         self.duel_view = duel_view
 
     async def callback(self, interaction: discord.Interaction):
+        expires_at = _get_punishment_expiry(
+            interaction.user.id,
+            self.duel_view.guild_id,
+        )
+        if expires_at:
+            return await interaction.response.send_message(
+                _restriction_message(expires_at),
+                ephemeral=True,
+            )
+
         if interaction.user.id not in [self.duel_view.retador_id, self.duel_view.retado_id]:
             return await interaction.response.send_message("❌ No participas en este duelo.", ephemeral=True)
 

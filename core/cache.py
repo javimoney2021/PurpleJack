@@ -292,6 +292,21 @@ def get_role_assignment_lock(user_id, guild_id, rol_id):
 def get_cargos_cache():
     return _cargos_cache
 
+
+def get_active_cargo_expiry(user_id, guild_id, rol_id, now=None):
+    """Retorna la expiración vigente de un rol temporal o 0 si no existe."""
+    now = time.time() if now is None else now
+    return max(
+        (
+            cargo.get("expira_en", 0)
+            for cargo in _cargos_cache.get(user_id, [])
+            if cargo.get("guild_id") == guild_id
+            and cargo.get("rol_id") == rol_id
+            and cargo.get("expira_en", 0) > now
+        ),
+        default=0,
+    )
+
 def set_cargos_cache(data: dict):
     global _cargos_cache
     _cargos_cache = data

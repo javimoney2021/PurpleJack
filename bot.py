@@ -100,16 +100,10 @@ async def block_restricted_prefix_commands(ctx: commands.Context) -> bool:
     if ctx.guild is None:
         return True
 
-    now = time.time()
-    expires_at = max(
-        (
-            cargo["expira_en"]
-            for cargo in cache.get_cargos_cache().get(ctx.author.id, [])
-            if cargo.get("guild_id") == ctx.guild.id
-            and cargo.get("rol_id") == PUNISHMENT_ROLE_ID
-            and cargo.get("expira_en", 0) > now
-        ),
-        default=0,
+    expires_at = cache.get_active_cargo_expiry(
+        ctx.author.id,
+        ctx.guild.id,
+        PUNISHMENT_ROLE_ID,
     )
     if not expires_at:
         return True
