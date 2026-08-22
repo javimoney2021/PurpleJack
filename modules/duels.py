@@ -28,7 +28,7 @@ GRID_SIZE = 5
 MAX_DUEL_BET = 3_000
 RETAL_THUMBNAIL = "https://pub-a09b3609b6b34dfab5c7aa7742cd1a8a.r2.dev/Purple%20jack%20Harcode/Kill_pj.png"
 WIN_THUMBNAIL = "https://pub-a09b3609b6b34dfab5c7aa7742cd1a8a.r2.dev/Purple%20jack%20Harcode/winpj.png"
-NAVE_ROLE_ID = 1515377564439281726  # Miembros de la Nave
+DUEL_LOCK_ROLE_ID = 1527103455313793136  # Rol bloqueado durante !retar
 
 # ── GLOBAL STATE ───────────────────────────────────────
 _active_duels = set()  # {guild_id} para evitar múltiples duelos por servidor
@@ -156,10 +156,10 @@ class AcceptDuelView(discord.ui.View):
             await interaction.response.defer()
             msg_anuncio = await self.ctx.send(f"⚔️ La batalla entre <@{self.retador_id}> y <@{self.retado_id}> Comenzará en segundos.... ⚔️")
 
-            # Cerrar permisos de escritura para el rol Nave
-            nave_role = self.ctx.guild.get_role(NAVE_ROLE_ID)
-            if nave_role:
-                await self.ctx.channel.set_permissions(nave_role, send_messages=False, view_channel=True, read_message_history=True, add_reactions=True)
+            # Cerrar permisos de escritura para el rol durante el duelo
+            duel_lock_role = self.ctx.guild.get_role(DUEL_LOCK_ROLE_ID)
+            if duel_lock_role:
+                await self.ctx.channel.set_permissions(duel_lock_role, send_messages=False, view_channel=True, read_message_history=True, add_reactions=True)
 
             await asyncio.sleep(3)
             await msg_anuncio.delete()
@@ -190,11 +190,11 @@ class AcceptDuelView(discord.ui.View):
         except Exception:
             await refund_wager_session(self.session_id)
             _active_duels.discard(self.ctx.guild.id)
-            nave_role = self.ctx.guild.get_role(NAVE_ROLE_ID)
-            if nave_role:
+            duel_lock_role = self.ctx.guild.get_role(DUEL_LOCK_ROLE_ID)
+            if duel_lock_role:
                 try:
                     await self.ctx.channel.set_permissions(
-                        nave_role,
+                        duel_lock_role,
                         send_messages=True,
                         view_channel=True,
                         read_message_history=True,
@@ -479,11 +479,11 @@ class DuelGameView(discord.ui.View):
 
     async def _restore_channel(self):
         if self.channel and self.guild:
-            nave_role = self.guild.get_role(NAVE_ROLE_ID)
-            if nave_role:
+            duel_lock_role = self.guild.get_role(DUEL_LOCK_ROLE_ID)
+            if duel_lock_role:
                 try:
                     await self.channel.set_permissions(
-                        nave_role,
+                        duel_lock_role,
                         send_messages=True,
                         view_channel=True,
                         read_message_history=True,
