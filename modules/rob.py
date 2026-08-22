@@ -18,7 +18,7 @@ from core.cache import get_rob_cooldown, set_rob_cooldown
 from core.cd_boost import resolve_cd_boost, send_cd_boost_notice
 from core.rankings import get_guild_balance_ranking
 
-SABOTEADOR_EXITO_PROB = 0.70
+SABOTEADOR_EXITO_PROB = 0.60
 SABOTEADOR_ROBO_PORCENTAJE = 0.20
 SABOTEADOR_FALLO_PORCENTAJE = 0.15
 EVENT_ROB_VICTIM_PENALTY_PERCENT = 30

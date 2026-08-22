@@ -7,6 +7,7 @@ import uuid
 import asyncpg
 from settings import DATABASE_URL
 from core import cache
+from core.config import INVENTORY_ITEM_MAX_QUANTITY
 
 logger = logging.getLogger(__name__)
 
@@ -1762,17 +1763,38 @@ async def add_stock(item_id, cantidad):
 # ── INVENTARIO ─────────────────────────────────────────
 
 async def add_to_inventory(user_id, item_id, cantidad=1):
+    if cantidad <= 0:
+        return {"ok": False, "reason": "invalid_quantity"}
+    if cantidad > INVENTORY_ITEM_MAX_QUANTITY:
+        return {
+            "ok": False,
+            "reason": "inventory_cap",
+            "limit": INVENTORY_ITEM_MAX_QUANTITY,
+        }
+
     async with pool.acquire() as conn:
-        await conn.execute(
+        row = await conn.fetchrow(
             """
             INSERT INTO inventario (user_id, item_id, cantidad)
             VALUES ($1, $2, $3)
             ON CONFLICT (user_id, item_id)
             DO UPDATE SET cantidad = inventario.cantidad + EXCLUDED.cantidad
+            WHERE inventario.cantidad + EXCLUDED.cantidad <= $4
+            RETURNING cantidad
             """,
-            user_id, item_id, cantidad
+            user_id,
+            item_id,
+            cantidad,
+            INVENTORY_ITEM_MAX_QUANTITY,
         )
+        if row is None:
+            return {
+                "ok": False,
+                "reason": "inventory_cap",
+                "limit": INVENTORY_ITEM_MAX_QUANTITY,
+            }
     cache.invalidate_inventory_cache(user_id)
+    return {"ok": True, "quantity": row["cantidad"]}
 
 
 async def purchase_item(user_id, item_id, unidades=1, use_bank=False):
@@ -1817,8 +1839,23 @@ async def purchase_item(user_id, item_id, unidades=1, use_bank=False):
                     user_id, item_id
                 )
                 poseidos = inv_row["cantidad"] if inv_row else 0
+                cantidad_compra = item_data.get("cantidad", 1) * unidades
+
+                if poseidos + cantidad_compra > INVENTORY_ITEM_MAX_QUANTITY:
+                    return {
+                        "ok": False,
+                        "reason": "inventory_cap",
+                        "item": item_data,
+                        "limit": INVENTORY_ITEM_MAX_QUANTITY,
+                        "owned": poseidos,
+                        "available": max(
+                            0,
+                            INVENTORY_ITEM_MAX_QUANTITY - poseidos,
+                        ),
+                    }
+
                 limite = item_data.get("limite_por_usuario", 0) or 0
-                if limite > 0 and poseidos + unidades > limite:
+                if limite > 0 and poseidos + cantidad_compra > limite:
                     return {
                         "ok": False,
                         "reason": "limit",
@@ -1853,7 +1890,6 @@ async def purchase_item(user_id, item_id, unidades=1, use_bank=False):
                         }
                     balance -= total
 
-                cantidad_compra = item_data.get("cantidad", 1) * unidades
                 await conn.execute(
                     """
                     UPDATE users

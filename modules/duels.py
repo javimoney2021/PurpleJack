@@ -26,7 +26,7 @@ DUEL_TIMEOUT = 20  # segundos para aceptar/rechazar
 ROUND_TIMEOUT = 5  # segundos que la espada está visible
 TOTAL_ROUNDS = 9
 GRID_SIZE = 5
-MAX_DUEL_BET = 3_000
+MAX_DUEL_BET = 5_000
 RETAL_THUMBNAIL = "https://pub-a09b3609b6b34dfab5c7aa7742cd1a8a.r2.dev/Purple%20jack%20Harcode/Kill_pj.png"
 WIN_THUMBNAIL = "https://pub-a09b3609b6b34dfab5c7aa7742cd1a8a.r2.dev/Purple%20jack%20Harcode/winpj.png"
 DUEL_LOCK_ROLE_ID = 1527103455313793136  # Rol bloqueado durante !retar
@@ -580,7 +580,8 @@ class Duels(commands.Cog):
             )
         if monto > MAX_DUEL_BET:
             return await ctx.message.reply(
-                f"La apuesta máxima para `!retar` es {MAX_DUEL_BET} {COIN}."
+                f"No puedes retar por más de **{MAX_DUEL_BET}** {COIN}. "
+                "Reduce tu apuesta para entrar a la Arena."
             )
 
         # Verificar saldo del retador

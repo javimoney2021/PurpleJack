@@ -1476,7 +1476,18 @@ class Staff(commands.Cog):
             return await interaction.followup.send(
                 f"❌ Item **{item}** no encontrado.", ephemeral=True
             )
-        await add_to_inventory(usuario.id, found["id"], cantidad)
+        result = await add_to_inventory(usuario.id, found["id"], cantidad)
+        if not result["ok"]:
+            if result["reason"] == "inventory_cap":
+                return await interaction.followup.send(
+                    f"❌ El inventario no puede superar **x{result['limit']}** "
+                    f"de **{found['nombre']}**.",
+                    ephemeral=True,
+                )
+            return await interaction.followup.send(
+                "❌ No se pudo agregar esa cantidad al inventario.",
+                ephemeral=True,
+            )
         icono = found["icono"] if found["icono"] else "🔹"
         await interaction.followup.send(
             f"✅ Se han agregado {cantidad}x {icono} {found['nombre']} al inventario de {usuario.mention}.",

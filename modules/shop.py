@@ -10,7 +10,10 @@ from core.database import (
     mark_cd_boost_notification_sent, mark_cd_boost_notification_failed,
 )
 from core import cache
-from core.config import COIN, LOG_CHANNEL_ID, TARJETA_CREDITO_ROL_ID, STAFF_ROLE_ID
+from core.config import (
+    COIN, LOG_CHANNEL_ID, TARJETA_CREDITO_ROL_ID, STAFF_ROLE_ID,
+    INVENTORY_ITEM_MAX_QUANTITY,
+)
 import time
 import re
 
@@ -18,6 +21,7 @@ logger = logging.getLogger(__name__)
 
 # ── CONFIG ─────────────────────────────────────────────
 ITEMS_PER_PAGE = 5
+INVENTORY_ITEMS_PER_PAGE = 8
 PURPLE = 0x9B59B6
 SHOP_EXPIRE_SECONDS = 150
 SHOP_EXPIRED_MESSAGE = "Tienda Caducó, consulte la tienda nuevamente"
@@ -200,6 +204,15 @@ class ConfirmBuyView(discord.ui.View):
                         content=f"❌ Solo hay **{purchase['available']}** unidad/es disponibles de **{item_fresh['nombre']}**.",
                         view=self
                     )
+                if reason == "inventory_cap":
+                    return await interaction.edit_original_response(
+                        content=(
+                            f"No puedes tener mas de x{INVENTORY_ITEM_MAX_QUANTITY} "
+                            "de un mismo item en tu Inventario. "
+                            "Consumelos antes de comprar mas !"
+                        ),
+                        view=self,
+                    )
                 if reason == "limit":
                     disponibles = purchase["available"]
                     limite = purchase["limit"]
@@ -367,6 +380,24 @@ class BuyButton(discord.ui.Button):
             return await interaction.response.send_message(
                 "❌ Este panel no fue generado por ti.", ephemeral=True
             )
+
+        inventory = await get_inventory(interaction.user.id)
+        owned = next(
+            (
+                item.get("cantidad", 0)
+                for item in inventory
+                if item["id"] == self.item["id"]
+            ),
+            0,
+        )
+        if owned >= INVENTORY_ITEM_MAX_QUANTITY:
+            return await interaction.response.send_message(
+                f"No puedes tener mas de x{INVENTORY_ITEM_MAX_QUANTITY} "
+                "de un mismo item en tu Inventario. "
+                "Consumelos antes de comprar mas !",
+                ephemeral=True,
+            )
+
         # ── Abrir modal de cantidad antes de confirmar ─────────
         await interaction.response.send_modal(
             QuantityModal(self.item, self.author_id, self.bot)
@@ -911,6 +942,48 @@ class UseButton(discord.ui.Button):
 
 # ── INVENTARIO LAYOUT ──────────────────────────────────
 
+class InventoryPrevButton(discord.ui.Button):
+    def __init__(self):
+        super().__init__(
+            style=discord.ButtonStyle.secondary,
+            label="◀ Anterior",
+            custom_id="inventario_prev",
+        )
+
+    async def callback(self, interaction: discord.Interaction):
+        view: InventarioLayout = self.view
+        if interaction.user.id != view.author_id:
+            return await interaction.response.send_message(
+                "❌ Este panel no fue generado por ti.", ephemeral=True
+            )
+        if view.page > 0:
+            view.page -= 1
+        await view._update(interaction)
+
+
+class InventoryNextButton(discord.ui.Button):
+    def __init__(self):
+        super().__init__(
+            style=discord.ButtonStyle.secondary,
+            label="Siguiente ▶",
+            custom_id="inventario_next",
+        )
+
+    async def callback(self, interaction: discord.Interaction):
+        view: InventarioLayout = self.view
+        if interaction.user.id != view.author_id:
+            return await interaction.response.send_message(
+                "❌ Este panel no fue generado por ti.", ephemeral=True
+            )
+        total_pages = max(
+            1,
+            (len(view.items) + INVENTORY_ITEMS_PER_PAGE - 1)
+            // INVENTORY_ITEMS_PER_PAGE,
+        )
+        if view.page < total_pages - 1:
+            view.page += 1
+        await view._update(interaction)
+
 class InventarioLayout(discord.ui.LayoutView):
     def __init__(self, items, author_id, guild, bot):
         super().__init__(timeout=60)
@@ -918,11 +991,21 @@ class InventarioLayout(discord.ui.LayoutView):
         self.author_id = author_id
         self.guild = guild
         self.bot = bot
+        self.page = 0
         self._build()
 
     def _build(self):
         try:
             self.clear_items()
+
+            total_pages = max(
+                1,
+                (len(self.items) + INVENTORY_ITEMS_PER_PAGE - 1)
+                // INVENTORY_ITEMS_PER_PAGE,
+            )
+            self.page = min(max(self.page, 0), total_pages - 1)
+            start = self.page * INVENTORY_ITEMS_PER_PAGE
+            page_items = self.items[start:start + INVENTORY_ITEMS_PER_PAGE]
 
             container = discord.ui.Container(accent_color=PURPLE)
 
@@ -932,7 +1015,7 @@ class InventarioLayout(discord.ui.LayoutView):
             ))
             container.add_item(discord.ui.Separator())
 
-            for item in self.items:
+            for item in page_items:
                 icono = item["icono"] if item["icono"] else "🔹"
                 cantidad = item.get("cantidad", 1)
 
@@ -950,14 +1033,30 @@ class InventarioLayout(discord.ui.LayoutView):
 
             container.add_item(discord.ui.Separator())
             container.add_item(discord.ui.TextDisplay(
-                f"-# Total: **{len(self.items)}** tipo(s) de item  •  Usa 💠 para consumir un item usable."
+                f"-# Página **{self.page + 1}/{total_pages}**  •  "
+                f"Total: **{len(self.items)}** tipo(s) de item  •  "
+                "Usa 💠 para consumir un item usable."
             ))
 
             self.add_item(container)
 
+            if total_pages > 1:
+                nav_row = discord.ui.ActionRow()
+                previous = InventoryPrevButton()
+                previous.disabled = self.page == 0
+                next_button = InventoryNextButton()
+                next_button.disabled = self.page >= total_pages - 1
+                nav_row.add_item(previous)
+                nav_row.add_item(next_button)
+                self.add_item(nav_row)
+
         except Exception as e:
             logger.error(f"ERROR InventarioLayout._build: {e}")
             raise
+
+    async def _update(self, interaction: discord.Interaction):
+        self._build()
+        await interaction.response.edit_message(view=self)
 
     async def on_timeout(self):
         pass
