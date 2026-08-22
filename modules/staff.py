@@ -24,14 +24,15 @@ from core.database import (
     clear_game_cooldowns,
     activar_evento as activar_evento_db, cerrar_evento as cerrar_evento_db,
     flush_evento_puntos, set_duel_cooldown_config, get_duel_active_config,
-    set_duel_active_config, clear_command_cooldowns, set_system_toggle
+    set_duel_active_config, clear_command_cooldowns, set_system_toggle,
+    add_cargo_temporal, delete_cargo_temporal, get_cargo_temporal,
 )
 from core import cache
 from core.config import (
     ruleta_config, game_config, dados_config, memo_config,
     blackjack_config, COIN,
     STAFF_ROLE, COORDINADOR_ROLE,
-    STAFF_ROLE_ID, COORDINADOR_ROLE_ID
+    STAFF_ROLE_ID, COORDINADOR_ROLE_ID, PUNISHMENT_ROLE_ID
 )
 from modules.memo import _memo_cooldowns
 from modules.Empleos import (
@@ -449,6 +450,99 @@ class Staff(commands.Cog):
             rest = seconds % 60
             return f"{m}m" if rest == 0 else f"{m}m{rest}s"
         return f"{seconds}s"
+
+    @staticmethod
+    def parse_punishment_duration(value: str) -> int:
+        match = re.fullmatch(r"([1-9]\d*)\s*([mh])", value.strip().lower())
+        if not match:
+            raise ValueError("Formato inválido")
+        amount = int(match.group(1))
+        return amount * (3600 if match.group(2) == "h" else 60)
+
+    @app_commands.command(
+        name="punish",
+        description="Restringe temporalmente los comandos con prefijo de un usuario",
+    )
+    @app_commands.rename(usuario="user", tiempo="time")
+    @app_commands.describe(
+        usuario="Usuario a restringir",
+        tiempo="Duración: minutos (m) u horas (h). Ej.: 30m, 2h",
+    )
+    @is_staff()
+    async def punish(
+        self,
+        interaction: discord.Interaction,
+        usuario: discord.Member,
+        tiempo: str,
+    ):
+        try:
+            duration = self.parse_punishment_duration(tiempo)
+        except ValueError:
+            return await interaction.response.send_message(
+                "❌ Duración inválida. Usa únicamente minutos u horas, por ejemplo: `30m` o `2h`.",
+                ephemeral=True,
+            )
+
+        if usuario.bot:
+            return await interaction.response.send_message(
+                "❌ No se puede restringir a un bot.", ephemeral=True
+            )
+        if interaction.guild is None:
+            return await interaction.response.send_message(
+                "❌ Este comando solo puede utilizarse dentro de un servidor.",
+                ephemeral=True,
+            )
+
+        role = interaction.guild.get_role(PUNISHMENT_ROLE_ID)
+        if role is None:
+            return await interaction.response.send_message(
+                "❌ No encontré el rol configurado de Expulsado. Verifica su ID y que el bot esté en el servidor.",
+                ephemeral=True,
+            )
+
+        await interaction.response.defer(ephemeral=False)
+        now = time.time()
+        previous = await get_cargo_temporal(usuario.id, interaction.guild.id, role.id)
+        previous_active = bool(previous and previous["expira_en"] > now)
+        expires_at = await add_cargo_temporal(
+            usuario.id,
+            interaction.guild.id,
+            role.id,
+            now + duration,
+        )
+
+        role_was_present = role in usuario.roles
+        try:
+            if not role_was_present:
+                await usuario.add_roles(
+                    role,
+                    reason=(
+                        f"Restricción temporal de comandos aplicada por {interaction.user} "
+                        f"hasta {int(expires_at)}"
+                    ),
+                )
+            verified_member = await interaction.guild.fetch_member(usuario.id)
+            if role.id not in {member_role.id for member_role in verified_member.roles}:
+                raise RuntimeError("Discord no confirmó la asignación del rol")
+        except (discord.Forbidden, discord.HTTPException, RuntimeError) as error:
+            if not previous_active:
+                await delete_cargo_temporal(usuario.id, role.id, interaction.guild.id)
+            logger.warning(
+                "No se pudo aplicar la restricción a %s: %s",
+                usuario.id,
+                error,
+            )
+            return await interaction.followup.send(
+                "❌ No pude asignar o verificar el rol de Expulsado. La restricción no fue aplicada. "
+                "Revisa los permisos y la jerarquía del rol del bot.",
+                ephemeral=True,
+            )
+
+        await interaction.followup.send(
+            f"✅ {usuario.mention} fue restringido hasta <t:{int(expires_at)}:F> "
+            f"(<t:{int(expires_at)}:R>).",
+            ephemeral=False,
+        )
 
     @app_commands.command(name="balance", description="Ver balance y banco de un miembro")
     @app_commands.describe(usuario="Miembro a consultar")

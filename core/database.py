@@ -489,6 +489,22 @@ async def get_user_temporary_roles(user_id: int):
     return [dict(row) for row in rows]
 
 
+async def get_cargo_temporal(user_id: int, guild_id: int, rol_id: int):
+    """Obtiene el registro temporal exacto de un usuario, servidor y rol."""
+    async with pool.acquire() as conn:
+        row = await conn.fetchrow(
+            """
+            SELECT id, user_id, guild_id, rol_id, expira_en
+            FROM cargos_temporales
+            WHERE user_id=$1 AND guild_id=$2 AND rol_id=$3
+            """,
+            user_id,
+            guild_id,
+            rol_id,
+        )
+    return dict(row) if row else None
+
+
 async def get_user_deletion_blocker(user_id: int):
     async with pool.acquire() as conn:
         pending_wager = await conn.fetchval("""
@@ -2588,6 +2604,7 @@ async def add_cargo_temporal(user_id, guild_id, rol_id, expira_en):
                 expira_en,
             )
     cache.upsert_cargo_cache(user_id, guild_id, rol_id, expira_en)
+    return expira_en
 
 async def delete_cargo_temporal(user_id, rol_id, guild_id=None):
     async with pool.acquire() as conn:

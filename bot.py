@@ -66,7 +66,9 @@ from core.database import (
     get_user_temporary_roles, purge_user_data, touch_user_activity,
 )
 from core import cache
-from core.config import AYUDA_CHANNEL_ID, LOG_CHANNEL_ID, STAFF_ROLE_ID
+from core.config import (
+    AYUDA_CHANNEL_ID, LOG_CHANNEL_ID, STAFF_ROLE_ID, PUNISHMENT_ROLE_ID,
+)
 
 intents = discord.Intents.default()
 intents.message_content = True
@@ -87,6 +89,38 @@ bot._user_activity_writes = _activity_writes
 USER_INACTIVITY_RETENTION = 60 * 24 * 60 * 60
 USER_ACTIVITY_WRITE_INTERVAL = 60 * 60
 INACTIVE_PURGE_INTERVAL = 6 * 60 * 60
+
+
+class CommandAccessRestricted(commands.CheckFailure):
+    """Evita que un usuario castigado ejecute comandos con prefijo."""
+
+
+@bot.check
+async def block_restricted_prefix_commands(ctx: commands.Context) -> bool:
+    if ctx.guild is None:
+        return True
+
+    now = time.time()
+    expires_at = max(
+        (
+            cargo["expira_en"]
+            for cargo in cache.get_cargos_cache().get(ctx.author.id, [])
+            if cargo.get("guild_id") == ctx.guild.id
+            and cargo.get("rol_id") == PUNISHMENT_ROLE_ID
+            and cargo.get("expira_en", 0) > now
+        ),
+        default=0,
+    )
+    if not expires_at:
+        return True
+
+    await ctx.reply(
+        "Tu acceso está **Restringido** debido a un uso incorrecto del canal. "
+        f"Podrás volver a interactuar en <t:{int(expires_at)}:R>",
+        mention_author=False,
+        delete_after=3,
+    )
+    raise CommandAccessRestricted()
 
 
 async def record_user_activity(user_id: int) -> None:
@@ -208,7 +242,11 @@ async def _retirar_cargo_vencido(cargo: dict) -> str:
         if role_id in {member_role.id for member_role in member.roles}:
             await member.remove_roles(
                 role,
-                reason="Expiración de rol temporal otorgado por un item",
+                reason=(
+                    "Finalización de restricción temporal de comandos"
+                    if role_id == PUNISHMENT_ROLE_ID
+                    else "Expiración de rol temporal otorgado por un item"
+                ),
             )
 
         for intento in range(3):
@@ -372,6 +410,8 @@ async def purge_inactive_users_loop():
 
 @bot.event
 async def on_command_error(ctx, error):
+    if isinstance(error, CommandAccessRestricted):
+        return
     if isinstance(error, commands.CommandNotFound):
         await ctx.reply(
             "❌ Este comando no es válido, Consulta la Guia de la Nave en <#1505296434076057752>",
