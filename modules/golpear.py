@@ -14,6 +14,8 @@ GOLPEAR_GIF = "https://pub-a09b3609b6b34dfab5c7aa7742cd1a8a.r2.dev/Purple%20jack
 COFRE_ROTO_IMAGE = "https://pub-a09b3609b6b34dfab5c7aa7742cd1a8a.r2.dev/Purple%20jack%20Harcode/CofreRoto.png"
 MAX_GOLPES = 3
 COFRE_TIMEOUT = 6
+COFRE_RECLAMADO_DELETE_AFTER = 20
+COFRE_SIN_RECLAMOS_DELETE_AFTER = 10
 
 # ── ESTADO GLOBAL ──────────────────────────────────────
 _golpear_config = {
@@ -97,6 +99,7 @@ class GolpearView(discord.ui.View):
             )
             embed.set_image(url=COFRE_ROTO_IMAGE)
             embed.set_footer(text="Drop de Cofres - Aprovecha!")
+            delete_after = COFRE_RECLAMADO_DELETE_AFTER
         else:
             embed = discord.Embed(
                 title="💨 Cofre Vencido",
@@ -105,6 +108,7 @@ class GolpearView(discord.ui.View):
             )
             embed.set_image(url=COFRE_ROTO_IMAGE)
             embed.set_footer(text="Drop de Cofres - Aprovecha!")
+            delete_after = COFRE_SIN_RECLAMOS_DELETE_AFTER
 
         try:
             await self.message.edit(embed=embed, view=self)
@@ -114,7 +118,7 @@ class GolpearView(discord.ui.View):
                 error,
             )
 
-        await asyncio.sleep(4)
+        await asyncio.sleep(delete_after)
         try:
             await self.message.delete()
         except discord.NotFound:
@@ -192,7 +196,7 @@ class GolpearView(discord.ui.View):
                 error,
             )
 
-        await asyncio.sleep(240)
+        await asyncio.sleep(COFRE_RECLAMADO_DELETE_AFTER)
         try:
             await message.delete()
         except discord.NotFound:

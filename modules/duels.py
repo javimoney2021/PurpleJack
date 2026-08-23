@@ -547,7 +547,7 @@ class Duels(commands.Cog):
     @commands.command(name="retar")
     async def retar(self, ctx, usuario: discord.Member, monto: int):
         if not await _is_duel_enabled(ctx.guild.id):
-            return await ctx.send(
+            return await ctx.reply(
                 "La Arena de batalla no se encuentra disponible por el momento."
             )
 
@@ -615,7 +615,7 @@ class Duels(commands.Cog):
     @retar.error
     async def retar_error(self, ctx, error):
         if ctx.guild is not None and not await _is_duel_enabled(ctx.guild.id):
-            return await ctx.send(
+            return await ctx.reply(
                 "La Arena de batalla no se encuentra disponible por el momento."
             )
         if isinstance(error, commands.MissingRequiredArgument):

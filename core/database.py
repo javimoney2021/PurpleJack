@@ -2464,6 +2464,25 @@ async def get_all_inventarios():
     return [dict(r) for r in rows]
 
 
+async def get_stock_inventory_summary():
+    """Devuelve el stock de tienda y el total existente en inventarios por item."""
+    async with pool.acquire() as conn:
+        rows = await conn.fetch(
+            """
+            SELECT
+                i.id,
+                i.nombre,
+                i.stock,
+                COALESCE(SUM(inv.cantidad), 0)::BIGINT AS stock_inventario
+            FROM items i
+            LEFT JOIN inventario inv ON inv.item_id = i.id
+            GROUP BY i.id, i.nombre, i.stock
+            ORDER BY LOWER(i.nombre), i.id
+            """
+        )
+    return [dict(row) for row in rows]
+
+
 # ── CARGOS TEMPORALES ──────────────────────────────────
 
 async def load_cargos_to_cache():

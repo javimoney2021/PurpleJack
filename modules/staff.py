@@ -15,7 +15,8 @@ from core.database import (
     get_user, update_balance, update_bank, pool,
     add_item, edit_item, delete_item,
     get_item_by_name, add_to_inventory, get_all_users_net_worth,
-    get_all_inventarios, load_items_to_cache, add_stock, remove_inventory_quantity,
+    get_all_inventarios, get_stock_inventory_summary, load_items_to_cache,
+    add_stock, remove_inventory_quantity,
     set_item_log_uso_channel,
     upsert_collect_config_db, delete_collect_config_db, delete_orphan_collect_configs_db,
     set_item_role_restrictions_db, remove_item_role_restriction_db,
@@ -326,6 +327,98 @@ class ExperienciaLaboralPaginationView(discord.ui.View):
         if interaction.user.id == self.author_id:
             return True
         await interaction.response.send_message("❌ Solo quien ejecutó el comando puede usar estos botones.", ephemeral=True)
+        return False
+
+    @discord.ui.button(label="Anterior", style=discord.ButtonStyle.secondary)
+    async def anterior(self, interaction: discord.Interaction, button: discord.ui.Button):
+        self.page -= 1
+        await interaction.response.edit_message(embed=self.get_embed(), view=self)
+
+    @discord.ui.button(label="Siguiente", style=discord.ButtonStyle.secondary)
+    async def siguiente(self, interaction: discord.Interaction, button: discord.ui.Button):
+        self.page += 1
+        await interaction.response.edit_message(embed=self.get_embed(), view=self)
+
+    async def on_timeout(self):
+        for child in self.children:
+            child.disabled = True
+        if self.message:
+            try:
+                await self.message.edit(view=self)
+            except (discord.HTTPException, discord.NotFound):
+                pass
+
+
+class StockListPaginationView(discord.ui.View):
+    PAGE_SIZE = 10
+
+    def __init__(self, author_id: int, rows: list[dict]):
+        super().__init__(timeout=300)
+        self.author_id = author_id
+        self.rows = rows
+        self.page = 0
+        self.message = None
+        self._actualizar_botones()
+
+    def _actualizar_botones(self):
+        total_pages = max(1, ceil(len(self.rows) / self.PAGE_SIZE))
+        self.anterior.disabled = self.page == 0
+        self.siguiente.disabled = self.page >= total_pages - 1
+
+    def get_embed(self):
+        self._actualizar_botones()
+        total_pages = max(1, ceil(len(self.rows) / self.PAGE_SIZE))
+        start = self.page * self.PAGE_SIZE
+        page_rows = self.rows[start:start + self.PAGE_SIZE]
+
+        embed = discord.Embed(
+            title="📦 Control de Stock",
+            description="Existencias actuales de la tienda y de todos los inventarios.",
+            color=discord.Color.dark_purple(),
+        )
+
+        nombres = []
+        stock_tienda = []
+        stock_inventario = []
+        for row in page_rows:
+            nombre = str(row["nombre"]).replace("`", "'")
+            nombres.append(nombre[:22])
+            stock = int(row["stock"])
+            stock_tienda.append("∞" if stock == -1 else str(stock))
+            stock_inventario.append(str(int(row["stock_inventario"])))
+
+        embed.add_field(
+            name="ITEM",
+            value=f"```\n{'\n'.join(nombres)}\n```",
+            inline=True,
+        )
+        embed.add_field(
+            name="Stock Tienda",
+            value=f"```\n{'\n'.join(stock_tienda)}\n```",
+            inline=True,
+        )
+        embed.add_field(
+            name="Stock Invent.",
+            value=f"```\n{'\n'.join(stock_inventario)}\n```",
+            inline=True,
+        )
+
+        total_inventarios = sum(int(row["stock_inventario"]) for row in self.rows)
+        embed.set_footer(
+            text=(
+                f"Página {self.page + 1}/{total_pages} • "
+                f"{len(self.rows)} artículos • {total_inventarios} unidades en inventarios"
+            )
+        )
+        return embed
+
+    async def interaction_check(self, interaction: discord.Interaction) -> bool:
+        if interaction.user.id == self.author_id:
+            return True
+        await interaction.response.send_message(
+            "❌ Solo quien ejecutó el comando puede usar estos botones.",
+            ephemeral=True,
+        )
         return False
 
     @discord.ui.button(label="Anterior", style=discord.ButtonStyle.secondary)
@@ -1601,6 +1694,31 @@ class Staff(commands.Cog):
             for i in items
             if current.lower() in i["nombre"].lower()
         ][:25]
+
+    @app_commands.command(
+        name="stock_list",
+        description="Muestra el stock de tienda y el total guardado en inventarios",
+    )
+    @is_staff()
+    async def stock_list(self, interaction: discord.Interaction):
+        await interaction.response.defer(ephemeral=False)
+        try:
+            rows = await get_stock_inventory_summary()
+            if not rows:
+                return await interaction.followup.send(
+                    "📦 No hay items registrados en la tienda.",
+                    ephemeral=True,
+                )
+
+            view = StockListPaginationView(interaction.user.id, rows)
+            await interaction.edit_original_response(embed=view.get_embed(), view=view)
+            view.message = await interaction.original_response()
+        except Exception:
+            logger.exception("ERROR stock_list")
+            await interaction.followup.send(
+                "❌ No pude consultar el stock en este momento.",
+                ephemeral=True,
+            )
 
     @app_commands.command(name="collect_config", description="Configura collect para un rol")
     @app_commands.describe(rol="Rol", cantidad="PurpleCoins a otorgar", cooldown="Cooldown: ej 2h o 30m")
