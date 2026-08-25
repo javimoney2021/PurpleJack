@@ -73,7 +73,8 @@ from core import cache
 from core.config import (
     AYUDA_CHANNEL_ID, LOG_CHANNEL_ID, STAFF_ROLE_ID, PUNISHMENT_ROLE_ID,
     LOG_CLEANUP_INTERVAL_SECONDS, LOG_MESSAGE_RETENTION_SECONDS,
-    LOG_RETENTION_CHANNEL_IDS,
+    LOG_RETENTION_CHANNEL_IDS, LOG_DELETE_DELAY_SECONDS,
+    LOG_DELETE_BATCH_SIZE, LOG_CLEANUP_BACKLOG_DELAY_SECONDS,
 )
 
 intents = discord.Intents.default()
@@ -410,8 +411,15 @@ async def purge_inactive_users_loop():
             await asyncio.sleep(300)
 
 
-async def _delete_expired_bot_logs(channel_id: int, cutoff: datetime) -> int:
+async def _delete_expired_bot_logs(
+    channel_id: int,
+    cutoff: datetime,
+    max_deletions: int,
+) -> tuple[int, bool]:
     """Elimina mensajes antiguos solo cuando pertenecen a esta cuenta del bot."""
+    if max_deletions <= 0:
+        return 0, True
+
     try:
         channel = bot.get_channel(channel_id)
         if channel is None:
@@ -424,13 +432,14 @@ async def _delete_expired_bot_logs(channel_id: int, cutoff: datetime) -> int:
             channel_id,
             error,
         )
-        return 0
+        return 0, False
 
     bot_user_id = bot.user.id if bot.user else None
     if bot_user_id is None:
-        return 0
+        return 0, False
 
     deleted = 0
+    batch_limit_reached = False
     try:
         async for message in channel.history(
             limit=None,
@@ -442,6 +451,10 @@ async def _delete_expired_bot_logs(channel_id: int, cutoff: datetime) -> int:
             try:
                 await message.delete()
                 deleted += 1
+                if deleted >= max_deletions:
+                    batch_limit_reached = True
+                    break
+                await asyncio.sleep(LOG_DELETE_DELAY_SECONDS)
             except discord.NotFound:
                 continue
             except discord.Forbidden as error:
@@ -464,7 +477,7 @@ async def _delete_expired_bot_logs(channel_id: int, cutoff: datetime) -> int:
             channel_id,
             error,
         )
-    return deleted
+    return deleted, batch_limit_reached
 
 
 async def log_retention_worker():
@@ -487,16 +500,39 @@ async def log_retention_worker():
                 seconds=LOG_MESSAGE_RETENTION_SECONDS
             )
             deleted_messages = 0
+            backlog_pending = False
             for channel_id in LOG_RETENTION_CHANNEL_IDS:
-                deleted_messages += await _delete_expired_bot_logs(channel_id, cutoff)
+                remaining = LOG_DELETE_BATCH_SIZE - deleted_messages
+                if remaining <= 0:
+                    backlog_pending = True
+                    break
+                channel_deleted, reached_limit = await _delete_expired_bot_logs(
+                    channel_id,
+                    cutoff,
+                    remaining,
+                )
+                deleted_messages += channel_deleted
+                if reached_limit:
+                    backlog_pending = True
+                    break
 
             deleted_outbox = await delete_expired_failed_item_use_logs()
-            await complete_maintenance_job(LOG_CLEANUP_JOB_NAME)
+            completed_at = time.time()
+            await complete_maintenance_job(
+                LOG_CLEANUP_JOB_NAME,
+                completed_at=completed_at,
+                next_run_at=(
+                    completed_at + LOG_CLEANUP_BACKLOG_DELAY_SECONDS
+                    if backlog_pending
+                    else None
+                ),
+            )
             logger.info(
                 "[LOG_CLEANUP:OK] Eliminados %s mensaje(s) del bot y %s "
-                "registro(s) fallido(s) del outbox.",
+                "registro(s) fallido(s) del outbox.%s",
                 deleted_messages,
                 deleted_outbox,
+                " Próximo lote en 5 minutos." if backlog_pending else "",
             )
         except asyncio.CancelledError:
             raise

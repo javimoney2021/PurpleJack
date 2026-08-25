@@ -2472,17 +2472,23 @@ async def claim_maintenance_job(
     }
 
 
-async def complete_maintenance_job(job_name: str, completed_at: float | None = None):
+async def complete_maintenance_job(
+    job_name: str,
+    completed_at: float | None = None,
+    next_run_at: float | None = None,
+):
     completed_at = time.time() if completed_at is None else float(completed_at)
     async with pool.acquire() as conn:
         await conn.execute(
             """
             UPDATE maintenance_schedule
-            SET last_completed_at=$2
+            SET last_completed_at=$2,
+                next_run_at=COALESCE($3, next_run_at)
             WHERE job_name=$1
             """,
             job_name,
             completed_at,
+            float(next_run_at) if next_run_at is not None else None,
         )
 
 
