@@ -75,7 +75,7 @@ class BasicGames(commands.Cog):
         amount = random.randint(game_config["work"]["min"], game_config["work"]["max"])
         msg = random.choice(WORK_MESSAGES).format(monto=amount)
 
-        # Actualizar RAM al instante — flush_loop persiste a DB cada 10 min
+        # Actualizar RAM al instante — flush_loop persiste periódicamente a DB
         _cache_mod.update_cached_cooldown(ctx.author.id, "work", now)
         _cache_mod.update_cached_balance(ctx.author.id, amount)
 
@@ -118,7 +118,7 @@ class BasicGames(commands.Cog):
 
         _cache_mod.update_cached_cooldown(ctx.author.id, "crime", now)
 
-        # Actualizar RAM al instante — flush_loop persiste a DB cada 10 min
+        # Actualizar RAM al instante — flush_loop persiste periódicamente a DB
         nick = ctx.author.nick or ctx.author.display_name
         response = await ctx.message.reply(f"{nick} {msg}", mention_author=False)
         await send_cd_boost_notice(response, ctx.author, cd_boost)

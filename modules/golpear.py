@@ -5,7 +5,13 @@ import random
 import time
 from discord.ext import commands
 from core.database import update_balance
-from core.config import COIN, STAFF_ROLE
+from core.config import (
+    COIN,
+    GOLPEAR_CHANNEL_ID,
+    GOLPEAR_MAX_TIME,
+    GOLPEAR_MIN_TIME,
+    STAFF_ROLE,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -20,9 +26,9 @@ COFRE_SIN_RECLAMOS_DELETE_AFTER = 10
 # ── ESTADO GLOBAL ──────────────────────────────────────
 _golpear_config = {
     "activo": False,
-    "canal_id": None,
-    "min_time": 600,
-    "max_time": 3600,
+    "canal_id": GOLPEAR_CHANNEL_ID,
+    "min_time": GOLPEAR_MIN_TIME,
+    "max_time": GOLPEAR_MAX_TIME,
     "min_ganancia": 150,
     "max_ganancia": 800,
     "next_spawn_at": 0.0,

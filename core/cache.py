@@ -9,6 +9,8 @@ logger = logging.getLogger("purplejack.cache")
 _cache = {}
 _dirty = set()
 _last_activity = {}
+_balance_index = {}
+_balance_index_version = 0
 
 FLUSH_INTERVAL = 120   # 2 minutos — reduce pérdida potencial ante reinicios
 CACHE_EXPIRE   = 7200  # 2 horas de inactividad
@@ -99,6 +101,58 @@ def get_cached(user_id):
     touch_user(user_id)
     return _cache.get(user_id)
 
+
+def _set_balance_index_value(user_id: int, balance: int) -> None:
+    global _balance_index_version
+    user_id = int(user_id)
+    balance = int(balance)
+    if _balance_index.get(user_id) == balance:
+        return
+    _balance_index[user_id] = balance
+    _balance_index_version += 1
+
+
+def restore_balance_index(rows) -> None:
+    """Restaura el índice económico completo desde la fuente persistente."""
+    global _balance_index, _balance_index_version
+    restored = {
+        int(row["id"]): int(row["balance"] or 0)
+        for row in rows
+    }
+    if restored != _balance_index:
+        _balance_index = restored
+        _balance_index_version += 1
+
+
+def get_balance_index_snapshot(limit: int | None = None):
+    """Devuelve versión y ranking inmutable con los balances vivos de RAM."""
+    ranking = sorted(
+        _balance_index.items(),
+        key=lambda entry: (-entry[1], entry[0]),
+    )
+    if limit is not None:
+        ranking = ranking[:max(0, int(limit))]
+    return _balance_index_version, tuple(ranking)
+
+
+def get_balance_index_version() -> int:
+    return _balance_index_version
+
+
+def get_indexed_balance(user_id: int, default: int = 0) -> int:
+    return int(_balance_index.get(int(user_id), default))
+
+
+def reset_balance_index(balance: int = 0) -> None:
+    """Conserva los usuarios conocidos y reinicia todos sus balances."""
+    global _balance_index_version
+    balance = int(balance)
+    if any(current != balance for current in _balance_index.values()):
+        for user_id in tuple(_balance_index):
+            _balance_index[user_id] = balance
+        _balance_index_version += 1
+
+
 def set_cache(user_id, data):
     _cache[user_id] = {
         "balance":        data.get("balance", 0),
@@ -106,6 +160,7 @@ def set_cache(user_id, data):
         "cooldown_work":  data.get("cooldown_work", 0),
         "cooldown_crime": data.get("cooldown_crime", 0),
     }
+    _set_balance_index_value(user_id, _cache[user_id]["balance"])
     touch_user(user_id)
 
 def mark_dirty(user_id):
@@ -115,6 +170,7 @@ def mark_dirty(user_id):
 def update_cached_balance(user_id, amount, track_event=True):
     if user_id in _cache:
         _cache[user_id]["balance"] += amount
+        _set_balance_index_value(user_id, _cache[user_id]["balance"])
         if track_event:
             record_evento_balance_delta(user_id, amount)
         mark_dirty(user_id)
@@ -132,6 +188,7 @@ def update_cached_bank(user_id, amount, track_event=True):
     if amount <= 0:
         # Retiros o penalizaciones: siempre se aplican sin límite
         _cache[user_id]["bank"] += amount
+        _set_balance_index_value(user_id, _cache[user_id]["balance"])
         mark_dirty(user_id)
         return amount
 
@@ -147,6 +204,8 @@ def update_cached_bank(user_id, amount, track_event=True):
         _cache[user_id]["balance"] += excedente_balance
         if track_event:
             record_evento_balance_delta(user_id, excedente_balance)
+
+    _set_balance_index_value(user_id, _cache[user_id]["balance"])
 
     mark_dirty(user_id)
     return aplicado_banco
@@ -168,7 +227,10 @@ def get_all_cache():
 
 def purge_user_cache(user_id: int) -> None:
     """Retira toda referencia personal del usuario conservada en RAM."""
+    global _balance_index_version
     _cache.pop(user_id, None)
+    if _balance_index.pop(user_id, None) is not None:
+        _balance_index_version += 1
     _dirty.discard(user_id)
     _last_activity.pop(user_id, None)
     _rob_cooldowns.pop(user_id, None)

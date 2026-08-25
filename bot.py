@@ -5,6 +5,7 @@ import asyncio
 import time
 import signal
 import logging
+from datetime import datetime, timedelta, timezone
 
 # ── LOGGING ────────────────────────────────────────────
 
@@ -55,6 +56,7 @@ except ImportError:
 
 from core.database import (
     init_db, load_items_to_cache, load_cargos_to_cache,
+    load_balance_index,
     load_collect_config_to_cache, claim_expired_cargos,
     get_cargo_temporal_by_id, mark_cargo_removal_failed,
     release_cargo_claim, delete_cargo_temporal_by_id,
@@ -64,10 +66,14 @@ from core.database import (
     recover_pending_wagers, ensure_wager_constraints,
     get_inactive_user_ids, get_user_deletion_blocker,
     get_user_temporary_roles, purge_user_data, touch_user_activity,
+    claim_maintenance_job, complete_maintenance_job,
+    delete_expired_failed_item_use_logs,
 )
 from core import cache
 from core.config import (
     AYUDA_CHANNEL_ID, LOG_CHANNEL_ID, STAFF_ROLE_ID, PUNISHMENT_ROLE_ID,
+    LOG_CLEANUP_INTERVAL_SECONDS, LOG_MESSAGE_RETENTION_SECONDS,
+    LOG_RETENTION_CHANNEL_IDS,
 )
 
 intents = discord.Intents.default()
@@ -83,12 +89,14 @@ evento_flush_task = None
 cargos_task = None
 wager_recovery_task = None
 inactive_purge_task = None
+log_cleanup_task = None
 _activity_writes = {}
 bot._user_activity_writes = _activity_writes
 
-USER_INACTIVITY_RETENTION = 60 * 24 * 60 * 60
+USER_INACTIVITY_RETENTION = 30 * 24 * 60 * 60
 USER_ACTIVITY_WRITE_INTERVAL = 60 * 60
 INACTIVE_PURGE_INTERVAL = 6 * 60 * 60
+LOG_CLEANUP_JOB_NAME = "discord-log-retention"
 
 
 class CommandAccessRestricted(commands.CheckFailure):
@@ -391,7 +399,7 @@ async def purge_inactive_users_loop():
                     purged += 1
             if purged:
                 logger.info(
-                    "Purga automática: %s usuario(s) eliminado(s) tras 60 días de inactividad.",
+                    "Purga automática: %s usuario(s) eliminado(s) tras 30 días de inactividad.",
                     purged,
                 )
             await asyncio.sleep(60 if len(user_ids) >= 100 else INACTIVE_PURGE_INTERVAL)
@@ -400,6 +408,101 @@ async def purge_inactive_users_loop():
         except Exception:
             logger.exception("Error en la purga automática de usuarios inactivos")
             await asyncio.sleep(300)
+
+
+async def _delete_expired_bot_logs(channel_id: int, cutoff: datetime) -> int:
+    """Elimina mensajes antiguos solo cuando pertenecen a esta cuenta del bot."""
+    try:
+        channel = bot.get_channel(channel_id)
+        if channel is None:
+            channel = await bot.fetch_channel(channel_id)
+        if not hasattr(channel, "history"):
+            raise RuntimeError("el destino no permite consultar historial")
+    except (discord.Forbidden, discord.NotFound, discord.HTTPException, RuntimeError) as error:
+        logger.error(
+            "[LOG_CLEANUP:E_CHANNEL] No se pudo consultar el canal %s: %s",
+            channel_id,
+            error,
+        )
+        return 0
+
+    bot_user_id = bot.user.id if bot.user else None
+    if bot_user_id is None:
+        return 0
+
+    deleted = 0
+    try:
+        async for message in channel.history(
+            limit=None,
+            before=cutoff,
+            oldest_first=True,
+        ):
+            if message.author.id != bot_user_id:
+                continue
+            try:
+                await message.delete()
+                deleted += 1
+            except discord.NotFound:
+                continue
+            except discord.Forbidden as error:
+                logger.error(
+                    "[LOG_CLEANUP:E_FORBIDDEN] Sin permiso para eliminar en %s: %s",
+                    channel_id,
+                    error,
+                )
+                break
+            except discord.HTTPException as error:
+                logger.warning(
+                    "[LOG_CLEANUP:E_DELETE] No se eliminó el mensaje %s en %s: %s",
+                    message.id,
+                    channel_id,
+                    error,
+                )
+    except (discord.Forbidden, discord.HTTPException) as error:
+        logger.error(
+            "[LOG_CLEANUP:E_HISTORY] Falló la lectura del canal %s: %s",
+            channel_id,
+            error,
+        )
+    return deleted
+
+
+async def log_retention_worker():
+    """Ejecuta la retención horaria con agenda persistente y reclamo atómico."""
+    await bot.wait_until_ready()
+    while not bot.is_closed():
+        try:
+            now = time.time()
+            schedule = await claim_maintenance_job(
+                LOG_CLEANUP_JOB_NAME,
+                LOG_CLEANUP_INTERVAL_SECONDS,
+                now=now,
+            )
+            if not schedule["claimed"]:
+                wait_for = max(1, schedule["next_run_at"] - now)
+                await asyncio.sleep(min(wait_for, LOG_CLEANUP_INTERVAL_SECONDS))
+                continue
+
+            cutoff = datetime.now(timezone.utc) - timedelta(
+                seconds=LOG_MESSAGE_RETENTION_SECONDS
+            )
+            deleted_messages = 0
+            for channel_id in LOG_RETENTION_CHANNEL_IDS:
+                deleted_messages += await _delete_expired_bot_logs(channel_id, cutoff)
+
+            deleted_outbox = await delete_expired_failed_item_use_logs()
+            await complete_maintenance_job(LOG_CLEANUP_JOB_NAME)
+            logger.info(
+                "[LOG_CLEANUP:OK] Eliminados %s mensaje(s) del bot y %s "
+                "registro(s) fallido(s) del outbox.",
+                deleted_messages,
+                deleted_outbox,
+            )
+        except asyncio.CancelledError:
+            raise
+        except Exception:
+            logger.exception("[LOG_CLEANUP:E_WORKER] Falló el worker de retención")
+            await asyncio.sleep(60)
 
 
 @bot.event
@@ -433,9 +536,13 @@ async def shutdown():
 
 @bot.event
 async def on_ready():
-    global evento_flush_task, cargos_task, wager_recovery_task, inactive_purge_task
+    global evento_flush_task, cargos_task, wager_recovery_task
+    global inactive_purge_task, log_cleanup_task
     logger.info(f"Bot conectado como {bot.user}")
-    logger.info("Caché iniciada | Flush cada 5 minutos")
+    logger.info(
+        "Caché iniciada | Flush cada %s segundos",
+        cache.FLUSH_INTERVAL,
+    )
     logger.info(f"Servidores activos: {len(bot.guilds)}")
 
     try:
@@ -470,7 +577,15 @@ async def on_ready():
             purge_inactive_users_loop(),
             name="purga-usuarios-inactivos-worker",
         )
-        logger.info("Task de privacidad iniciada | Purga tras 60 días de inactividad")
+        logger.info("Task de privacidad iniciada | Purga tras 30 días de inactividad")
+    if log_cleanup_task is None or log_cleanup_task.done():
+        log_cleanup_task = asyncio.create_task(
+            log_retention_worker(),
+            name="retencion-logs-worker",
+        )
+        logger.info(
+            "Task de retención de logs iniciada | Revisión persistente cada hora"
+        )
     logger.info("\n⫷ 𝙋𝙐𝙍𝙋𝙇𝙀𝙅𝘼𝘾𝙆 𝙀𝙉 𝙇𝙄𝙉𝙀𝘼 ⫸\n")
 
 def run_bot():
@@ -486,6 +601,11 @@ def run_bot():
                 "Se reembolsaron %s apuestas vencidas al iniciar.",
                 reembolsadas,
             )
+        indexed_balances = await load_balance_index()
+        logger.info(
+            "Índice económico en RAM iniciado con %s usuario(s).",
+            indexed_balances,
+        )
         await ensure_wager_constraints()
         await create_game_config_table()
         await load_game_config()

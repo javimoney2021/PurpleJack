@@ -2,7 +2,6 @@ import re
 import logging
 import discord
 import asyncio
-import aiohttp
 import time
 from io import BytesIO
 
@@ -32,7 +31,6 @@ from core import cache
 from core.config import (
     ruleta_config, game_config, dados_config, memo_config,
     blackjack_config, COIN,
-    STAFF_ROLE, COORDINADOR_ROLE,
     STAFF_ROLE_ID, COORDINADOR_ROLE_ID, PUNISHMENT_ROLE_ID
 )
 from modules.memo import _memo_cooldowns
@@ -44,10 +42,6 @@ from modules.Empleos import (
 EVENTO_THUMBNAIL_URL = "https://pub-a09b3609b6b34dfab5c7aa7742cd1a8a.r2.dev/Purple%20jack%20Harcode/PurpleThumb.png"
 EVENTO_TOP_ICON = "<:ygoldstar:1004555717610590258>"
 
-
-# ── ANUNCIOS (RAM only) ────────────────────────────────
-_pending_announcements = {}
-# {user_id: {"channel": channel_obj, "source_channel_id": int, "expires": float, "content": str|None}}
 
 def is_staff():
     async def predicate(interaction: discord.Interaction):
@@ -88,12 +82,13 @@ class ResetAllModal(discord.ui.Modal, title="Confirmar Reset Global"):
                 )
         cache._cache.clear()
         cache._dirty.clear()
+        cache.reset_balance_index(0)
         if cache.is_evento_activo():
             cache.clear_evento_puntos()
             await flush_evento_puntos()
         await interaction.response.send_message("✅ Reset global completado.", ephemeral=False)
 
-# ── ANUNCIO CONFIRM VIEW ───────────────────────────────
+# ── RESET DE EXPERIENCIA LABORAL ────────────────────────
 
 class ResetExpLaboralGlobalModal(discord.ui.Modal, title="Confirmar Reset de XP Laboral"):
     confirmacion = discord.ui.TextInput(
@@ -176,50 +171,6 @@ class CleanOrphanCollectModal(discord.ui.Modal, title="Limpiar Collects Huérfan
             ephemeral=True,
         )
 
-
-class AnuncioConfirmView(discord.ui.View):
-    def __init__(self, user_id, channel, content, img_bytes=None, img_filename=None):
-        super().__init__(timeout=60)
-        self.user_id = user_id
-        self.channel = channel
-        self.content = content
-        self.img_bytes = img_bytes
-        self.img_filename = img_filename or "imagen.png"
-
-    @discord.ui.button(label="✅ Aceptar", style=discord.ButtonStyle.success)
-    async def aceptar(self, interaction: discord.Interaction, button: discord.ui.Button):
-        if interaction.user.id != self.user_id:
-            return await interaction.response.send_message("❌ No es tu confirmación.", ephemeral=True)
-        for item in self.children:
-            item.disabled = True
-        await interaction.response.edit_message(
-            embed=discord.Embed(
-                description=f"✅ Anuncio enviado a {self.channel.mention}.",
-                color=discord.Color.green()
-            ),
-            view=self
-        )
-        if self.img_bytes:
-            file = discord.File(BytesIO(self.img_bytes), filename=self.img_filename)
-            await self.channel.send(content=self.content or None, file=file)
-        else:
-            await self.channel.send(self.content)
-        _pending_announcements.pop(self.user_id, None)
-
-    @discord.ui.button(label="❌ Cancelar", style=discord.ButtonStyle.danger)
-    async def cancelar(self, interaction: discord.Interaction, button: discord.ui.Button):
-        if interaction.user.id != self.user_id:
-            return await interaction.response.send_message("❌ No es tu confirmación.", ephemeral=True)
-        for item in self.children:
-            item.disabled = True
-        await interaction.response.edit_message(
-            embed=discord.Embed(
-                description="🚫 Anuncio cancelado. No se envió nada.",
-                color=discord.Color.red()
-            ),
-            view=self
-        )
-        _pending_announcements.pop(self.user_id, None)
 
 class SaldosPaginationView(discord.ui.View):
     def __init__(self, author_id, users):
@@ -511,7 +462,7 @@ class EconomiaView(discord.ui.View):
         await interaction.followup.send(
             content="✅ Inventarios generados. Descarga el archivo a continuación.",
             file=dispositivo,
-            ephemeral=False
+            ephemeral=True
         )
 
 
@@ -641,13 +592,13 @@ class Staff(commands.Cog):
     @app_commands.describe(usuario="Miembro a consultar")
     @is_staff()
     async def balance_staff(self, interaction, usuario: discord.Member):
-        await interaction.response.defer(ephemeral=False)
+        await interaction.response.defer(ephemeral=True)
         user = await get_user(usuario.id)
         embed = discord.Embed(title=f"💰 Finanzas de {usuario.display_name}", color=discord.Color.gold())
         embed.add_field(name=f"{COIN} Balance", value=f"{user['balance']} {COIN}", inline=True)
         embed.add_field(name="🏦 Banco", value=f"{user['bank']} {COIN}", inline=True)
         embed.set_thumbnail(url=usuario.display_avatar.url)
-        await interaction.followup.send(embed=embed, ephemeral=False)
+        await interaction.followup.send(embed=embed, ephemeral=True)
 
     @app_commands.command(name="addcoins", description="Añade PurpleCoins a un miembro")
     @app_commands.describe(usuario="Miembro", cantidad="Cantidad a añadir", destino="Balance o Banco")
@@ -664,13 +615,6 @@ class Staff(commands.Cog):
             await update_balance(usuario.id, cantidad, track_event=False)
         else:
             await update_bank(usuario.id, cantidad, track_event=False)
-        async with pool.acquire() as conn:
-            data = cache.get_cached(usuario.id)
-            if data:
-                await conn.execute(
-                    "UPDATE users SET balance=$1, bank=$2 WHERE id=$3",
-                    data["balance"], data["bank"], usuario.id
-                )
         await interaction.followup.send(
             f"✅ Se añadieron **{cantidad}** {COIN} al **{destino.name}** de {usuario.mention}.", ephemeral=False
         )
@@ -690,13 +634,6 @@ class Staff(commands.Cog):
             await update_balance(usuario.id, -cantidad)
         else:
             await update_bank(usuario.id, -cantidad)
-        async with pool.acquire() as conn:
-            data = cache.get_cached(usuario.id)
-            if data:
-                await conn.execute(
-                    "UPDATE users SET balance=$1, bank=$2 WHERE id=$3",
-                    data["balance"], data["bank"], usuario.id
-                )
         await interaction.followup.send(
             f"✅ Se removieron **{cantidad}** {COIN} del **{destino.name}** de {usuario.mention}.", ephemeral=False
         )
@@ -1142,7 +1079,7 @@ class Staff(commands.Cog):
         canal_id = cfg.get("canal_id")
         if not canal_id:
             return await interaction.followup.send(
-                "❌ No hay un canal configurado. Usa `/golpear_editar` primero.",
+                "❌ El canal fijo del sistema de cofres no está disponible.",
                 ephemeral=True,
             )
 
@@ -1178,34 +1115,25 @@ class Staff(commands.Cog):
             ephemeral=True,
         )
 
-    @app_commands.command(name="golpear_editar", description="Configura canal, tiempos y ganancias del sistema de cofres")
+    @app_commands.command(name="golpear_editar", description="Configura las ganancias del sistema de cofres")
     @app_commands.describe(
-        canal="Canal donde aparecerán los cofres",
-        min_time="Tiempo mínimo (ej. 30s, 2m, 1h)",
-        max_time="Tiempo máximo (ej. 60s, 5m, 2h)",
         min_ganancia="Ganancia mínima por cofre",
         max_ganancia="Ganancia máxima por cofre"
     )
     @is_staff()
-    async def golpear_editar(self, interaction, canal: discord.TextChannel, min_time: str, max_time: str, min_ganancia: int = None, max_ganancia: int = None):
-        await interaction.response.defer(ephemeral=False)
-        try:
-            min_seconds = self.parse_cooldown(min_time)
-            max_seconds = self.parse_cooldown(max_time)
-        except ValueError:
-            return await interaction.followup.send(
-                "❌ Usa formatos válidos como `30s`, `2m` o `1h`.", ephemeral=True
-            )
-        if min_seconds <= 0 or max_seconds <= 0:
-            return await interaction.followup.send(
-                "❌ Los tiempos deben ser mayores a cero.", ephemeral=True
-            )
-        if min_seconds >= max_seconds:
-            return await interaction.followup.send("❌ El tiempo mínimo debe ser menor al máximo.", ephemeral=True)
-        
+    async def golpear_editar(
+        self,
+        interaction: discord.Interaction,
+        min_ganancia: int = None,
+        max_ganancia: int = None,
+    ):
+        await interaction.response.defer(ephemeral=True)
         import sys
         gmod = sys.modules["modules.golpear"]
         cfg = gmod._golpear_config
+        canal_id = gmod.GOLPEAR_CHANNEL_ID
+        min_seconds = gmod.GOLPEAR_MIN_TIME
+        max_seconds = gmod.GOLPEAR_MAX_TIME
 
         # Validar ganancias si se proporcionan
         if min_ganancia is None:
@@ -1217,6 +1145,19 @@ class Staff(commands.Cog):
             return await interaction.followup.send("❌ Las ganancias deben ser mayores a 0.", ephemeral=True)
         if min_ganancia >= max_ganancia:
             return await interaction.followup.send("❌ La ganancia mínima debe ser menor a la máxima.", ephemeral=True)
+
+        try:
+            canal = self.bot.get_channel(canal_id) or await self.bot.fetch_channel(canal_id)
+        except (discord.NotFound, discord.Forbidden, discord.HTTPException):
+            return await interaction.followup.send(
+                f"❌ No pude acceder al canal fijo <#{canal_id}>.",
+                ephemeral=True,
+            )
+        if not isinstance(canal, discord.TextChannel):
+            return await interaction.followup.send(
+                f"❌ El destino fijo <#{canal_id}> no es un canal de texto.",
+                ephemeral=True,
+            )
 
         bot_member = canal.guild.me
         if bot_member is None:
@@ -1234,11 +1175,11 @@ class Staff(commands.Cog):
 
         from core.database import save_golpear_config
         await save_golpear_config(
-            canal.id, min_seconds, max_seconds,
+            canal_id, min_seconds, max_seconds,
             min_ganancia, max_ganancia, cfg["activo"],
             0,
         )
-        cfg["canal_id"] = canal.id
+        cfg["canal_id"] = canal_id
         cfg["min_time"] = min_seconds
         cfg["max_time"] = max_seconds
         cfg["min_ganancia"] = min_ganancia
@@ -1251,7 +1192,7 @@ class Staff(commands.Cog):
             f"📌 Canal: {canal.mention}\n"
             f"⏱️ Intervalo: **{self.parse_cooldown_str(min_seconds)}** — **{self.parse_cooldown_str(max_seconds)}**\n"
             f"💰 Ganancias: **{min_ganancia}** — **{max_ganancia}** {COIN}",
-            ephemeral=False,
+            ephemeral=True,
         )
 
     # ── ADD ITEM (nuevo flujo: campos de texto directos) ───
@@ -1651,7 +1592,7 @@ class Staff(commands.Cog):
         await interaction.response.send_message(
             embed=embed,
             view=EconomiaView(interaction.user.id),
-            ephemeral=False
+            ephemeral=True
         )
 
     @app_commands.command(name="stock_add", description="Añade stock a un item de la tienda")
@@ -1701,7 +1642,7 @@ class Staff(commands.Cog):
     )
     @is_staff()
     async def stock_list(self, interaction: discord.Interaction):
-        await interaction.response.defer(ephemeral=False)
+        await interaction.response.defer(ephemeral=True)
         try:
             rows = await get_stock_inventory_summary()
             if not rows:
@@ -2110,113 +2051,6 @@ class Staff(commands.Cog):
             ephemeral=False
         )
 
-    @app_commands.command(name="call_post", description="Envía un anuncio a un canal escogido")
-    @app_commands.describe(canal="Canal donde se enviará el anuncio")
-    @is_staff()
-    async def call_post(self, interaction: discord.Interaction, canal: discord.TextChannel):
-        try:
-            role = discord.utils.get(interaction.user.roles, name=COORDINADOR_ROLE)
-            if not role:
-                return await interaction.response.send_message(
-                    "❌ No tienes permisos para usar Anuncios.", ephemeral=True
-                )
-            import time
-            user_id = interaction.user.id
-            _pending_announcements[user_id] = {
-                "channel": canal,
-                "source_channel_id": interaction.channel_id,
-                "expires": time.time() + 300,
-                "content": None
-            }
-            await interaction.response.send_message(
-                embed=discord.Embed(
-                    title="📣 Anunciador listo",
-                    description=(
-                        f"Escribe tu mensaje **en este canal** y lo reenviaré a {canal.mention}.\n\n"
-                        f"⏳ Tienes **5 minutos**. Escribe normalmente, nadie más lo verá."
-                    ),
-                    color=discord.Color.purple()
-                ),
-                ephemeral=True
-            )
-
-            async def auto_clear():
-                await asyncio.sleep(300)
-                entry = _pending_announcements.get(user_id)
-                if entry and entry["content"] is None:
-                    _pending_announcements.pop(user_id, None)
-
-            asyncio.create_task(auto_clear())
-
-        except Exception as e:
-            import traceback
-            traceback.print_exc()
-            try:
-                await interaction.response.send_message(f"❌ Error interno: {e}", ephemeral=True)
-            except Exception:
-                pass
-
-    @commands.Cog.listener()
-    async def on_message(self, message: discord.Message):
-        if message.author.bot:
-            return
-
-        import time
-        user_id = message.author.id
-
-        # ── Anuncio listener ───────────────────────────
-        entry = _pending_announcements.get(user_id)
-        if not entry or entry["content"] is not None:
-            return
-        if time.time() > entry["expires"]:
-            _pending_announcements.pop(user_id, None)
-            return
-        if message.channel.id != entry["source_channel_id"]:
-            return
-
-        content = message.content
-        entry["content"] = content or "​"
-
-        # Capturar imagen ANTES de borrar el mensaje
-        img_bytes = None
-        img_filename = None
-        if message.attachments:
-            att = message.attachments[0]
-            img_filename = att.filename
-            try:
-                import aiohttp
-                async with aiohttp.ClientSession() as session:
-                    async with session.get(att.url) as resp:
-                        img_bytes = await resp.read()
-            except Exception:
-                img_bytes = None
-
-        try:
-            await message.delete()
-        except Exception:
-            pass
-
-        confirm_embed = discord.Embed(
-            title="📋 Confirma tu anuncio",
-            description=(
-                f"**Canal destino:** {entry['channel'].mention}\n\n"
-                f"**Mensaje:**\n{content or '*(sin texto)*'}"
-            ),
-            color=discord.Color.orange()
-        )
-        if img_bytes:
-            confirm_embed.set_footer(text="✅ Imagen adjunta detectada | Tienes 60 segundos para confirmar.")
-        else:
-            confirm_embed.set_footer(text="Tienes 60 segundos para confirmar.")
-
-        await message.channel.send(
-            content=message.author.mention,
-            embed=confirm_embed,
-            view=AnuncioConfirmView(user_id, entry["channel"], content, img_bytes, img_filename),
-            delete_after=65
-        )
-
-
     @app_commands.command(name="retar_edit", description="Cambia el cooldown del comando !retar")
     @app_commands.describe(cooldown="Cooldown en segundos")
     @is_staff()
@@ -2379,7 +2213,7 @@ class Staff(commands.Cog):
     @app_commands.command(name="rrhh", description="Panel de gestión de trabajadores activos")
     @is_staff()
     async def rrhh(self, interaction: discord.Interaction):
-        await interaction.response.defer(ephemeral=False)
+        await interaction.response.defer(ephemeral=True)
         rows = await get_all_empleos_activos()
         workers = []
         for data in rows:
@@ -2388,10 +2222,17 @@ class Staff(commands.Cog):
                 nick = member.nick or member.display_name
                 workers.append({"member": member, "data": data, "nick": nick})
         if not workers:
-            await interaction.followup.send("📋 No hay trabajadores activos actualmente.")
+            await interaction.followup.send(
+                "📋 No hay trabajadores activos actualmente.",
+                ephemeral=True,
+            )
             return
         view = RRHHSelectView(workers, page=1)
-        await interaction.followup.send(content="📋 **Panel RH — Trabajadores Activos**", view=view)
+        await interaction.followup.send(
+            content="📋 **Panel RH — Trabajadores Activos**",
+            view=view,
+            ephemeral=True,
+        )
 
 
 # ── RRHH VIEWS ────────────────────────────────────────────

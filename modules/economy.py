@@ -20,7 +20,7 @@ from core.config import (
     memo_config, blackjack_config, COORDINADOR_ROLE_ID,
 )
 from core.cache import MAX_BANK
-from core.rankings import get_guild_balance_ranking
+from core.rankings import get_guild_balance_ranking, invalidate_guild_member
 
 TOP_COOLDOWN = 300
 EVENTO_THUMBNAIL_URL = "https://pub-a09b3609b6b34dfab5c7aa7742cd1a8a.r2.dev/Purple%20jack%20Harcode/PurpleThumb.png"
@@ -39,7 +39,8 @@ NAVE_INFO_DESCRIPTION = (
     "Antes de comenzar, consulta nuestros "
     "[Términos de Servicio](https://purplejack.online/Terms.html) y nuestra "
     "[Política de Privacidad](https://purplejack.online/Privacy.html) para conocer "
-    "las reglas y el tratamiento de tus datos.\n\n"
+    "las reglas y el tratamiento de tus datos. Los registros operativos publicados "
+    "por PurpleJack en sus canales de control se eliminan después de 24 horas.\n\n"
     "Para dudas o reportes de errores, visita nuestro "
     f"[#soporte]({NAVE_SUPPORT_URL})."
 )
@@ -275,9 +276,18 @@ async def _notify_completed_data_deletion(bot, user: discord.abc.User) -> None:
         channel = bot.get_channel(DATA_DELETION_LOG_CHANNEL_ID)
         if channel is None:
             channel = await bot.fetch_channel(DATA_DELETION_LOG_CHANNEL_ID)
+        nickname = getattr(user, "nick", None) or user.display_name
+        nickname = discord.utils.escape_markdown(
+            discord.utils.escape_mentions(nickname)
+        )
         await channel.send(
-            f"<@&{COORDINADOR_ROLE_ID}> El usuario {user.mention} eliminó sus datos de PurpleJack.",
-            allowed_mentions=discord.AllowedMentions(users=True, roles=True),
+            f"<@&{COORDINADOR_ROLE_ID}> El usuario **{nickname}** eliminó sus datos de PurpleJack.",
+            allowed_mentions=discord.AllowedMentions(
+                everyone=False,
+                users=False,
+                roles=True,
+                replied_user=False,
+            ),
         )
     except (discord.Forbidden, discord.HTTPException, discord.NotFound) as exc:
         logger.error(
@@ -694,6 +704,14 @@ class WithdrawModal(ui.Modal, title="Retirar del Banco"):
 class Economy(commands.Cog):
     def __init__(self, bot):
         self.bot = bot
+
+    @commands.Cog.listener()
+    async def on_member_join(self, member: discord.Member):
+        invalidate_guild_member(member.guild.id, member.id)
+
+    @commands.Cog.listener()
+    async def on_member_remove(self, member: discord.Member):
+        invalidate_guild_member(member.guild.id, member.id)
 
     @commands.command(name="bal")
     async def balance(self, ctx):

@@ -7,7 +7,15 @@ import uuid
 import asyncpg
 from settings import DATABASE_URL
 from core import cache
-from core.config import INVENTORY_ITEM_MAX_QUANTITY
+from core.config import (
+    FAILED_ITEM_LOG_RETENTION_SECONDS,
+    GOLPEAR_CHANNEL_ID,
+    GOLPEAR_MAX_TIME,
+    GOLPEAR_MIN_TIME,
+    INVENTORY_ITEM_MAX_QUANTITY,
+    LEGACY_LOG_CHANNEL_ID,
+    LOG_CHANNEL_ID,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -248,6 +256,20 @@ async def init_db():
         CREATE INDEX IF NOT EXISTS item_use_log_outbox_pending_idx
         ON item_use_log_outbox (next_attempt_at, locked_until, created_at)
         """)
+        await conn.execute("""
+        CREATE INDEX IF NOT EXISTS item_use_log_outbox_failed_retention_idx
+        ON item_use_log_outbox (created_at)
+        WHERE attempts > 0
+        """)
+        await conn.execute(
+            """
+            UPDATE item_use_log_outbox
+            SET channel_id=$1
+            WHERE channel_id=$2
+            """,
+            LOG_CHANNEL_ID,
+            LEGACY_LOG_CHANNEL_ID,
+        )
 
         await conn.execute("""
         CREATE TABLE IF NOT EXISTS veterano_config (
@@ -314,6 +336,15 @@ async def init_db():
         CREATE TABLE IF NOT EXISTS system_toggles (
             name TEXT PRIMARY KEY,
             active BOOLEAN NOT NULL
+        )
+        """)
+
+        await conn.execute("""
+        CREATE TABLE IF NOT EXISTS maintenance_schedule (
+            job_name TEXT PRIMARY KEY,
+            next_run_at DOUBLE PRECISION NOT NULL,
+            last_started_at DOUBLE PRECISION DEFAULT NULL,
+            last_completed_at DOUBLE PRECISION DEFAULT NULL
         )
         """)
 
@@ -431,6 +462,14 @@ async def flush_evento_puntos():
 
 
 # ── USUARIOS ───────────────────────────────────────────
+
+async def load_balance_index():
+    """Carga una sola vez el índice ligero usado por !top y !rob por posición."""
+    async with pool.acquire() as conn:
+        rows = await conn.fetch("SELECT id, balance FROM users")
+    cache.restore_balance_index(rows)
+    return len(rows)
+
 
 async def get_user(user_id):
     cached = cache.get_cached(user_id)
@@ -664,7 +703,7 @@ async def update_bank(user_id, amount, track_event=True):
 async def cache_balance(user_id, amount, track_event=True):
     """
     Actualiza balance solo en RAM.
-    La persistencia ocurre en el flush_loop (cada 10 min).
+    La persistencia ocurre en el flush_loop periódico.
     Usar en mini-juegos donde no hay transferencia entre usuarios.
     """
     await get_user(user_id)  # garantiza fila en DB y usuario en caché
@@ -676,7 +715,7 @@ async def cache_bank(user_id, amount, track_event=True):
     """
     Actualiza banco solo en RAM respetando MAX_BANK.
     El excedente se redirige al balance automáticamente.
-    La persistencia ocurre en el flush_loop (cada 10 min).
+    La persistencia ocurre en el flush_loop periódico.
     """
     await get_user(user_id)
     async with _get_economy_lock(user_id):
@@ -2386,6 +2425,67 @@ async def claim_pending_item_use_logs(limit: int = 25, event_ids=None):
     return [dict(row) for row in rows]
 
 
+async def claim_maintenance_job(
+    job_name: str,
+    interval_seconds: float,
+    now: float | None = None,
+):
+    """Reclama una ejecución programada sin duplicarla entre procesos o reinicios."""
+    now = time.time() if now is None else float(now)
+    interval_seconds = max(60.0, float(interval_seconds))
+    async with pool.acquire() as conn:
+        async with conn.transaction():
+            await conn.execute(
+                """
+                INSERT INTO maintenance_schedule (job_name, next_run_at)
+                VALUES ($1, $2)
+                ON CONFLICT (job_name) DO NOTHING
+                """,
+                job_name,
+                now,
+            )
+            claimed = await conn.fetchrow(
+                """
+                UPDATE maintenance_schedule
+                SET last_started_at=$2,
+                    next_run_at=$2 + $3
+                WHERE job_name=$1
+                  AND next_run_at <= $2
+                RETURNING next_run_at
+                """,
+                job_name,
+                now,
+                interval_seconds,
+            )
+            if claimed:
+                return {
+                    "claimed": True,
+                    "next_run_at": float(claimed["next_run_at"]),
+                }
+            next_run_at = await conn.fetchval(
+                "SELECT next_run_at FROM maintenance_schedule WHERE job_name=$1",
+                job_name,
+            )
+    return {
+        "claimed": False,
+        "next_run_at": float(next_run_at or (now + interval_seconds)),
+    }
+
+
+async def complete_maintenance_job(job_name: str, completed_at: float | None = None):
+    completed_at = time.time() if completed_at is None else float(completed_at)
+    async with pool.acquire() as conn:
+        await conn.execute(
+            """
+            UPDATE maintenance_schedule
+            SET last_completed_at=$2
+            WHERE job_name=$1
+            """,
+            job_name,
+            completed_at,
+        )
+
+
 async def mark_item_use_log_sent(event_id: str):
     async with pool.acquire() as conn:
         await conn.execute(
@@ -2414,6 +2514,27 @@ async def mark_item_use_log_failed(
             error[:1000],
             event_id,
         )
+
+
+async def delete_expired_failed_item_use_logs(
+    cutoff: float | None = None,
+) -> int:
+    """Elimina únicamente entregas fallidas del outbox que excedieron la retención."""
+    if cutoff is None:
+        cutoff = time.time() - FAILED_ITEM_LOG_RETENTION_SECONDS
+    async with pool.acquire() as conn:
+        status = await conn.execute(
+            """
+            DELETE FROM item_use_log_outbox
+            WHERE attempts > 0
+              AND created_at < $1
+            """,
+            float(cutoff),
+        )
+    try:
+        return int(status.rsplit(" ", 1)[-1])
+    except (AttributeError, ValueError):
+        return 0
 
 
 async def get_usos_diarios(user_id: int, item_id: int) -> int:
@@ -2939,8 +3060,8 @@ async def create_game_config_table():
         CREATE TABLE IF NOT EXISTS golpear_config (
             id SERIAL PRIMARY KEY,
             canal_id BIGINT,
-            min_time INTEGER DEFAULT 600,
-            max_time INTEGER DEFAULT 3600,
+            min_time INTEGER DEFAULT 300,
+            max_time INTEGER DEFAULT 600,
             min_ganancia INTEGER DEFAULT 150,
             max_ganancia INTEGER DEFAULT 800,
             activo BOOLEAN DEFAULT FALSE,
@@ -2960,7 +3081,18 @@ async def create_game_config_table():
                 canal_id, min_time, max_time, min_ganancia, max_ganancia, activo
             ) VALUES ($1, $2, $3, $4, $5, $6)
             """,
-            None, 600, 3600, 150, 800, False,
+            GOLPEAR_CHANNEL_ID, GOLPEAR_MIN_TIME, GOLPEAR_MAX_TIME,
+            150, 800, False,
+        )
+        await conn.execute(
+            """
+            UPDATE golpear_config
+            SET canal_id=$1, min_time=$2, max_time=$3
+            WHERE id=(SELECT id FROM golpear_config ORDER BY id LIMIT 1)
+            """,
+            GOLPEAR_CHANNEL_ID,
+            GOLPEAR_MIN_TIME,
+            GOLPEAR_MAX_TIME,
         )
 
         # /ayuda_nave usa contenido interno desde 2026-08. Esta limpieza es
@@ -2973,9 +3105,9 @@ async def load_golpear_config_to_cache():
         row = await conn.fetchrow("SELECT * FROM golpear_config ORDER BY id LIMIT 1")
     if row:
         return {
-            "canal_id":     row["canal_id"],
-            "min_time":     row["min_time"],
-            "max_time":     row["max_time"],
+            "canal_id":     GOLPEAR_CHANNEL_ID,
+            "min_time":     GOLPEAR_MIN_TIME,
+            "max_time":     GOLPEAR_MAX_TIME,
             "min_ganancia": row["min_ganancia"],
             "max_ganancia": row["max_ganancia"],
             "activo":       row["activo"],
@@ -2987,7 +3119,7 @@ async def save_golpear_config(
     canal_id, min_time, max_time, min_ganancia, max_ganancia, activo,
     next_spawn_at=0,
 ):
-    """Guarda la config en la DB. Recibe los valores explicitamente, NO importa modules.golpear."""
+    """Guarda estado y ganancias; canal e intervalo permanecen fijos."""
     async with pool.acquire() as conn:
         await conn.execute("""
         UPDATE golpear_config SET
@@ -2996,7 +3128,8 @@ async def save_golpear_config(
             next_spawn_at=$7
         WHERE id=(SELECT id FROM golpear_config ORDER BY id LIMIT 1)
         """,
-        canal_id, min_time, max_time, min_ganancia, max_ganancia, activo,
+        GOLPEAR_CHANNEL_ID, GOLPEAR_MIN_TIME, GOLPEAR_MAX_TIME,
+        min_ganancia, max_ganancia, activo,
         next_spawn_at,
         )
 
