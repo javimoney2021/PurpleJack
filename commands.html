@@ -1,0 +1,92 @@
+<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <meta name="description" content="Guía pública de comandos de PurpleJack para economía, empleos, inventario, juegos y soporte.">
+  <meta name="theme-color" content="#12051f">
+  <title>PurpleJack | Comandos</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Orbitron:wght@600;700;800;900&family=Rajdhani:wght@500;600;700&display=swap" rel="stylesheet">
+  <style>
+    :root{--space:#030108;--deep:#10051e;--panel:#130a22e8;--panel2:#1d0e32;--line:#643c91;--purple:#b761ff;--violet:#7648ff;--pink:#f06cff;--cyan:#76eaff;--green:#6dffc1;--gold:#ffd77a;--text:#fbf7ff;--muted:#c8b9d8;--shadow:0 24px 70px #000b}
+    *{box-sizing:border-box}html{scroll-behavior:smooth;scroll-padding-top:92px}body{margin:0;min-height:100vh;color:var(--text);font-family:Rajdhani,"Segoe UI",sans-serif;font-size:1.05rem;line-height:1.55;background:radial-gradient(circle at 8% 7%,#572478 0,transparent 25%),radial-gradient(circle at 92% 15%,#142c78 0,transparent 26%),linear-gradient(145deg,var(--space),var(--deep) 52%,#020106);background-attachment:fixed}body:before{content:"";position:fixed;inset:0;z-index:-2;pointer-events:none;background:linear-gradient(90deg,#030108ee,#08020ea8),url("assets/purplejack-character.jpg") center/cover no-repeat;opacity:.22}body:after{content:"";position:fixed;inset:0;z-index:-1;pointer-events:none;opacity:.3;background-image:radial-gradient(#fff 0.7px,transparent .8px);background-size:31px 31px;mask-image:linear-gradient(#000,transparent 92%)}a{color:inherit}.skip{position:fixed;left:12px;top:-60px;z-index:100;background:#fff;color:#160025;padding:10px 14px;border-radius:8px}.skip:focus{top:12px}.shell{width:min(1160px,calc(100% - 32px));margin:auto}.topbar{position:sticky;top:0;z-index:40;border-bottom:1px solid #8b4ec066;background:#07020eea;backdrop-filter:blur(16px)}.bar{display:flex;align-items:center;gap:10px;min-height:68px}.brand{font-family:Orbitron,Eurostile,sans-serif;font-weight:900;letter-spacing:.12em;color:#ddb4ff;margin-right:auto;text-shadow:0 0 16px #b45fff;text-decoration:none}.toplink,.doc-switch,.nav a{display:inline-flex;align-items:center;justify-content:center;text-decoration:none;border:1px solid #72449d;border-radius:10px;background:linear-gradient(145deg,#26133e,#10091c);color:#f2e5ff;padding:9px 13px;font-size:.82rem;font-weight:700;transition:.2s;box-shadow:inset 0 0 14px #bd72ff14}.doc-switch{border-color:#3e83a2;color:#dffaff}.toplink:hover,.doc-switch:hover,.nav a:hover,.nav a:focus-visible{transform:translateY(-2px);border-color:var(--pink);box-shadow:0 0 22px #d35fff66,inset 0 0 18px #df7cff20;outline:none}.hero{padding:74px 0 40px;text-align:center}.hero-copy{max-width:900px;margin:auto}.kicker{display:inline-block;color:var(--cyan);font-size:.72rem;text-transform:uppercase;letter-spacing:.24em;border:1px solid #53649d;border-radius:999px;padding:7px 13px;background:#120d2d}.hero h1{font-family:Orbitron,Eurostile,sans-serif;font-size:clamp(2.65rem,6.7vw,5.7rem);line-height:.98;margin:21px 0 18px;letter-spacing:.02em;text-transform:uppercase;background:linear-gradient(180deg,#fff 0,#e5c7ff 36%,#a553f3 62%,#522080 100%);background-clip:text;-webkit-background-clip:text;color:transparent;filter:drop-shadow(0 4px 0 #26073d) drop-shadow(0 8px 0 #100019) drop-shadow(0 0 22px #d260ff88)}.lead{max-width:720px;color:#d5c8df;font-size:1.13rem;margin:0 auto}.hero-art{position:relative;max-width:280px;margin:32px auto 0}.hero-art:before{content:"";position:absolute;inset:8% -8%;z-index:-1;border-radius:50%;background:#ab4fff66;filter:blur(36px)}.hero-art img{display:block;width:100%;aspect-ratio:1;object-fit:cover;object-position:center;border:1px solid #bd78e8;border-radius:28px;box-shadow:0 28px 70px #000b,0 0 35px #a446eb55}.hero-art span{position:absolute;left:18px;bottom:16px;padding:6px 11px;border:1px solid #b766e0;border-radius:999px;background:#09030ddb;color:#f3dfff;font-size:.75rem;font-weight:800;letter-spacing:.08em}.nav{display:grid;grid-template-columns:repeat(5,1fr);gap:9px;margin:0 auto 22px;padding:12px;border:1px solid #5f397d;border-radius:15px;background:#0c0614dc;box-shadow:var(--shadow);backdrop-filter:blur(12px)}.nav a{padding:11px 8px}.toolbar{display:flex;align-items:center;gap:12px;margin-bottom:20px}.search{width:100%;min-height:48px;border:1px solid #704499;border-radius:12px;padding:0 15px;color:#fff;background:#10081de8;font:600 1rem Rajdhani,"Segoe UI",sans-serif;outline:none}.search:focus{border-color:var(--pink);box-shadow:0 0 0 3px #c95cff25,0 0 24px #bd4dff30}.count{white-space:nowrap;color:#bd9fd1;font-size:.88rem}.section{position:relative;border:1px solid var(--line);border-radius:17px;background:linear-gradient(145deg,var(--panel),#08040eea);box-shadow:0 16px 45px #0007;overflow:hidden;padding:28px;margin-bottom:17px}.section:before{content:"";position:absolute;inset:0 auto 0 0;width:3px;background:linear-gradient(var(--pink),var(--cyan));box-shadow:0 0 18px #d45effaa}.section-head{display:flex;align-items:end;justify-content:space-between;gap:20px;margin-bottom:17px}.section-tag{display:block;color:var(--cyan);font-size:.68rem;font-weight:800;letter-spacing:.16em;text-transform:uppercase;margin-bottom:6px}.section h2{font-family:Orbitron,Eurostile,sans-serif;font-size:1.28rem;margin:0}.section-head p{color:var(--muted);margin:0;text-align:right;font-size:.91rem}.commands{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px}.command{display:grid;grid-template-columns:minmax(115px,.38fr) 1fr;align-items:center;gap:12px;min-height:74px;border:1px solid #43285e;border-radius:12px;background:linear-gradient(135deg,#170b28,#0b0714);padding:13px 15px;transition:.2s}.command:hover{transform:translateY(-2px);border-color:#9e5bd2;box-shadow:0 10px 25px #0007,0 0 18px #a64df62e}.command code{width:max-content;max-width:100%;overflow-wrap:anywhere;color:#f7eaff;background:#6b2aa940;border:1px solid #8148af;border-radius:8px;padding:6px 9px;font:700 .88rem Orbitron,monospace;text-shadow:0 0 10px #d59aff}.command span{color:#bfaecc}.slash .command code{color:#dffcff;border-color:#357e9c;background:#236d8840;text-shadow:0 0 10px #7df2ff}.notice{display:flex;gap:13px;align-items:flex-start;border:1px solid #6d5736;border-radius:13px;background:linear-gradient(145deg,#2a2012aa,#0b0715);padding:17px;margin:20px 0 42px;color:#d9c9e3}.notice strong{color:var(--gold)}.footer{margin-top:42px;border-top:1px solid #442660;background:#050208dd;padding:30px 0;color:#927ca3;font-size:.82rem}.footer-inner{display:flex;justify-content:space-between;align-items:center;gap:18px}.footer-links{display:flex;gap:14px;flex-wrap:wrap}.footer a{color:#d5aaff}.back{position:fixed;right:18px;bottom:18px;width:43px;height:43px;display:grid;place-items:center;border:1px solid #a259cf;border-radius:50%;background:#32124d;color:#fff;text-decoration:none;box-shadow:0 0 22px #ca5eff66}.hidden{display:none!important}
+    @media(max-width:880px){.hero-art{max-width:260px}.nav{grid-template-columns:repeat(2,1fr)}.commands{grid-template-columns:1fr}.section-head{display:block}.section-head p{text-align:left;margin-top:6px}.toplink{display:none}}
+    @media(max-width:560px){.shell{width:min(100% - 22px,1160px)}.hero{padding-top:48px;gap:24px}.hero-art{max-width:240px}.nav{grid-template-columns:1fr}.section{padding:21px}.command{grid-template-columns:1fr;gap:8px}.toolbar{align-items:stretch;flex-direction:column}.count{white-space:normal}.footer-inner{align-items:flex-start;flex-direction:column}.brand{font-size:.82rem}.doc-switch{padding:8px 10px}}
+  </style>
+</head>
+<body id="inicio">
+  <a class="skip" href="#contenido">Saltar al contenido</a>
+  <header class="topbar"><div class="shell bar"><a class="brand" href="index.html">PURPLEJACK</a><a class="toplink" href="#juegos">Juegos</a><a class="doc-switch" href="terms.html">Términos</a><a class="doc-switch" href="privacy.html">Privacidad</a></div></header>
+  <div class="shell">
+    <section class="hero" aria-labelledby="titulo">
+      <div class="hero-copy"><span class="kicker">Motor de la Nave · Guía pública</span><h1 id="titulo">PurpleJack<br>Comandos</h1><p class="lead">Explora las funciones de economía, empleos, inventario y entretenimiento disponibles para la tripulación. El prefijo principal para comandos de usuario es <strong>!</strong>.</p></div>
+      <div class="hero-art"><img src="assets/purplejack-character.jpg" alt="Personaje anfitrión de PurpleJack con ambientación morada espacial"><span>ANFITRIÓN DE LA NAVE</span></div>
+    </section>
+    <nav class="nav" aria-label="Categorías de comandos"><a href="#economia">Economía</a><a href="#empleos">Empleos</a><a href="#tienda">Inventario</a><a href="#juegos">Juegos</a><a href="#cuenta">Cuenta</a></nav>
+    <main id="contenido">
+      <div class="toolbar"><label for="buscar" class="skip">Buscar comandos</label><input class="search" id="buscar" type="search" placeholder="Buscar un comando o función…" autocomplete="off"><span class="count" id="contador">26 comandos disponibles</span></div>
+
+      <section class="section" id="economia"><div class="section-head"><div><span class="section-tag">01 · Recursos</span><h2>Economía y progreso</h2></div><p>Consulta tus recursos, posiciones y recompensas.</p></div><div class="commands">
+        <article class="command"><code>!bal</code><span>Consulta tu balance disponible y el dinero guardado en el banco.</span></article>
+        <article class="command"><code>!cd</code><span>Muestra los cooldowns que tienes activos y su tiempo restante.</span></article>
+        <article class="command"><code>!top</code><span>Consulta la clasificación de los balances más altos.</span></article>
+        <article class="command"><code>!evento</code><span>Muestra la clasificación vigente del evento.</span></article>
+        <article class="command"><code>!collect</code><span>Reclama la recompensa disponible según tu rol.</span></article>
+        <article class="command"><code>!exp</code><span>Consulta tu experiencia laboral y progreso profesional.</span></article>
+      </div></section>
+
+      <section class="section" id="empleos"><div class="section-head"><div><span class="section-tag">02 · Profesiones</span><h2>Empleos y jornadas</h2></div><p>Trabaja, especialízate y desarrolla maestrías.</p></div><div class="commands">
+        <article class="command"><code>!work</code><span>Realiza un trabajo económico básico y recibe su resultado.</span></article>
+        <article class="command"><code>!crime</code><span>Intenta un crimen virtual con posibilidad de ganar o perder monedas.</span></article>
+        <article class="command"><code>!empleos</code><span>Consulta la lista de empleos disponibles y sus requisitos.</span></article>
+        <article class="command"><code>!aplicar</code><span>Solicita el empleo indicado cuando cumples sus condiciones.</span></article>
+        <article class="command"><code>!renunciar</code><span>Abandona tu empleo actual y activa la espera correspondiente.</span></article>
+        <article class="command"><code>!oficina</code><span>Accede al panel de empleos especializados y de maestría.</span></article>
+        <article class="command"><code>!trabajar</code><span>Inicia la jornada interactiva del empleo que posees.</span></article>
+      </div></section>
+
+      <section class="section" id="tienda"><div class="section-head"><div><span class="section-tag">03 · Colección</span><h2>Tienda e inventario</h2></div><p>Compra, consulta y administra tus artículos virtuales.</p></div><div class="commands">
+        <article class="command"><code>!tienda</code><span>Abre el catálogo de artículos disponibles para comprar.</span></article>
+        <article class="command"><code>!info</code><span>Muestra la información y propiedades de un artículo.</span></article>
+        <article class="command"><code>!inv</code><span>Abre tu inventario paginado y permite usar artículos compatibles.</span></article>
+        <article class="command"><code>!time</code><span>Consulta el tiempo restante de tus artículos temporales.</span></article>
+      </div></section>
+
+      <section class="section" id="juegos"><div class="section-head"><div><span class="section-tag">04 · Competición</span><h2>Juegos y desafíos</h2></div><p>Apuestas exclusivamente virtuales, sin valor monetario real.</p></div><div class="commands">
+        <article class="command"><code>!dados</code><span>Juega una ronda de dados contra el bot con una apuesta virtual.</span></article>
+        <article class="command"><code>!ruleta</code><span>Realiza una apuesta virtual en la ruleta.</span></article>
+        <article class="command"><code>!bj</code><span>Juega una partida de Blackjack contra el dealer.</span></article>
+        <article class="command"><code>!memo</code><span>Inicia el juego interactivo de memoria por parejas.</span></article>
+        <article class="command"><code>!carrera</code><span>Convoca una carrera y permite que otros corredores se unan.</span></article>
+        <article class="command"><code>!retar</code><span>Desafía a otro miembro a un duelo con monedas virtuales.</span></article>
+        <article class="command"><code>!rob</code><span>Intenta robar monedas virtuales a otro miembro elegible.</span></article>
+      </div></section>
+
+      <section class="section slash" id="cuenta"><div class="section-head"><div><span class="section-tag">05 · Información</span><h2>Cuenta, ayuda y privacidad</h2></div><p>Estas funciones se ejecutan como comandos de barra.</p></div><div class="commands">
+        <article class="command"><code>/ayuda_nave</code><span>Abre la presentación oficial, el índice de comandos y los accesos de soporte.</span></article>
+        <article class="command"><code>/eliminar_mis_datos</code><span>Solicita eliminar tu información funcional mediante doble confirmación.</span></article>
+      </div></section>
+
+      <aside class="notice"><span aria-hidden="true">✦</span><div><strong>Uso responsable.</strong> Las monedas, objetos, premios y apuestas de PurpleJack son elementos ficticios de entretenimiento. Consulta los términos y la política de privacidad antes de utilizar el servicio.</div></aside>
+    </main>
+  </div>
+  <footer class="footer"><div class="shell footer-inner"><span>© 2026 PurpleJack · Guía pública de comandos</span><div class="footer-links"><a href="index.html">Portal</a><a href="terms.html">Términos</a><a href="privacy.html">Privacidad</a></div></div></footer>
+  <a class="back" href="#inicio" aria-label="Volver arriba">↑</a>
+  <script>
+    const search = document.querySelector('#buscar');
+    const cards = [...document.querySelectorAll('.command')];
+    const sections = [...document.querySelectorAll('main .section')];
+    const counter = document.querySelector('#contador');
+    const normalize = value => value.toLocaleLowerCase('es').normalize('NFD').replace(/[\u0300-\u036f]/g, '');
+    search.addEventListener('input', () => {
+      const query = normalize(search.value.trim());
+      let visible = 0;
+      cards.forEach(card => { const show = !query || normalize(card.textContent).includes(query); card.classList.toggle('hidden', !show); if (show) visible += 1; });
+      sections.forEach(section => section.classList.toggle('hidden', !section.querySelector('.command:not(.hidden)')));
+      counter.textContent = `${visible} ${visible === 1 ? 'comando disponible' : 'comandos disponibles'}`;
+    });
+  </script>
+</body>
+</html>
