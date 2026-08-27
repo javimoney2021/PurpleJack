@@ -991,25 +991,6 @@ async def append_historial(user_id, empleo, exito, pago, motivo):
         """, user_id, empleo, time.time(), exito, pago, motivo)
 
 
-async def get_all_empleos_activos():
-    """Devuelve todos los registros de empleos_users con empleo_actual activo."""
-    if not pool:
-        return []
-    async with pool.acquire() as conn:
-        rows = await conn.fetch(
-            "SELECT * FROM empleos_users WHERE empleo_actual IS NOT NULL"
-        )
-    result = []
-    for row in rows:
-        data = dict(row)
-        try:
-            data["historial_reciente_de_jornadas"] = ast.literal_eval(data["historial_reciente_de_jornadas"])
-        except Exception:
-            data["historial_reciente_de_jornadas"] = []
-        result.append(data)
-    return result
-
-
 async def get_all_experiencia_laboral():
     """Devuelve el ranking completo de EXP laboral directamente desde la DB."""
     if not pool:

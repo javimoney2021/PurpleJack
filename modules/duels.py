@@ -18,6 +18,7 @@ from core.database import (
 )
 from core.config import COIN, PUNISHMENT_ROLE_ID
 from core import cache
+from core.member_resolution import resolve_explicit_member, resolve_reply_member
 
 logger = logging.getLogger(__name__)
 
@@ -545,7 +546,12 @@ class Duels(commands.Cog):
         self.bot = bot
 
     @commands.command(name="retar")
-    async def retar(self, ctx, usuario: discord.Member, monto: int):
+    async def retar(
+        self,
+        ctx,
+        target_input: str | None = None,
+        amount_input: str | None = None,
+    ):
         if not await _is_duel_enabled(ctx.guild.id):
             return await ctx.reply(
                 "La Arena de batalla no se encuentra disponible por el momento."
@@ -567,6 +573,23 @@ class Duels(commands.Cog):
         if expira_en > now:
             timestamp = int(expira_en)
             return await ctx.reply(f"🚀 La Arena de combate esta ocupada por Jugadores de otros universos Intenta <t:{timestamp}:R>")
+
+        if ctx.message.reference is not None and amount_input is None:
+            usuario = await resolve_reply_member(ctx)
+            amount_input = target_input
+        else:
+            usuario = await resolve_explicit_member(ctx.guild, target_input)
+
+        try:
+            monto = int(amount_input) if amount_input is not None else None
+        except ValueError:
+            monto = None
+
+        if usuario is None or monto is None:
+            return await ctx.reply(
+                f"{ctx.author.mention} Formatos válidos: `!retar @usuario monto`, "
+                "`!retar ID monto` o responde a su mensaje con `!retar monto`."
+            )
 
         if ctx.author.id == usuario.id:
             return await ctx.send("❌ No puedes retarte a ti mismo.")
@@ -618,8 +641,11 @@ class Duels(commands.Cog):
             return await ctx.reply(
                 "La Arena de batalla no se encuentra disponible por el momento."
             )
-        if isinstance(error, commands.MissingRequiredArgument):
-            await ctx.send(f"{ctx.author.mention} Formato correcto **!retar usuario monto**")
+        if isinstance(error, (commands.MissingRequiredArgument, commands.TooManyArguments)):
+            await ctx.send(
+                f"{ctx.author.mention} Formatos válidos: `!retar @usuario monto`, "
+                "`!retar ID monto` o responde a su mensaje con `!retar monto`."
+            )
         elif isinstance(error, commands.CommandOnCooldown):
             retry_after = error.retry_after
             timestamp = int(ctx.message.created_at.timestamp()) + int(retry_after)

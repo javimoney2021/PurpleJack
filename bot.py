@@ -79,13 +79,19 @@ from core.config import (
 
 intents = discord.Intents.default()
 intents.message_content = True
-intents.members = True
+intents.members = False
 
 async def get_prefix(bot, message):
     """Normaliza el prefijo '!' aceptando '!comando' y '! comando' indistintamente."""
     return ["! ", "!"]
 
-bot = commands.Bot(command_prefix=get_prefix, intents=intents, help_command=None)
+bot = commands.Bot(
+    command_prefix=get_prefix,
+    intents=intents,
+    help_command=None,
+    member_cache_flags=discord.MemberCacheFlags.none(),
+    chunk_guilds_at_startup=False,
+)
 evento_flush_task = None
 cargos_task = None
 wager_recovery_task = None

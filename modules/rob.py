@@ -17,6 +17,7 @@ from core import cache
 from core.cache import get_rob_cooldown, set_rob_cooldown
 from core.cd_boost import resolve_cd_boost, send_cd_boost_notice
 from core.rankings import get_guild_balance_ranking
+from core.member_resolution import resolve_explicit_member, resolve_reply_member
 
 SABOTEADOR_EXITO_PROB = 0.60
 SABOTEADOR_ROBO_PORCENTAJE = 0.20
@@ -71,28 +72,6 @@ class Rob(commands.Cog):
             return None
         return rankings[position - 1][0]
 
-    async def _get_reply_target(self, ctx):
-        """Resuelve al autor del mensaje al que se respondió, incluso sin caché."""
-        reference = ctx.message.reference
-        if reference is None or reference.message_id is None:
-            return None
-
-        message = reference.resolved
-        if not isinstance(message, discord.Message):
-            channel = ctx.guild.get_channel(reference.channel_id) or ctx.channel
-            try:
-                message = await channel.fetch_message(reference.message_id)
-            except (discord.NotFound, discord.Forbidden, discord.HTTPException):
-                return None
-
-        member = message.author
-        if isinstance(member, discord.Member):
-            return member
-        try:
-            return await ctx.guild.fetch_member(member.id)
-        except (discord.NotFound, discord.Forbidden, discord.HTTPException):
-            return None
-
     @commands.command()
     async def rob(self, ctx, target_input: str = None):
         if not rob_config["activa"]:
@@ -103,11 +82,11 @@ class Rob(commands.Cog):
 
         target = None
         if target_input is None:
-            target = await self._get_reply_target(ctx)
+            target = await resolve_reply_member(ctx)
             if target is None:
                 return await ctx.send(
                     f"❌ {ctx.author.mention} Responde al mensaje de un usuario o usa "
-                    "`!rob @usuario` / `!rob <posición del top>`."
+                    "`!rob @usuario`, `!rob ID` o `!rob <posición del top>`."
                 )
         elif target_input.isdigit() and len(target_input) <= 2:
             position = int(target_input)
@@ -118,12 +97,12 @@ class Rob(commands.Cog):
                 return await ctx.send(
                     f"❌ No se encontró un jugador disponible en la posición **{position}.**"
                 )
-        elif target is None:
-            try:
-                target = await commands.MemberConverter().convert(ctx, target_input)
-            except commands.BadArgument:
+        else:
+            target = await resolve_explicit_member(ctx.guild, target_input)
+            if target is None:
                 return await ctx.send(
-                    f"❌ No se pudo encontrar a ese usuario. Usa `!rob @usuario` o `!rob <posición del top>`."
+                    "❌ No se pudo encontrar a ese usuario. Usa una mención, su ID, "
+                    "responde a su mensaje o indica una posición del Top 15."
                 )
 
         if target == ctx.author:

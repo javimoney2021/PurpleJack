@@ -28,6 +28,7 @@ from core.database import (
     add_cargo_temporal, delete_cargo_temporal, get_cargo_temporal,
 )
 from core import cache
+from core.member_resolution import resolve_guild_member
 from core.config import (
     ruleta_config, game_config, dados_config, memo_config,
     blackjack_config, COIN,
@@ -36,7 +37,7 @@ from core.config import (
 from modules.memo import _memo_cooldowns
 from modules.Empleos import (
     _EMPLEOS_CACHE, get_empleo_user, save_empleo_user,
-    get_all_empleos_activos, get_all_experiencia_laboral,
+    get_all_experiencia_laboral,
 )
 
 EVENTO_THUMBNAIL_URL = "https://pub-a09b3609b6b34dfab5c7aa7742cd1a8a.r2.dev/Purple%20jack%20Harcode/PurpleThumb.png"
@@ -251,7 +252,7 @@ class ExperienciaLaboralPaginationView(discord.ui.View):
         self.anterior.disabled = self.page == 0
         self.siguiente.disabled = self.page >= total_pages - 1
 
-    def get_embed(self):
+    async def get_embed(self):
         self._actualizar_botones()
         total_pages = max(1, ceil(len(self.rows) / self.PAGE_SIZE))
         start = self.page * self.PAGE_SIZE
@@ -264,7 +265,7 @@ class ExperienciaLaboralPaginationView(discord.ui.View):
             lines = ["Pos | Usuario               | Empleo       | EXP"]
             lines.append("----+-----------------------+--------------+-----")
             for position, row in enumerate(page_rows, start=start + 1):
-                member = self.guild.get_member(row["user_id"])
+                member = await resolve_guild_member(self.guild, row["user_id"])
                 nick = member.nick or member.display_name if member else f"ID {row['user_id']}"
                 nick = nick.replace("`", "'")[:20]
                 empleo = (row.get("empleo_actual") or "Sin empleo").title().replace("`", "'")[:12]
@@ -283,12 +284,12 @@ class ExperienciaLaboralPaginationView(discord.ui.View):
     @discord.ui.button(label="Anterior", style=discord.ButtonStyle.secondary)
     async def anterior(self, interaction: discord.Interaction, button: discord.ui.Button):
         self.page -= 1
-        await interaction.response.edit_message(embed=self.get_embed(), view=self)
+        await interaction.response.edit_message(embed=await self.get_embed(), view=self)
 
     @discord.ui.button(label="Siguiente", style=discord.ButtonStyle.secondary)
     async def siguiente(self, interaction: discord.Interaction, button: discord.ui.Button):
         self.page += 1
-        await interaction.response.edit_message(embed=self.get_embed(), view=self)
+        await interaction.response.edit_message(embed=await self.get_embed(), view=self)
 
     async def on_timeout(self):
         for child in self.children:
@@ -741,7 +742,10 @@ class Staff(commands.Cog):
         await interaction.response.defer(ephemeral=True)
         rows = await get_all_experiencia_laboral()
         view = ExperienciaLaboralPaginationView(interaction.user.id, interaction.guild, rows)
-        view.message = await interaction.edit_original_response(embed=view.get_embed(), view=view)
+        view.message = await interaction.edit_original_response(
+            embed=await view.get_embed(),
+            view=view,
+        )
 
     @app_commands.command(name="reset_exp_laboral", description="Reinicia la XP Laboral de un usuario o de todos")
     @app_commands.describe(
@@ -2209,131 +2213,6 @@ class Staff(commands.Cog):
                 "Los usuarios pueden trabajar sin riesgo de ser despedidos por inactividad.",
                 ephemeral=False
             )
-
-    @app_commands.command(name="rrhh", description="Panel de gestión de trabajadores activos")
-    @is_staff()
-    async def rrhh(self, interaction: discord.Interaction):
-        await interaction.response.defer(ephemeral=True)
-        rows = await get_all_empleos_activos()
-        workers = []
-        for data in rows:
-            member = interaction.guild.get_member(data["user_id"])
-            if member:
-                nick = member.nick or member.display_name
-                workers.append({"member": member, "data": data, "nick": nick})
-        if not workers:
-            await interaction.followup.send(
-                "📋 No hay trabajadores activos actualmente.",
-                ephemeral=True,
-            )
-            return
-        view = RRHHSelectView(workers, page=1)
-        await interaction.followup.send(
-            content="📋 **Panel RH — Trabajadores Activos**",
-            view=view,
-            ephemeral=True,
-        )
-
-
-# ── RRHH VIEWS ────────────────────────────────────────────
-
-def _build_rrhh_embed(worker: dict, coin: str) -> discord.Embed:
-    data   = worker["data"]
-    member = worker["member"]
-    nick   = worker["nick"]
-
-    empleo           = (data.get("empleo_actual") or "—").title()
-    fecha_contrato   = data.get("fecha_contratacion", 0)
-    exp_laboral      = data.get("exp_laboral", 0)
-    ingresos         = data.get("ingresos_empleo_actual", 0)
-    exitosas         = data.get("exitosos_empleo_actual", 0)
-    fallidas         = data.get("fallidos_empleo_actual", 0)
-    ultimo_trabajo   = data.get("ultimo_trabajo", 0)
-
-    embed = discord.Embed(
-        title=f"📋 Historial Laboral — {nick}",
-        color=discord.Color.blurple()
-    )
-    embed.set_thumbnail(url=member.display_avatar.url)
-    embed.add_field(name="💼 Trabajo Actual",      value=empleo, inline=True)
-    embed.add_field(name="📅 Fecha de Aplicación",
-                    value=f"<t:{int(fecha_contrato)}:F>" if fecha_contrato else "—", inline=True)
-    embed.add_field(name="⭐ Experiencia Laboral",  value=str(exp_laboral), inline=True)
-    embed.add_field(name=f"💰 Ingresos Generados",  value=f"{ingresos} {coin}", inline=True)
-    embed.add_field(name="✅ Jornadas Exitosas",    value=str(exitosas), inline=True)
-    embed.add_field(name="❌ Jornadas Fallidas",    value=str(fallidas), inline=True)
-    embed.add_field(name="🕐 Último Trabajo",
-                    value=f"<t:{int(ultimo_trabajo)}:R>" if ultimo_trabajo else "—", inline=False)
-    embed.set_footer(text=f"ID: {member.id}")
-    return embed
-
-
-class _WorkerSelect(discord.ui.Select):
-    def __init__(self, workers: list, page: int):
-        self._workers = workers
-        self._page    = page
-        shown = workers[:20] if page == 1 else workers[20:45]
-        options = [
-            discord.SelectOption(
-                label=w["nick"][:100],
-                value=str(w["member"].id),
-                description=(w["data"].get("empleo_actual") or "").title()[:100]
-            )
-            for w in shown
-        ]
-        if page == 1 and len(workers) > 20:
-            options.append(discord.SelectOption(
-                label="➡️ Ver más trabajadores...",
-                value="__ver_mas__",
-                description=f"{len(workers) - 20} trabajadores adicionales"
-            ))
-        super().__init__(
-            placeholder="Selecciona un trabajador.",
-            options=options,
-            min_values=1,
-            max_values=1
-        )
-
-    async def callback(self, interaction: discord.Interaction):
-        value = self.values[0]
-        if value == "__ver_mas__":
-            await interaction.response.edit_message(
-                content="📋 **Panel RH — Trabajadores Activos**",
-                embed=None,
-                view=RRHHSelectView(self._workers, page=2)
-            )
-            return
-        user_id = int(value)
-        worker  = next((w for w in self._workers if w["member"].id == user_id), None)
-        if not worker:
-            return await interaction.response.send_message("❌ Trabajador no encontrado.", ephemeral=True)
-        embed = _build_rrhh_embed(worker, COIN)
-        await interaction.response.edit_message(content=None, embed=embed, view=RRHHEmbedView(self._workers))
-
-
-class RRHHSelectView(discord.ui.View):
-    def __init__(self, workers: list, page: int = 1):
-        super().__init__(timeout=None)
-        self.add_item(_WorkerSelect(workers, page))
-
-
-class RRHHEmbedView(discord.ui.View):
-    def __init__(self, workers: list):
-        super().__init__(timeout=None)
-        self._workers = workers
-
-    @discord.ui.button(label="👈 Volver a Trabajadores", style=discord.ButtonStyle.blurple)
-    async def volver(self, interaction: discord.Interaction, button: discord.ui.Button):
-        await interaction.response.edit_message(
-            content="📋 **Panel RH — Trabajadores Activos**",
-            embed=None,
-            view=RRHHSelectView(self._workers, page=1)
-        )
-
-    @discord.ui.button(label="❌ Cerrar RH", style=discord.ButtonStyle.red)
-    async def cerrar(self, interaction: discord.Interaction, button: discord.ui.Button):
-        await interaction.message.delete()
-
 
 async def setup(bot):
     await bot.add_cog(Staff(bot))

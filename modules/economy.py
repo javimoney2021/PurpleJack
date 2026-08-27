@@ -20,7 +20,8 @@ from core.config import (
     memo_config, blackjack_config, COORDINADOR_ROLE_ID,
 )
 from core.cache import MAX_BANK
-from core.rankings import get_guild_balance_ranking, invalidate_guild_member
+from core.rankings import get_guild_balance_ranking
+from core.member_resolution import resolve_guild_member
 
 TOP_COOLDOWN = 300
 EVENTO_THUMBNAIL_URL = "https://pub-a09b3609b6b34dfab5c7aa7742cd1a8a.r2.dev/Purple%20jack%20Harcode/PurpleThumb.png"
@@ -705,14 +706,6 @@ class Economy(commands.Cog):
     def __init__(self, bot):
         self.bot = bot
 
-    @commands.Cog.listener()
-    async def on_member_join(self, member: discord.Member):
-        invalidate_guild_member(member.guild.id, member.id)
-
-    @commands.Cog.listener()
-    async def on_member_remove(self, member: discord.Member):
-        invalidate_guild_member(member.guild.id, member.id)
-
     @commands.command(name="bal")
     async def balance(self, ctx):
         user = await get_user(ctx.author.id)
@@ -799,7 +792,7 @@ class Economy(commands.Cog):
 
             lineas = []
             for user_id, puntos in resultados_anteriores:
-                member = ctx.guild.get_member(user_id) if ctx.guild else None
+                member = await resolve_guild_member(ctx.guild, user_id)
                 nombre = (member.nick or member.display_name) if member else f"Usuario {user_id}"
                 lineas.append(f"{COIN} {nombre} —— {COIN} **{puntos}**")
 
@@ -816,7 +809,7 @@ class Economy(commands.Cog):
         if resultados:
             lineas = []
             for indice, (user_id, puntos) in enumerate(resultados):
-                member = ctx.guild.get_member(user_id) if ctx.guild else None
+                member = await resolve_guild_member(ctx.guild, user_id)
                 nombre = (member.nick or member.display_name) if member else f"Usuario {user_id}"
                 posicion = EVENTO_TOP_ICON if indice < 4 else f"**{indice + 1}.**"
                 lineas.append(f"{posicion} {nombre} —— {COIN} **{puntos}**")
