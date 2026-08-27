@@ -15,6 +15,42 @@
     @media(max-width:900px){body:before{background:linear-gradient(#030106e8,#07020ee8),url("assets/purplejack-character.jpg") center/cover no-repeat}.hero{grid-template-columns:1fr}.content{max-width:700px;margin:auto;text-align:center}.eyebrow{margin:auto}.lead,.sub,.portal{margin-left:auto;margin-right:auto}.art-credit{display:none}}
     @media(max-width:560px){.shell{width:min(100% - 24px,1180px)}.topbar{min-height:64px}.status{font-size:.72rem}.hero{min-height:calc(100vh - 65px);padding:38px 0}.content{padding:20px 0}h1{font-size:clamp(2.75rem,17vw,4.7rem)}.portal{grid-template-columns:1fr}.card.commands{grid-column:auto}.card{min-height:104px}.legal-note{padding:0 10px}}
   </style>
+  <style>
+    /* Capa de compatibilidad: mantiene el portal centrado y desplazable en cualquier pantalla. */
+    html,body{min-height:100%}
+    body{overflow-x:hidden;overflow-y:auto}
+    body:before{background-position:center center;background-size:cover}
+    .shell{width:min(1120px,calc(100% - 40px))}
+    .hero{min-height:calc(100dvh - 75px);display:flex;align-items:center;justify-content:center;padding:clamp(36px,6vh,68px) 0}
+    .content{width:min(100%,820px);margin:0 auto;padding:0;text-align:center}
+    .eyebrow{margin-inline:auto}
+    h1{max-width:100%;font-size:clamp(3rem,7vw,6.2rem);line-height:.94;letter-spacing:-.045em;overflow-wrap:normal}
+    h1 span{font-size:clamp(.24em,2.4vw,.34em);line-height:1.45;letter-spacing:clamp(.12em,.8vw,.28em);margin-left:0}
+    .lead,.sub,.portal{margin-left:auto;margin-right:auto}
+    .lead{max-width:760px}
+    .sub{max-width:700px}
+    .portal{width:100%;max-width:760px}
+    .card{text-align:left}
+    .card.commands{display:block;min-height:102px}
+    .card.commands small,.card.commands strong,.card.commands span{display:block}
+    .art-credit{display:none}
+    @media(max-width:760px){
+      .shell{width:min(100% - 24px,1120px)}
+      .topbar{min-height:64px}
+      .hero{min-height:calc(100dvh - 65px);padding:34px 0 44px}
+      h1{font-size:clamp(2.55rem,14vw,4.7rem);letter-spacing:-.055em;margin:23px 0 20px}
+      h1 span{font-size:clamp(.22em,4.1vw,.32em);letter-spacing:.12em}
+      .portal{grid-template-columns:1fr}
+      .card.commands{grid-column:auto}
+    }
+    @media(max-width:420px){
+      .brand{font-size:.78rem}
+      .status{font-size:.66rem}
+      h1{font-size:clamp(2.2rem,13.8vw,3.6rem)}
+      .eyebrow{font-size:.64rem;letter-spacing:.11em}
+      .card{padding:17px}
+    }
+  </style>
 </head>
 <body>
   <div class="scanlines" aria-hidden="true"></div>
@@ -28,7 +64,7 @@
       <nav class="portal" aria-label="Documentos y recursos públicos">
         <a class="card" href="terms.html"><small>Documento legal</small><strong>Términos y Condiciones</strong><span>Reglas de uso y funcionamiento del servicio.</span></a>
         <a class="card" href="privacy.html"><small>Transparencia</small><strong>Política de Privacidad</strong><span>Datos tratados, conservación y opciones del usuario.</span></a>
-        <a class="card commands" href="commands.html"><span class="command-icon" aria-hidden="true">!</span><small>Guía de navegación</small><strong>Explorar comandos</strong><span>Consulta las funciones públicas de economía, empleos, inventario y juegos.</span></a>
+        <a class="card commands" href="commands.html"><small>Guía de navegación</small><strong>Explorar comandos</strong><span>Consulta las funciones públicas de economía, empleos, inventario y juegos.</span></a>
       </nav>
       <p class="legal-note">Las monedas, objetos, premios y apuestas mencionados en el servicio son exclusivamente virtuales y no poseen valor monetario real.</p>
     </section>
