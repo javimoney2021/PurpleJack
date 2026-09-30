@@ -73,6 +73,7 @@ async def init_db():
             limite_por_usuario INTEGER DEFAULT 0,
             limite_uso INTEGER DEFAULT 0,
             cd_boost BOOLEAN NOT NULL DEFAULT FALSE,
+            caduca_dias INTEGER NOT NULL DEFAULT 0,
             log_uso_channel_id BIGINT DEFAULT NULL
         )
         """)
@@ -85,6 +86,7 @@ async def init_db():
             ("limite_por_usuario",   "INTEGER DEFAULT 0"),
             ("limite_uso",           "INTEGER DEFAULT 0"),
             ("cd_boost",             "BOOLEAN NOT NULL DEFAULT FALSE"),
+            ("caduca_dias",          "INTEGER NOT NULL DEFAULT 0"),
             ("log_uso_channel_id",   "BIGINT DEFAULT NULL"),
         ]:
             await conn.execute(
@@ -98,6 +100,25 @@ async def init_db():
             cantidad INTEGER DEFAULT 1,
             PRIMARY KEY (user_id, item_id)
         )
+        """)
+        await conn.execute("""
+        CREATE TABLE IF NOT EXISTS inventario_vencimientos (
+            id BIGSERIAL PRIMARY KEY,
+            user_id BIGINT NOT NULL,
+            item_id INTEGER NOT NULL,
+            cantidad INTEGER NOT NULL CHECK (cantidad > 0),
+            stock_unidades INTEGER NOT NULL DEFAULT 0 CHECK (stock_unidades >= 0),
+            expira_en DOUBLE PRECISION NOT NULL,
+            creado_en DOUBLE PRECISION NOT NULL
+        )
+        """)
+        await conn.execute("""
+        CREATE INDEX IF NOT EXISTS inventario_vencimientos_expira_idx
+        ON inventario_vencimientos (expira_en, id)
+        """)
+        await conn.execute("""
+        CREATE INDEX IF NOT EXISTS inventario_vencimientos_usuario_item_idx
+        ON inventario_vencimientos (user_id, item_id, expira_en, id)
         """)
 
         await conn.execute("""
@@ -1699,17 +1720,18 @@ async def get_item_by_name(nombre):
 
 async def add_item(nombre, descripcion, descripcion_larga, precio, cantidad,
                    stock, icono, utilizable, mensaje_uso, rol_id, duracion,
-                   limite_por_usuario=0, limite_uso=0, cd_boost=False):
+                   limite_por_usuario=0, limite_uso=0, cd_boost=False,
+                   caduca_dias=0):
     async with pool.acquire() as conn:
         await conn.execute("""
             INSERT INTO items
                 (nombre, descripcion, descripcion_larga, precio, cantidad,
                  stock, icono, utilizable, mensaje_uso, rol_id, duracion,
-                 limite_por_usuario, limite_uso, cd_boost)
-                VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14)
+                 limite_por_usuario, limite_uso, cd_boost, caduca_dias)
+                VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15)
         """, nombre, descripcion, descripcion_larga, precio, cantidad,
              stock, icono, utilizable, mensaje_uso, rol_id, duracion,
-             limite_por_usuario, limite_uso, cd_boost)
+             limite_por_usuario, limite_uso, cd_boost, caduca_dias)
     await load_items_to_cache()
 
 async def edit_item(
@@ -1747,10 +1769,11 @@ async def set_item_log_uso_channel(item_id, channel_id):
 
 async def delete_item(item_id):
     async with pool.acquire() as conn:
-        await conn.execute("DELETE FROM items WHERE id=$1", item_id)
         rows = await conn.fetch("SELECT user_id FROM inventario WHERE item_id=$1", item_id)
         affected_users = [r["user_id"] for r in rows]
+        await conn.execute("DELETE FROM inventario_vencimientos WHERE item_id=$1", item_id)
         await conn.execute("DELETE FROM inventario WHERE item_id=$1", item_id)
+        await conn.execute("DELETE FROM items WHERE id=$1", item_id)
     for user_id in affected_users:
         cache.invalidate_inventory_cache(user_id)
     await load_items_to_cache()
@@ -1946,6 +1969,28 @@ async def purchase_item(user_id, item_id, unidades=1, use_bank=False):
                     """,
                     user_id, item_id, cantidad_compra
                 )
+                caduca_dias = int(item_data.get("caduca_dias") or 0)
+                if caduca_dias > 0:
+                    creado_en = time.time()
+                    expira_en = creado_en + caduca_dias * 86400
+                    # Un lote por unidad de stock conserva correctamente el
+                    # reabastecimiento incluso si una compra entrega más de un item.
+                    await conn.execute(
+                        """
+                        INSERT INTO inventario_vencimientos (
+                            user_id, item_id, cantidad, stock_unidades,
+                            expira_en, creado_en
+                        )
+                        SELECT $1, $2, $3, 1, $4, $5
+                        FROM generate_series(1, $6)
+                        """,
+                        user_id,
+                        item_id,
+                        item_data.get("cantidad", 1),
+                        expira_en,
+                        creado_en,
+                        unidades,
+                    )
                 if stock != -1:
                     await conn.execute(
                         "UPDATE items SET stock = stock - $1 WHERE id=$2",
@@ -1979,11 +2024,16 @@ async def get_inventory_from_db(user_id):
         rows = await conn.fetch("""
             SELECT i.id, i.nombre, i.icono, i.utilizable, i.mensaje_uso,
                    i.rol_id, i.duracion, i.limite_uso, i.cd_boost,
-                   i.log_uso_channel_id,
-                   inv.cantidad
+                   i.log_uso_channel_id, i.caduca_dias,
+                   inv.cantidad,
+                   MIN(iv.expira_en) AS expira_en
             FROM inventario inv
             JOIN items i ON inv.item_id = i.id
+            LEFT JOIN inventario_vencimientos iv
+                   ON iv.user_id=inv.user_id AND iv.item_id=inv.item_id
             WHERE inv.user_id = $1
+            GROUP BY i.id, inv.cantidad
+            ORDER BY i.nombre
         """, user_id)
     return [dict(r) for r in rows]
 
@@ -1994,6 +2044,148 @@ async def get_inventory(user_id):
     items = await get_inventory_from_db(user_id)
     cache.set_inventory_cache(user_id, items)
     return items
+
+
+async def _descontar_lotes_vencibles(conn, user_id: int, item_id: int, cantidad: int):
+    """Descuenta primero los lotes con vencimiento más próximo."""
+    restante = cantidad
+    while restante > 0:
+        lote = await conn.fetchrow(
+            """
+            SELECT id, cantidad, stock_unidades
+            FROM inventario_vencimientos
+            WHERE user_id=$1 AND item_id=$2
+            ORDER BY expira_en, id
+            FOR UPDATE SKIP LOCKED
+            LIMIT 1
+            """,
+            user_id,
+            item_id,
+        )
+        if not lote:
+            return
+        retirado = min(restante, lote["cantidad"])
+        nueva_cantidad = lote["cantidad"] - retirado
+        # Un paquete parcialmente consumido no puede restablecerse al stock.
+        nuevo_stock = 0 if retirado else lote["stock_unidades"]
+        if nueva_cantidad:
+            await conn.execute(
+                """
+                UPDATE inventario_vencimientos
+                SET cantidad=$2, stock_unidades=$3
+                WHERE id=$1
+                """,
+                lote["id"],
+                nueva_cantidad,
+                nuevo_stock,
+            )
+        else:
+            await conn.execute(
+                "DELETE FROM inventario_vencimientos WHERE id=$1",
+                lote["id"],
+            )
+        restante -= retirado
+
+
+async def retirar_items_vencidos(limit: int = 500) -> dict:
+    """Retira lotes vencidos y repone su stock limitado en una transacción.
+
+    Solo se restablecen paquetes íntegros: una unidad parcialmente usada nunca
+    aumenta el stock de nuevo. El resultado permite al worker decidir si debe
+    publicar el aviso general de vencimientos.
+    """
+    ahora = time.time()
+    usuarios_afectados = set()
+    items_afectados = set()
+    stock_por_item = {}
+    unidades_retiradas = 0
+
+    async with pool.acquire() as conn:
+        async with conn.transaction():
+            lotes = await conn.fetch(
+                """
+                SELECT id, user_id, item_id, cantidad, stock_unidades
+                FROM inventario_vencimientos
+                WHERE expira_en <= $1
+                ORDER BY expira_en, id
+                FOR UPDATE SKIP LOCKED
+                LIMIT $2
+                """,
+                ahora,
+                limit,
+            )
+            for lote in lotes:
+                inventario = await conn.fetchrow(
+                    """
+                    SELECT cantidad FROM inventario
+                    WHERE user_id=$1 AND item_id=$2
+                    FOR UPDATE
+                    """,
+                    lote["user_id"],
+                    lote["item_id"],
+                )
+                disponible = int(inventario["cantidad"]) if inventario else 0
+                retirar = min(disponible, int(lote["cantidad"]))
+
+                if retirar:
+                    restante = disponible - retirar
+                    if restante:
+                        await conn.execute(
+                            """
+                            UPDATE inventario SET cantidad=$1
+                            WHERE user_id=$2 AND item_id=$3
+                            """,
+                            restante,
+                            lote["user_id"],
+                            lote["item_id"],
+                        )
+                    else:
+                        await conn.execute(
+                            "DELETE FROM inventario WHERE user_id=$1 AND item_id=$2",
+                            lote["user_id"],
+                            lote["item_id"],
+                        )
+                    usuarios_afectados.add(lote["user_id"])
+                    items_afectados.add(lote["item_id"])
+                    unidades_retiradas += retirar
+
+                    if retirar == lote["cantidad"] and lote["stock_unidades"]:
+                        stock_por_item[lote["item_id"]] = (
+                            stock_por_item.get(lote["item_id"], 0)
+                            + int(lote["stock_unidades"])
+                        )
+
+                await conn.execute(
+                    "DELETE FROM inventario_vencimientos WHERE id=$1",
+                    lote["id"],
+                )
+
+            stock_repuesto = 0
+            for item_id, unidades in stock_por_item.items():
+                row = await conn.fetchrow(
+                    """
+                    UPDATE items
+                    SET stock=stock+$1
+                    WHERE id=$2 AND stock != -1
+                    RETURNING stock
+                    """,
+                    unidades,
+                    item_id,
+                )
+                if row is not None:
+                    stock_repuesto += unidades
+
+    for user_id in usuarios_afectados:
+        cache.invalidate_inventory_cache(user_id)
+    if stock_por_item:
+        await load_items_to_cache()
+    return {
+        "lotes": len(lotes),
+        "unidades_retiradas": unidades_retiradas,
+        "items_distintos": len(items_afectados),
+        "stock_repuesto": stock_repuesto,
+    }
+
 
 async def remove_from_inventory(user_id, item_nombre):
     async with pool.acquire() as conn:
@@ -2014,7 +2206,8 @@ async def remove_from_inventory(user_id, item_nombre):
                 "DELETE FROM inventario WHERE user_id=$1 AND item_id=$2",
                 user_id, row["item_id"]
             )
-    cache.remove_from_inventory_cache(user_id, item_nombre)
+        await _descontar_lotes_vencibles(conn, user_id, row["item_id"], 1)
+    cache.invalidate_inventory_cache(user_id)
     return True
 
 
@@ -2056,6 +2249,7 @@ async def remove_inventory_quantity(user_id: int, item_id: int, cantidad: int):
                     user_id,
                     item_id,
                 )
+            await _descontar_lotes_vencibles(conn, user_id, item_id, cantidad)
 
     cache.invalidate_inventory_cache(user_id)
     return {"ok": True, "remaining": restante}
@@ -2131,7 +2325,7 @@ async def consume_inventory_item(
                     }
 
             item_config = await conn.fetchrow(
-                "SELECT nombre, cd_boost FROM items WHERE id=$1 FOR SHARE",
+                "SELECT nombre, cd_boost, caduca_dias FROM items WHERE id=$1 FOR SHARE",
                 item_id,
             )
             if not item_config:
@@ -2154,6 +2348,8 @@ async def consume_inventory_item(
                     user_id,
                     item_id,
                 )
+            if item_config["caduca_dias"] > 0:
+                await _descontar_lotes_vencibles(conn, user_id, item_id, 1)
 
             if daily_limit > 0:
                 await conn.execute(

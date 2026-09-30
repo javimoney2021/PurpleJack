@@ -1,5 +1,6 @@
 import discord
 import asyncio
+import logging
 import random
 import time
 from discord.ext import commands
@@ -13,6 +14,8 @@ from core.database import (
     refund_wager,
 )
 from core.config import COIN, memo_config
+
+logger = logging.getLogger("purplejack.memo")
 
 # ── CONFIG ─────────────────────────────────────────────
 MAX_INTENTOS  = 6
@@ -49,6 +52,10 @@ class MemoView(discord.ui.View):
         self.message       = None
         self.wager_id      = wager_id
         self._terminado    = False
+        self._wager_finalizada = False
+        # Serializa clics simultáneos del mismo tablero (doble pulsación,
+        # varias pestañas o latencia de Discord).
+        self._interaction_lock = asyncio.Lock()
         self._build_buttons()
 
     def _build_buttons(self):
@@ -65,47 +72,89 @@ class MemoView(discord.ui.View):
             btn.callback = self._make_callback(i)
             self.add_item(btn)
 
+    async def _responder(self, interaction: discord.Interaction, mensaje: str):
+        """Responde aunque la interacción ya haya sido diferida."""
+        if interaction.response.is_done():
+            return await interaction.followup.send(mensaje, ephemeral=True)
+        return await interaction.response.send_message(mensaje, ephemeral=True)
+
+    async def _editar_tablero(
+        self,
+        interaction: discord.Interaction,
+        *,
+        embed: discord.Embed,
+    ):
+        """Edita el tablero con reintento y respaldo sobre el mensaje guardado."""
+        ultimo_error = None
+        for intento in range(2):
+            try:
+                await interaction.edit_original_response(embed=embed, view=self)
+                return
+            except (discord.HTTPException, discord.NotFound) as error:
+                ultimo_error = error
+                if intento == 0:
+                    await asyncio.sleep(0.25)
+
+        if self.message is not None:
+            try:
+                await self.message.edit(embed=embed, view=self)
+                return
+            except (discord.HTTPException, discord.NotFound) as error:
+                ultimo_error = error
+        if ultimo_error is not None:
+            raise ultimo_error
+
+    async def _programar_eliminacion(self):
+        await asyncio.sleep(AUTO_DELETE)
+        if self.message is None:
+            return
+        try:
+            await self.message.delete()
+        except (discord.HTTPException, discord.NotFound):
+            pass
+
     def _make_callback(self, idx: int):
         async def callback(interaction: discord.Interaction):
             if interaction.user.id != self.author.id:
-                return await interaction.response.send_message(
-                    "❌ Este tablero no es tuyo.", ephemeral=True
-                )
-            if self.bloqueado:
-                return await interaction.response.send_message(
-                    "⏳ Espera un momento...", ephemeral=True
-                )
-            if self.revelado[idx]:
-                return await interaction.response.send_message(
-                    "✅ Esta casilla ya está descubierta.", ephemeral=True
-                )
-            if idx in self.seleccion:
-                return await interaction.response.send_message(
-                    "❌ Ya seleccionaste esta casilla.", ephemeral=True
-                )
+                return await self._responder(interaction, "❌ Este tablero no es tuyo.")
+            if self._interaction_lock.locked():
+                return await self._responder(interaction, "⏳ Espera un momento...")
 
-            self.bloqueado = True
-            self.seleccion.append(idx)
+            # Reconoce el clic antes de cualquier cambio visual, espera o I/O.
+            # Discord ya no marcará la interacción como vencida durante una
+            # latencia puntual de su API o de la base de datos.
+            try:
+                await interaction.response.defer()
+            except (discord.HTTPException, discord.NotFound) as error:
+                logger.warning("No se pudo diferir clic de Memo %s: %s", self.wager_id, error)
+                return
 
-            # ── Mostrar casilla seleccionada temporalmente ────────
-            self._build_buttons()
-            # Forzar visible la selección actual
-            for item in self.children:
-                cid = int(item.custom_id.split("_")[1])
-                if cid in self.seleccion:
-                    item.label = self.tablero[cid]
-                    item.style = discord.ButtonStyle.primary
+            async with self._interaction_lock:
+                if self._terminado:
+                    return await self._responder(interaction, "⌛ Esta partida ya finalizó.")
+                if self.bloqueado:
+                    return await self._responder(interaction, "⏳ Espera un momento...")
+                if self.revelado[idx]:
+                    return await self._responder(interaction, "✅ Esta casilla ya está descubierta.")
+                if idx in self.seleccion:
+                    return await self._responder(interaction, "❌ Ya seleccionaste esta casilla.")
 
-            await interaction.response.edit_message(
-                embed=self._build_embed(), view=self
-            )
+                self.bloqueado = True
+                self.seleccion.append(idx)
+                self._build_buttons()
+                for item in self.children:
+                    cid = int(item.custom_id.split("_")[1])
+                    if cid in self.seleccion:
+                        item.label = self.tablero[cid]
+                        item.style = discord.ButtonStyle.primary
+                await self._editar_tablero(interaction, embed=self._build_embed())
 
-            # ── Evaluar par cuando hay 2 seleccionadas ────────────
-            if len(self.seleccion) == 2:
+                if len(self.seleccion) != 2:
+                    self.bloqueado = False
+                    return
+
                 i1, i2 = self.seleccion
-
                 if self.tablero[i1] == self.tablero[i2]:
-                    # ✅ Par correcto
                     self.revelado[i1] = True
                     self.revelado[i2] = True
                     self.pares_ok += 1
@@ -116,14 +165,14 @@ class MemoView(discord.ui.View):
                     self._build_buttons()
 
                     if self.pares_ok == 8:
-                        if self._terminado:
-                            return
                         self._terminado = True
-                        self.bloqueado  = True
-                        # 🏆 Ganó — devuelve la apuesta + premio total
+                        self.bloqueado = True
                         recompensa_total = self.monto * 3
                         ganancia_neta = self.monto * 2
-                        await settle_wager(self.wager_id, recompensa_total)
+                        settlement = await settle_wager(self.wager_id, recompensa_total)
+                        if not settlement.get("ok"):
+                            raise RuntimeError(f"No se pudo liquidar Memo: {settlement.get('reason')}")
+                        self._wager_finalizada = True
                         embed = self._build_embed(
                             estado=(
                                 f"🏆 ¡Ganaste! Recibes **+{recompensa_total}** {COIN} en total "
@@ -134,71 +183,43 @@ class MemoView(discord.ui.View):
                         self.stop()
                         self._deshabilitar_todo()
                         _active_memo.discard(self.author.id)
-                        try:
-                            await interaction.edit_original_response(embed=embed, view=self)
-                        except Exception:
-                            pass
-                        await asyncio.sleep(AUTO_DELETE)
-                        try:
-                            await self.message.delete()
-                        except Exception:
-                            pass
+                        await self._editar_tablero(interaction, embed=embed)
+                        asyncio.create_task(self._programar_eliminacion())
                         return
 
                     self.bloqueado = False
-                    try:
-                        await interaction.edit_original_response(
-                            embed=self._build_embed(), view=self
-                        )
-                    except Exception:
-                        pass
+                    await self._editar_tablero(interaction, embed=self._build_embed())
+                    return
 
-                else:
-                    # ❌ Par incorrecto
-                    self.intentos_fail += 1
-                    self.racha = 0
-                    intentos_restantes = MAX_INTENTOS - self.intentos_fail
-
-                    if intentos_restantes <= 0:
-                        if self._terminado:
-                            self.bloqueado = False
-                            return
-                        self._terminado = True
-                        # 💀 Perdió — apuesta ya descontada al iniciar
-                        await lose_wager(self.wager_id)
-                        self.revelado = [True] * 16   # revelar todo
-                        self._build_buttons()
-                        self._deshabilitar_todo()
-                        embed = self._build_embed(
-                            estado=f"💀 ¡Perdiste! Se descuentan **-{self.monto}** {COIN}",
-                            thumbnail_url=MEMO_LOSS_THUMBNAIL,
-                        )
-                        self.stop()
-                        _active_memo.discard(self.author.id)
-                        try:
-                            await interaction.edit_original_response(embed=embed, view=self)
-                        except Exception:
-                            pass
-                        await asyncio.sleep(AUTO_DELETE)
-                        try:
-                            await self.message.delete()
-                        except Exception:
-                            pass
-                        return
-
-                    # Mostrar las dos incorrectas 1.5s y luego ocultarlas
-                    await asyncio.sleep(1.5)
-                    self.seleccion = []
-                    self.bloqueado = False
+                self.intentos_fail += 1
+                self.racha = 0
+                intentos_restantes = MAX_INTENTOS - self.intentos_fail
+                if intentos_restantes <= 0:
+                    self._terminado = True
+                    settlement = await lose_wager(self.wager_id)
+                    if not settlement.get("ok"):
+                        raise RuntimeError(f"No se pudo liquidar Memo: {settlement.get('reason')}")
+                    self._wager_finalizada = True
+                    self.revelado = [True] * 16
                     self._build_buttons()
-                    try:
-                        await interaction.edit_original_response(
-                            embed=self._build_embed(), view=self
-                        )
-                    except Exception:
-                        pass
-            else:
+                    self._deshabilitar_todo()
+                    embed = self._build_embed(
+                        estado=f"💀 ¡Perdiste! Se descuentan **-{self.monto}** {COIN}",
+                        thumbnail_url=MEMO_LOSS_THUMBNAIL,
+                    )
+                    self.stop()
+                    _active_memo.discard(self.author.id)
+                    await self._editar_tablero(interaction, embed=embed)
+                    asyncio.create_task(self._programar_eliminacion())
+                    return
+
+                # Las dos incorrectas quedan visibles brevemente y el lock
+                # bloquea cualquier clic concurrente durante esa transición.
+                await asyncio.sleep(1.5)
+                self.seleccion = []
                 self.bloqueado = False
+                self._build_buttons()
+                await self._editar_tablero(interaction, embed=self._build_embed())
 
         return callback
 
@@ -229,40 +250,66 @@ class MemoView(discord.ui.View):
             item.disabled = True
 
     async def on_timeout(self):
-        if self._terminado:
-            return
-        self._terminado = True
-        _active_memo.discard(self.author.id)
-        await refund_wager(self.wager_id)
-        self._deshabilitar_todo()
-        if self.message:
+        async with self._interaction_lock:
+            if self._terminado:
+                return
+            self._terminado = True
+            _active_memo.discard(self.author.id)
             try:
-                await self.message.edit(
-                    embed=self._build_embed(
-                        estado=(
-                            f"⏰ Tiempo agotado. Partida cancelada y apuesta de "
-                            f"**{self.monto}** {COIN} reembolsada."
-                        )
-                    ),
-                    view=self
-                )
-                await asyncio.sleep(AUTO_DELETE)
-                await self.message.delete()
+                reembolso = await refund_wager(self.wager_id)
+                self._wager_finalizada = bool(reembolso.get("ok"))
             except Exception:
-                pass
+                logger.exception("No se pudo reembolsar Memo %s al vencer.", self.wager_id)
+            self._deshabilitar_todo()
+            if self.message:
+                estado = (
+                    f"⏰ Tiempo agotado. Partida cancelada y apuesta de "
+                    f"**{self.monto}** {COIN} reembolsada."
+                    if self._wager_finalizada
+                    else "⚠️ Tiempo agotado. El reembolso se reintentará automáticamente."
+                )
+                try:
+                    await self.message.edit(
+                        embed=self._build_embed(estado=estado),
+                        view=self,
+                    )
+                    asyncio.create_task(self._programar_eliminacion())
+                except (discord.HTTPException, discord.NotFound) as error:
+                    logger.warning("No se pudo cerrar Memo %s por tiempo: %s", self.wager_id, error)
 
     async def on_error(self, interaction, error, item):
-        self._terminado = True
-        _active_memo.discard(self.author.id)
-        await refund_wager(self.wager_id)
-        self._deshabilitar_todo()
+        logger.error(
+            "Error en Memo %s (item=%s): %s",
+            self.wager_id,
+            item,
+            error,
+            exc_info=(type(error), error, error.__traceback__),
+        )
+        async with self._interaction_lock:
+            if not self._terminado:
+                self._terminado = True
+            _active_memo.discard(self.author.id)
+            self._deshabilitar_todo()
+            self.stop()
+            reembolso = None
+            if not self._wager_finalizada:
+                try:
+                    reembolso = await refund_wager(self.wager_id)
+                    self._wager_finalizada = bool(reembolso.get("ok"))
+                except Exception:
+                    logger.exception("No se pudo reembolsar Memo %s tras un error.", self.wager_id)
+        mensaje = (
+            "⚠️ La partida se canceló por un error y tu apuesta fue reembolsada."
+            if reembolso and reembolso.get("ok")
+            else "⚠️ La partida ya había sido procesada; no se realizó ningún cobro ni pago adicional."
+        )
         try:
-            await interaction.followup.send(
-                "⚠️ La partida se canceló por un error y tu apuesta fue reembolsada.",
-                ephemeral=True,
+            await self._responder(
+                interaction,
+                mensaje,
             )
-        except Exception:
-            pass
+        except (discord.HTTPException, discord.NotFound) as response_error:
+            logger.warning("No se pudo responder error de Memo %s: %s", self.wager_id, response_error)
 
 
 # ── COG ────────────────────────────────────────────────

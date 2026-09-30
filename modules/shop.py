@@ -8,6 +8,7 @@ from core.database import (
     mark_item_use_log_sent, mark_item_use_log_failed,
     claim_expired_cd_boost_notifications,
     mark_cd_boost_notification_sent, mark_cd_boost_notification_failed,
+    retirar_items_vencidos,
 )
 from core import cache
 from core.config import (
@@ -25,6 +26,9 @@ INVENTORY_ITEMS_PER_PAGE = 8
 PURPLE = 0x9B59B6
 SHOP_EXPIRE_SECONDS = 150
 SHOP_EXPIRED_MESSAGE = "Tienda Caducó, consulte la tienda nuevamente"
+ITEM_EXPIRATION_CHANNEL_ID = 1503028597005222091
+ITEM_EXPIRATION_WORKER_SECONDS = 24 * 60 * 60
+ITEM_EXPIRATION_BATCH_SIZE = 500
 _item_use_locks = {}
 
 
@@ -1018,9 +1022,14 @@ class InventarioLayout(discord.ui.LayoutView):
             for item in page_items:
                 icono = item["icono"] if item["icono"] else "🔹"
                 cantidad = item.get("cantidad", 1)
+                vencimiento = ""
+                expira_en = item.get("expira_en")
+                if expira_en:
+                    dias = max(0, int((float(expira_en) - time.time() + 86399) // 86400))
+                    vencimiento = f"  Vence ➜ **{dias}d**"
 
                 texto = discord.ui.TextDisplay(
-                    f"{icono} **{item['nombre']}** x{cantidad}"
+                    f"{icono} **{item['nombre']}** x{cantidad}{vencimiento}"
                 )
 
                 if item["utilizable"]:
@@ -1084,6 +1093,7 @@ class Shop(commands.Cog):
     def __init__(self, bot):
         self.bot = bot
         self._item_use_log_task = None
+        self._item_expiration_task = None
 
     async def cog_load(self):
         if self._item_use_log_task is None or self._item_use_log_task.done():
@@ -1091,10 +1101,17 @@ class Shop(commands.Cog):
                 self._item_use_log_worker(),
                 name="item-use-log-outbox",
             )
+        if self._item_expiration_task is None or self._item_expiration_task.done():
+            self._item_expiration_task = asyncio.create_task(
+                self._item_expiration_worker(),
+                name="item-expiration-worker",
+            )
 
     def cog_unload(self):
         if self._item_use_log_task is not None:
             self._item_use_log_task.cancel()
+        if self._item_expiration_task is not None:
+            self._item_expiration_task.cancel()
 
     async def _item_use_log_worker(self):
         await self.bot.wait_until_ready()
@@ -1108,6 +1125,40 @@ class Shop(commands.Cog):
             except Exception:
                 logger.exception("Error procesando logs pendientes de uso de items")
                 await asyncio.sleep(20)
+
+    async def _item_expiration_worker(self):
+        """Limpia lotes vencidos cada 24h y repone los artículos recuperables."""
+        await self.bot.wait_until_ready()
+        while not self.bot.is_closed():
+            try:
+                retiradas = 0
+                repuestas = 0
+                while True:
+                    resultado = await retirar_items_vencidos(ITEM_EXPIRATION_BATCH_SIZE)
+                    retiradas += resultado["unidades_retiradas"]
+                    repuestas += resultado["stock_repuesto"]
+                    if resultado["lotes"] < ITEM_EXPIRATION_BATCH_SIZE:
+                        break
+
+                if retiradas > 3:
+                    channel = self.bot.get_channel(ITEM_EXPIRATION_CHANNEL_ID)
+                    if channel is None:
+                        channel = await self.bot.fetch_channel(ITEM_EXPIRATION_CHANNEL_ID)
+                    if hasattr(channel, "send"):
+                        await channel.send(
+                            "Varios items vencidos fueron retirados y reestablecidos al Stock en **!tienda** 😉"
+                        )
+                if retiradas:
+                    logger.info(
+                        "Retirados %s item(s) vencidos; %s unidad(es) repuestas al stock.",
+                        retiradas,
+                        repuestas,
+                    )
+            except asyncio.CancelledError:
+                raise
+            except Exception:
+                logger.exception("Error procesando vencimientos de inventario")
+            await asyncio.sleep(ITEM_EXPIRATION_WORKER_SECONDS)
 
     async def cog_command_error(self, ctx, error):
         if isinstance(error, commands.CommandOnCooldown):
@@ -1170,6 +1221,12 @@ class Shop(commands.Cog):
         embed.add_field(name="💰 Precio", value=f"{item['precio']} {COIN}", inline=True)
         embed.add_field(name="📦 Stock", value=stock_txt, inline=True)
         embed.add_field(name="🎯 Usable", value=usable_txt, inline=True)
+        if item.get("caduca_dias", 0):
+            embed.add_field(
+                name="⌛ Vencimiento",
+                value=f"{item['caduca_dias']} día(s) desde la compra.",
+                inline=True,
+            )
         if item.get("cd_boost"):
             embed.add_field(
                 name="⚡ CD Boost",

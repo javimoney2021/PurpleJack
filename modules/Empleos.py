@@ -85,7 +85,10 @@ EMPLEOS = {
 OFICINA_XP_MINIMA = 30
 MAESTRIA_XP_COSTO = 150
 OFICINA_PANEL_SEGUNDOS = 300
-JORNADA_PERSISTENTE_SEGUNDOS = 10 * 365 * 24 * 3600
+# La sesión y su tablero tienen una vida máxima fija.  El cooldown laboral
+# (tres horas para los empleos actuales) sigue siendo independiente.
+JORNADA_TABLERO_SEGUNDOS = 60 * 60
+JORNADAS_BARRIDO_SEGUNDOS = 2 * 60 * 60
 MAESTRIA_THUMBNAIL_URL = "https://pub-a09b3609b6b34dfab5c7aa7742cd1a8a.r2.dev/Purple%20jack%20Harcode/MaestriaPJ.png"
 
 EMPLEOS_MAESTRIA = {
@@ -239,28 +242,6 @@ async def _responder_jornada(
     return await interaction.response.send_message(mensaje, ephemeral=ephemeral)
 
 
-async def _renovar_jornada_tolerante(session_id: str, timeout: int):
-    """Renueva la sesión sin destruir la partida por un fallo transitorio de Aiven."""
-    for intento in range(2):
-        try:
-            return await asyncio.wait_for(
-                renovar_jornada(session_id, timeout),
-                timeout=4,
-            )
-        except Exception as error:
-            if intento == 0:
-                await asyncio.sleep(0.25)
-                continue
-            logger.warning(
-                "No se pudo renovar temporalmente la jornada %s: %s",
-                session_id,
-                error,
-            )
-    # La liquidación atómica continúa siendo la autoridad final. Un fallo
-    # transitorio de renovación no debe cerrar un tablero que sigue en RAM.
-    return None
-
-
 async def _cerrar_tablero_con_error(
     view: ui.View,
     empleo: str,
@@ -330,6 +311,43 @@ async def _mostrar_tablero_bloqueado(view: ui.View):
             "No se pudo mostrar el bloqueo visual de la jornada %s.",
             getattr(view, "session_id", "?"),
         )
+
+
+async def _cerrar_tablero_por_inactividad(view: ui.View, empleo: str):
+    """Cierra un tablero que alcanzó su hora máxima sin castigar al usuario."""
+    try:
+        cierre = await cancelar_jornada_por_inactividad(view.session_id)
+    except Exception:
+        logger.exception(
+            "No se pudo cancelar por inactividad la jornada %s.",
+            getattr(view, "session_id", "?"),
+        )
+        cierre = {"ok": False}
+
+    if cierre.get("ok"):
+        descripcion = (
+            "La jornada se cerró tras **1 hora de inactividad**.\n"
+            "No se aplicaron recompensas ni penalizaciones.\n\n"
+            f"Podrás volver a trabajar <t:{int(cierre['cooldown_hasta'])}:R>."
+        )
+        color = discord.Color.dark_grey()
+    else:
+        descripcion = (
+            "No fue posible cerrar la jornada en este momento. "
+            "El sistema la revisará automáticamente; intenta usar **!trabajar** más tarde."
+        )
+        color = discord.Color.red()
+
+    embed = discord.Embed(
+        title=f"Jornada {empleo} finalizada",
+        description=descripcion,
+        color=color,
+    )
+    if getattr(view, "message", None) is not None:
+        try:
+            await view.message.edit(embed=embed, view=None)
+        except (discord.HTTPException, discord.NotFound):
+            pass
 
 
 def _programar_eliminacion(view: ui.View, delay: int = 180):
@@ -503,25 +521,21 @@ async def crear_jornada(
                     "session_id": duplicate["session_id"],
                 }
 
-            disponible_en = (
-                float(empleo_actual["ultimo_trabajo"] or 0) + cooldown_seconds
-            )
-            if not bypass_cooldown and disponible_en > now:
-                return {
-                    "ok": False,
-                    "reason": "cooldown",
-                    "expires_at": disponible_en,
-                }
-
             active = await conn.fetchrow(
                 """
-                SELECT session_id, expires_at FROM empleos_jornadas
+                SELECT session_id, created_at, expires_at FROM empleos_jornadas
                 WHERE user_id=$1 AND status='active'
                 FOR UPDATE
                 """,
                 user_id,
             )
             if active and active["expires_at"] <= now:
+                # Una jornada abandonada nunca concede pago ni aplica una multa,
+                # pero sí conserva su inicio como referencia del cooldown laboral.
+                cooldown_inicio = max(
+                    float(empleo_actual["ultimo_trabajo"] or 0),
+                    float(active["created_at"]),
+                )
                 await conn.execute(
                     """
                     UPDATE empleos_jornadas
@@ -531,12 +545,32 @@ async def crear_jornada(
                     active["session_id"],
                     now,
                 )
+                await conn.execute(
+                    """
+                    UPDATE empleos_users SET ultimo_trabajo=$2
+                    WHERE user_id=$1
+                    """,
+                    user_id,
+                    cooldown_inicio,
+                )
+                empleo_actual = dict(empleo_actual)
+                empleo_actual["ultimo_trabajo"] = cooldown_inicio
                 active = None
             if active:
                 return {
                     "ok": False,
                     "reason": "already_active",
                     "session_id": active["session_id"],
+                }
+
+            disponible_en = (
+                float(empleo_actual["ultimo_trabajo"] or 0) + cooldown_seconds
+            )
+            if not bypass_cooldown and disponible_en > now:
+                return {
+                    "ok": False,
+                    "reason": "cooldown",
+                    "expires_at": disponible_en,
                 }
 
             await conn.execute(
@@ -554,7 +588,7 @@ async def crear_jornada(
                 guild_id,
                 channel_id,
                 now,
-                now + timeout + 30,
+                now + timeout,
             )
     return {"ok": True, "session_id": session_id}
 
@@ -569,20 +603,6 @@ async def asociar_mensaje_jornada(session_id: str, message_id: int):
             session_id,
             message_id,
         )
-
-
-async def renovar_jornada(session_id: str, timeout: int) -> bool:
-    async with pool.acquire() as conn:
-        result = await conn.execute(
-            """
-            UPDATE empleos_jornadas
-            SET expires_at=$2
-            WHERE session_id=$1 AND status='active'
-            """,
-            session_id,
-            time.time() + timeout + 30,
-        )
-    return result.endswith("1")
 
 
 async def cancelar_jornada(session_id: str, status: str = "cancelled") -> bool:
@@ -616,18 +636,143 @@ async def cancelar_jornada_segura(
 
 
 async def cancelar_jornadas_de_ejecucion_anterior():
-    """Cierra sesiones RAM huérfanas y devuelve sus mensajes para limpiarlos."""
+    """Cierra las sesiones que un reinicio dejó sin tablero en RAM.
+
+    No hay recompensa ni penalización. El inicio de la jornada se conserva como
+    base del cooldown, de modo que un reinicio no permita repetirla gratis.
+    """
     async with pool.acquire() as conn:
         rows = await conn.fetch(
             """
-            UPDATE empleos_jornadas
-            SET status='cancelled', finalized_at=$1
+            SELECT session_id FROM empleos_jornadas
             WHERE status='active'
-            RETURNING user_id, empleo, guild_id, channel_id, message_id
+            ORDER BY created_at
+            """
+        )
+    cerradas = []
+    for row in rows:
+        try:
+            resultado = await cancelar_jornada_por_inactividad(row["session_id"])
+        except Exception:
+            logger.exception(
+                "No se pudo recuperar la jornada huérfana %s.",
+                row["session_id"],
+            )
+            continue
+        if resultado.get("ok"):
+            cerradas.append(resultado)
+    return cerradas
+
+
+async def cancelar_jornada_por_inactividad(
+    session_id: str,
+    *,
+    solo_si_vencida: bool = False,
+) -> dict:
+    """Cancela una sesión sin liquidación y deja su cooldown correctamente fijado.
+
+    El lock laboral se toma antes que el de la sesión, igual que al crear o
+    liquidar una jornada. Así un clic tardío, el worker y ``!trabajar`` no
+    pueden duplicar pagos ni dejar una sesión activa bloqueada.
+    """
+    now = time.time()
+    async with pool.acquire() as conn:
+        async with conn.transaction():
+            referencia = await conn.fetchrow(
+                """
+                SELECT user_id FROM empleos_jornadas
+                WHERE session_id=$1
+                """,
+                session_id,
+            )
+            if not referencia:
+                return {"ok": False, "reason": "session_not_found"}
+
+            empleo_row = await conn.fetchrow(
+                """
+                SELECT user_id, ultimo_trabajo FROM empleos_users
+                WHERE user_id=$1 FOR UPDATE
+                """,
+                referencia["user_id"],
+            )
+            session = await conn.fetchrow(
+                """
+                SELECT * FROM empleos_jornadas
+                WHERE session_id=$1 FOR UPDATE
+                """,
+                session_id,
+            )
+            if not session or session["status"] != "active":
+                return {"ok": False, "reason": "already_finalized"}
+            if solo_si_vencida and float(session["expires_at"]) > now:
+                return {"ok": False, "reason": "not_expired"}
+
+            await conn.execute(
+                """
+                UPDATE empleos_jornadas
+                SET status='cancelled', finalized_at=$2
+                WHERE session_id=$1 AND status='active'
+                """,
+                session_id,
+                now,
+            )
+
+            cooldown_inicio = float(session["created_at"])
+            if empleo_row:
+                cooldown_inicio = max(
+                    cooldown_inicio,
+                    float(empleo_row["ultimo_trabajo"] or 0),
+                )
+                await conn.execute(
+                    """
+                    UPDATE empleos_users SET ultimo_trabajo=$2
+                    WHERE user_id=$1
+                    """,
+                    session["user_id"],
+                    cooldown_inicio,
+                )
+
+    empleo = normalizar_empleo(session["empleo"])
+    info_empleo = EMPLEOS_MAESTRIA.get(empleo) or EMPLEOS.get(empleo) or {}
+    resultado = dict(session)
+    resultado.update(
+        ok=True,
+        cooldown_inicio=cooldown_inicio,
+        cooldown_hasta=cooldown_inicio + info_empleo.get("duracion_horas", 3) * 3600,
+    )
+    return resultado
+
+
+async def cancelar_jornadas_vencidas(limit: int = 100) -> list[dict]:
+    """Recoge jornadas vencidas en lotes para el worker persistente."""
+    async with pool.acquire() as conn:
+        rows = await conn.fetch(
+            """
+            SELECT session_id FROM empleos_jornadas
+            WHERE status='active' AND expires_at <= $1
+            ORDER BY expires_at
+            LIMIT $2
             """,
             time.time(),
+            limit,
         )
-    return [dict(row) for row in rows]
+
+    cerradas = []
+    for row in rows:
+        try:
+            resultado = await cancelar_jornada_por_inactividad(
+                row["session_id"],
+                solo_si_vencida=True,
+            )
+        except Exception:
+            logger.exception(
+                "No se pudo cerrar la jornada vencida %s.",
+                row["session_id"],
+            )
+            continue
+        if resultado.get("ok"):
+            cerradas.append(resultado)
+    return cerradas
 
 
 def _parse_historial_jornadas(value) -> list:
@@ -1635,18 +1780,19 @@ class Empleos(commands.Cog):
         self.bot = bot
         self._jornadas_huerfanas = []
         self._jornadas_huerfanas_limpiadas = False
+        self._jornadas_worker_task: asyncio.Task | None = None
 
     async def cog_load(self):
         await init_empleos_tables()
         _despidos_config["activo"] = await get_system_toggle("despidos", False)
         self._jornadas_huerfanas = await cancelar_jornadas_de_ejecucion_anterior()
 
-    @commands.Cog.listener()
-    async def on_ready(self):
-        if self._jornadas_huerfanas_limpiadas:
-            return
-        self._jornadas_huerfanas_limpiadas = True
-        for jornada in self._jornadas_huerfanas:
+    def cog_unload(self):
+        if self._jornadas_worker_task is not None:
+            self._jornadas_worker_task.cancel()
+
+    async def _actualizar_tableros_cerrados(self, jornadas: list[dict], *, reinicio: bool):
+        for jornada in jornadas:
             if not jornada.get("channel_id") or not jornada.get("message_id"):
                 continue
             try:
@@ -1654,22 +1800,56 @@ class Empleos(commands.Cog):
                 if channel is None:
                     channel = await self.bot.fetch_channel(jornada["channel_id"])
                 message = await channel.fetch_message(jornada["message_id"])
+                motivo = (
+                    "Esta jornada fue cerrada de forma segura durante un reinicio."
+                    if reinicio
+                    else "Esta jornada se cerró tras 1 hora de inactividad."
+                )
                 embed = discord.Embed(
-                    title="Jornada interrumpida",
+                    title="Jornada finalizada",
                     description=(
-                        "Esta jornada fue cerrada de forma segura durante un reinicio. "
-                        "Puedes consultar **!trabajar** para iniciar una nueva."
+                        f"{motivo}\n"
+                        "No se aplicaron recompensas ni penalizaciones.\n\n"
+                        f"Podrás volver a trabajar <t:{int(jornada['cooldown_hasta'])}:R>."
                     ),
                     color=discord.Color.dark_grey(),
                 )
                 await message.edit(embed=embed, view=None)
             except (discord.HTTPException, discord.NotFound, discord.Forbidden):
                 logger.warning(
-                    "No se pudo cerrar el tablero laboral huérfano %s/%s.",
+                    "No se pudo cerrar el tablero laboral %s/%s.",
                     jornada.get("channel_id"),
                     jornada.get("message_id"),
                 )
+
+    async def _worker_jornadas_inactivas(self):
+        await self.bot.wait_until_ready()
+        while not self.bot.is_closed():
+            try:
+                jornadas = await cancelar_jornadas_vencidas()
+                if jornadas:
+                    await self._actualizar_tableros_cerrados(jornadas, reinicio=False)
+                    logger.info(
+                        "[TRABAJAR] Worker cerró %s jornada(s) inactiva(s).",
+                        len(jornadas),
+                    )
+            except asyncio.CancelledError:
+                raise
+            except Exception:
+                logger.exception("[TRABAJAR] Error en worker de jornadas inactivas.")
+            await asyncio.sleep(JORNADAS_BARRIDO_SEGUNDOS)
+
+    @commands.Cog.listener()
+    async def on_ready(self):
+        if self._jornadas_huerfanas_limpiadas:
+            return
+        self._jornadas_huerfanas_limpiadas = True
+        await self._actualizar_tableros_cerrados(self._jornadas_huerfanas, reinicio=True)
         self._jornadas_huerfanas.clear()
+        self._jornadas_worker_task = asyncio.create_task(
+            self._worker_jornadas_inactivas(),
+            name="empleos-jornadas-inactivas",
+        )
 
     @commands.command(name="empleos", aliases=["trabajos"])
     async def empleos(self, ctx):
@@ -1774,18 +1954,13 @@ class Empleos(commands.Cog):
                         f"(más de 24h sin trabajar). Usa **!aplicar** para conseguir un nuevo empleo."
                     )
 
-        timeout = (
-            JORNADA_PERSISTENTE_SEGUNDOS
-            if empleo == "piromano"
-            else (60 if empleo == "chantajista" else 180)
-        )
         jornada = await crear_jornada(
             ctx.author.id,
             empleo,
             f"trabajar:message:{ctx.message.id}",
             guild_id=ctx.guild.id if ctx.guild else None,
             channel_id=ctx.channel.id,
-            timeout=timeout,
+            timeout=JORNADA_TABLERO_SEGUNDOS,
             cooldown_seconds=info["duracion_horas"] * 3600,
             bypass_cooldown=bypass,
         )
@@ -1864,17 +2039,6 @@ class JornadaView(ui.View):
             await interaction.response.defer()
         except discord.NotFound:
             return False
-
-        renovada = await _renovar_jornada_tolerante(
-            self.session_id,
-            int(getattr(self, "session_timeout", self.timeout or 180)),
-        )
-        if renovada is False:
-            await _responder_jornada(
-                interaction,
-                "⌛ Esta jornada ya fue cerrada. Consulta **!trabajar** nuevamente.",
-            )
-            return False
         return True
 
 
@@ -1889,7 +2053,7 @@ class CazadorView(JornadaView):
     MEZCLAR_SEGUNDOS = 3
 
     def __init__(self, bot, author, info, session_id: str):
-        super().__init__(timeout=180)
+        super().__init__(timeout=JORNADA_TABLERO_SEGUNDOS)
         self.bot = bot
         self.author = author
         self.info = info
@@ -2136,13 +2300,7 @@ class CazadorView(JornadaView):
             self.terminado = True
             self.bloqueado = True
             self.stop()
-            self.fase = "resultado"
-            self.resultado_exitoso = False
-            self.resultado_mensaje = self._mensaje_resultado(False, por_timeout=True)
-            self.resultado_color = discord.Color.red()
-            self._build_buttons()
-        await _mostrar_tablero_bloqueado(self)
-        await self._finalizar(False, por_timeout=True)
+        await _cerrar_tablero_por_inactividad(self, "Cazador")
 
     async def on_error(self, interaction: Interaction, error: Exception, item):
         self.terminado = True
@@ -2164,12 +2322,11 @@ class PiromanoView(JornadaView):
     GASOLINAS_OBJETIVO = 10
 
     def __init__(self, bot, author, info, session_id: str):
-        super().__init__(timeout=None)
+        super().__init__(timeout=JORNADA_TABLERO_SEGUNDOS)
         self.bot = bot
         self.author = author
         self.info = info
         self.session_id = session_id
-        self.session_timeout = JORNADA_PERSISTENTE_SEGUNDOS
         self.message = None
         self.fase = "revelando"
         self.terminado = False
@@ -2470,6 +2627,15 @@ class PiromanoView(JornadaView):
                 liquidada=liquidada,
             )
 
+    async def on_timeout(self):
+        async with self._interaction_lock:
+            if self.terminado:
+                return
+            self.terminado = True
+            self.bloqueado = True
+            self.stop()
+        await _cerrar_tablero_por_inactividad(self, "Píromano")
+
     async def on_error(self, interaction: Interaction, error: Exception, item):
         self.terminado = True
         self.bloqueado = True
@@ -2495,7 +2661,7 @@ class ChantajistaView(JornadaView):
     MAX_VIDAS = 3
 
     def __init__(self, bot, author, info, session_id: str):
-        super().__init__(timeout=60)
+        super().__init__(timeout=JORNADA_TABLERO_SEGUNDOS)
         self.bot = bot
         self.author = author
         self.info = info
@@ -2728,11 +2894,8 @@ class ChantajistaView(JornadaView):
                 return
             self.terminado = True
             self.bloqueado = True
-            self.mostrar_ganador = True
-            self._build_buttons()
-        await _mostrar_tablero_bloqueado(self)
-        logger.info("[TRABAJAR/CHANTAJISTA] Jornada vencida — Usuario: %s", self.author.name)
-        await self._finalizar(False, por_timeout=True)
+            self.stop()
+        await _cerrar_tablero_por_inactividad(self, "Chantajista")
 
     async def on_error(self, interaction: Interaction, error: Exception, item):
         self.terminado = True
@@ -2766,7 +2929,7 @@ class ChantajistaView(JornadaView):
 
 class LimpiadorView(JornadaView):
     def __init__(self, bot, author, info, session_id: str):
-        super().__init__(timeout=180)
+        super().__init__(timeout=JORNADA_TABLERO_SEGUNDOS)
         self.bot = bot
         self.author = author
         self.info = info
@@ -2953,9 +3116,7 @@ class LimpiadorView(JornadaView):
                 return
             self.terminado = True
             self.stop()
-            self._build_buttons()
-        await _mostrar_tablero_bloqueado(self)
-        await self._terminar(None, exito=False, por_timeout=True)
+        await _cerrar_tablero_por_inactividad(self, "Limpiador")
 
     async def _cleanup(self):
         await asyncio.sleep(180)
@@ -2970,7 +3131,7 @@ class IngenieroView(JornadaView):
     MAX_VIDAS = 4
 
     def __init__(self, bot, author, info, session_id: str):
-        super().__init__(timeout=180)
+        super().__init__(timeout=JORNADA_TABLERO_SEGUNDOS)
         self.bot = bot
         self.author = author
         self.info = info
@@ -3200,14 +3361,12 @@ class IngenieroView(JornadaView):
             self.terminado = True
             self.bloqueado = True
             self.stop()
-            self._build_buttons()
-        await _mostrar_tablero_bloqueado(self)
-        await self._terminar(None, exito=False, por_timeout=True)
+        await _cerrar_tablero_por_inactividad(self, "Ingeniero")
 
 
 class PlomeroView(JornadaView):
     def __init__(self, bot, author, info, session_id: str):
-        super().__init__(timeout=180)
+        super().__init__(timeout=JORNADA_TABLERO_SEGUNDOS)
         self.bot = bot
         self.author = author
         self.info = info
@@ -3385,9 +3544,7 @@ class PlomeroView(JornadaView):
                 return
             self.terminado = True
             self.stop()
-            self._build_buttons()
-        await _mostrar_tablero_bloqueado(self)
-        await self._terminar(None, exito=False, por_timeout=True)
+        await _cerrar_tablero_por_inactividad(self, "Plomero")
 
 
 async def setup(bot):

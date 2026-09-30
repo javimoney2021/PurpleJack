@@ -1213,7 +1213,8 @@ class Staff(commands.Cog):
         cantid_por_user="Límite de compras por usuario. Vacío = ilimitado. Opcional.",
         mensaje_uso="Mensaje al usar el item en !inv. Vacío = mensaje por defecto. Opcional.",
         limite_uso="Máximo de usos por día por usuario. Ej: 1. Vacío = sin límite. Opcional.",
-        cd_boost="Reduce 50% los cooldowns compatibles durante 180 minutos."
+        cd_boost="Reduce 50% los cooldowns compatibles durante 180 minutos.",
+        caduca="Vencimiento tras comprar: solo días, ej. 5d. Vacío = no caduca."
     )
     @is_staff()
     async def item_new(self, interaction,
@@ -1228,10 +1229,21 @@ class Staff(commands.Cog):
                        cantid_por_user: int = 0,
                        mensaje_uso: str = "",
                        limite_uso: int = 0,
-                       cd_boost: bool = False):
+                       cd_boost: bool = False,
+                       caduca: str = ""):
 
         if precio <= 0:
             return await interaction.response.send_message("❌ El precio debe ser mayor a 0.", ephemeral=True)
+
+        caduca_dias = 0
+        if caduca.strip():
+            valor_caduca = caduca.strip().lower()
+            if not re.fullmatch(r"[1-9]\d*d", valor_caduca):
+                return await interaction.response.send_message(
+                    "❌ El vencimiento debe estar expresado solo en días. Ejemplo: `5d`.",
+                    ephemeral=True,
+                )
+            caduca_dias = int(valor_caduca[:-1])
 
         # Parsear duración antes del defer para validar formato
         duracion_segundos = 0
@@ -1278,6 +1290,7 @@ class Staff(commands.Cog):
             limite_por_usuario=cantid_por_user if cantid_por_user > 0 else 0,
             limite_uso=limite_uso if limite_uso > 0 else 0,
             cd_boost=cd_boost,
+            caduca_dias=caduca_dias,
         )
 
         dur_txt = duracion_rol if duracion_rol else "Permanente"
@@ -1285,6 +1298,7 @@ class Staff(commands.Cog):
         icono_display = icono if icono else "🔹"
         limite_txt = str(cantid_por_user) if cantid_por_user > 0 else "∞"
         limite_uso_txt = str(limite_uso) if limite_uso > 0 else "∞"
+        caduca_txt = f"{caduca_dias} día(s) desde cada compra" if caduca_dias else "No caduca"
 
         uso_txt = mensaje_uso.strip() if mensaje_uso.strip() else "Mensaje por defecto"
         await interaction.followup.send(
@@ -1294,6 +1308,7 @@ class Staff(commands.Cog):
             f"• Límite por usuario: **{limite_txt}**\n"
             f"• Usos por día: **{limite_uso_txt}**\n"
             f"• CD Boost: **{'Sí' if cd_boost else 'No'}**\n"
+            f"• Vencimiento: **{caduca_txt}**\n"
             f"• Rol: {rol_txt}  •  Duración: {dur_txt}\n"
             f"• Mensaje de uso: {uso_txt}",
             ephemeral=False
