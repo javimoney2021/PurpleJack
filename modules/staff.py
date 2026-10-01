@@ -1320,6 +1320,7 @@ class Staff(commands.Cog):
         nuevo_nombre="Nuevo nombre. Vacío = sin cambio. Opcional.",
         nuevo_precio="Nuevo precio. Vacío = sin cambio. Opcional.",
         nueva_desc="Nueva descripción corta. Vacío = sin cambio. Opcional.",
+        nuevo_icono="Emoji del servidor o unicode. Vacío = sin cambio. Opcional.",
         nuevo_mensaje_uso="Nuevo mensaje al usar el item. Vacío = sin cambio. Opcional.",
         cantidad_por_user="Límite de compras por usuario. 0 = ilimitado. Opcional.",
         limite_uso="Máximo de usos diarios por usuario. 0 = ilimitado. Opcional.",
@@ -1331,6 +1332,7 @@ class Staff(commands.Cog):
                           nuevo_nombre: str = "",
                           nuevo_precio: int = None,
                           nueva_desc: str = "",
+                          nuevo_icono: str = "",
                           nuevo_mensaje_uso: str = "",
                           cantidad_por_user: int = None,
                           limite_uso: int = None,
@@ -1355,7 +1357,7 @@ class Staff(commands.Cog):
                 )
 
             if not any([
-                nuevo_nombre, nuevo_precio is not None, nueva_desc, nuevo_mensaje_uso,
+                nuevo_nombre, nuevo_precio is not None, nueva_desc, nuevo_icono, nuevo_mensaje_uso,
                 cantidad_por_user is not None, limite_uso is not None,
                 cd_boost is not None,
             ]):
@@ -1366,12 +1368,13 @@ class Staff(commands.Cog):
             nombre = nuevo_nombre.strip() or None
             precio = nuevo_precio if nuevo_precio is not None else None
             desc = nueva_desc.strip() or None
+            icono_nuevo = nuevo_icono.strip() or None
             msg_uso = nuevo_mensaje_uso.strip() if nuevo_mensaje_uso.strip() else None
 
             await edit_item(
                 found["id"], nombre=nombre, precio=precio, descripcion=desc,
                 mensaje_uso=msg_uso, limite_por_usuario=cantidad_por_user,
-                limite_uso=limite_uso, cd_boost=cd_boost,
+                limite_uso=limite_uso, cd_boost=cd_boost, icono=icono_nuevo,
             )
 
             cambios = []
@@ -1381,6 +1384,9 @@ class Staff(commands.Cog):
                 cambios.append(f"• Precio: **{found['precio']}** → **{precio}** {COIN}")
             if desc:
                 cambios.append(f"• Descripción: **{desc}**")
+            if icono_nuevo is not None:
+                icono_anterior = found["icono"] or "🔹"
+                cambios.append(f"• Icono: {icono_anterior} → {icono_nuevo}")
             if msg_uso is not None:
                 cambios.append(f"• Mensaje de uso: **{msg_uso}**")
             if cantidad_por_user is not None:
@@ -1398,7 +1404,7 @@ class Staff(commands.Cog):
                 boost_nuevo = "Sí" if cd_boost else "No"
                 cambios.append(f"• CD Boost: **{boost_anterior}** → **{boost_nuevo}**")
 
-            icono = found["icono"] if found["icono"] else "🔹"
+            icono = icono_nuevo or found["icono"] or "🔹"
             await interaction.followup.send(
                 f"✅ Item **{icono} {found['nombre']}** actualizado:\n" + "\n".join(cambios),
                 ephemeral=False

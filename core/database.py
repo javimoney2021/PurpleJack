@@ -1736,7 +1736,7 @@ async def add_item(nombre, descripcion, descripcion_larga, precio, cantidad,
 
 async def edit_item(
     item_id, nombre=None, precio=None, stock=None, descripcion=None, mensaje_uso=None,
-    limite_por_usuario=None, limite_uso=None, cd_boost=None,
+    limite_por_usuario=None, limite_uso=None, cd_boost=None, icono=None,
 ):
     async with pool.acquire() as conn:
         if nombre:
@@ -1747,6 +1747,8 @@ async def edit_item(
             await conn.execute("UPDATE items SET stock=$1 WHERE id=$2", stock, item_id)
         if descripcion:
             await conn.execute("UPDATE items SET descripcion=$1 WHERE id=$2", descripcion, item_id)
+        if icono is not None:
+            await conn.execute("UPDATE items SET icono=$1 WHERE id=$2", icono, item_id)
         if mensaje_uso is not None:
             await conn.execute("UPDATE items SET mensaje_uso=$1 WHERE id=$2", mensaje_uso, item_id)
         if limite_por_usuario is not None:
