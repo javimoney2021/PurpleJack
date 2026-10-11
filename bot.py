@@ -70,6 +70,7 @@ from core.database import (
     delete_expired_failed_item_use_logs,
 )
 from core import cache
+from core.halloween import init_halloween_tables
 from core.config import (
     AYUDA_CHANNEL_ID, LOG_CHANNEL_ID, STAFF_ROLE_ID, PUNISHMENT_ROLE_ID,
     LOG_CLEANUP_INTERVAL_SECONDS, LOG_MESSAGE_RETENTION_SECONDS,
@@ -637,6 +638,7 @@ def run_bot():
         loop.add_signal_handler(signal.SIGTERM, lambda: asyncio.create_task(shutdown()))
 
         await init_db()
+        await init_halloween_tables()
         reembolsadas = await recover_pending_wagers()
         if reembolsadas:
             logger.warning(

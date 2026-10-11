@@ -85,8 +85,8 @@ EMPLEOS = {
 OFICINA_XP_MINIMA = 30
 MAESTRIA_XP_COSTO = 150
 OFICINA_PANEL_SEGUNDOS = 300
-# La sesión y su tablero tienen una vida máxima fija.  El cooldown laboral
-# (tres horas para los empleos actuales) sigue siendo independiente.
+# Cada interacción del dueño renueva una hora de inactividad para la sesión
+# y el tablero. El cooldown laboral sigue siendo independiente.
 JORNADA_TABLERO_SEGUNDOS = 60 * 60
 JORNADAS_BARRIDO_SEGUNDOS = 2 * 60 * 60
 MAESTRIA_THUMBNAIL_URL = "https://pub-a09b3609b6b34dfab5c7aa7742cd1a8a.r2.dev/Purple%20jack%20Harcode/MaestriaPJ.png"
@@ -314,7 +314,7 @@ async def _mostrar_tablero_bloqueado(view: ui.View):
 
 
 async def _cerrar_tablero_por_inactividad(view: ui.View, empleo: str):
-    """Cierra un tablero que alcanzó su hora máxima sin castigar al usuario."""
+    """Cierra un tablero tras una hora sin interacciones del jugador."""
     try:
         cierre = await cancelar_jornada_por_inactividad(view.session_id)
     except Exception:
@@ -603,6 +603,26 @@ async def asociar_mensaje_jornada(session_id: str, message_id: int):
             session_id,
             message_id,
         )
+
+
+async def renovar_jornada_activa(session_id: str, user_id: int) -> bool:
+    """Extiende el plazo persistente solo si la jornada sigue activa y vigente."""
+    ahora = time.time()
+    async with pool.acquire() as conn:
+        row = await conn.fetchrow(
+            """
+            UPDATE empleos_jornadas
+            SET expires_at=GREATEST(expires_at, $3)
+            WHERE session_id=$1 AND user_id=$2
+              AND status='active' AND expires_at > $4
+            RETURNING expires_at
+            """,
+            session_id,
+            user_id,
+            ahora + JORNADA_TABLERO_SEGUNDOS,
+            ahora,
+        )
+    return row is not None
 
 
 async def cancelar_jornada(session_id: str, status: str = "cancelled") -> bool:
@@ -2039,6 +2059,30 @@ class JornadaView(ui.View):
             await interaction.response.defer()
         except discord.NotFound:
             return False
+        try:
+            vigente = await renovar_jornada_activa(self.session_id, self.author.id)
+        except Exception:
+            logger.exception("No se pudo renovar la jornada %s.", self.session_id)
+            await _responder_jornada(
+                interaction,
+                "❌ No se pudo comprobar la jornada. Intenta pulsar de nuevo.",
+            )
+            return False
+        if not vigente:
+            try:
+                await cancelar_jornada_por_inactividad(
+                    self.session_id,
+                    solo_si_vencida=True,
+                )
+            except Exception:
+                logger.exception("No se pudo cerrar la jornada %s.", self.session_id)
+            self.stop()
+            await _caducar_tablero(self)
+            await _responder_jornada(
+                interaction,
+                "⌛ Esta jornada ya terminó o se anuló por inactividad.",
+            )
+            return False
         return True
 
 
@@ -2346,14 +2390,7 @@ class PiromanoView(JornadaView):
         self._build_buttons()
 
     async def interaction_check(self, interaction: Interaction) -> bool:
-        """Valida al propietario sin interponer llamadas antes del cambio visual."""
-        if interaction.user.id != self.author.id:
-            await interaction.response.send_message(
-                "❌ Este tablero no es tuyo.",
-                ephemeral=True,
-            )
-            return False
-        return True
+        return await super().interaction_check(interaction)
 
     def _build_buttons(self):
         self.clear_items()
@@ -2727,7 +2764,7 @@ class ChantajistaView(JornadaView):
             color=discord.Color.purple(),
         )
         embed.add_field(name="Vidas restantes", value=corazones, inline=False)
-        embed.set_footer(text="Tienes 60 segundos para encontrar al Tripulante.")
+        embed.set_footer(text="La jornada se anula tras 1 hora sin actividad.")
         return embed
 
     def _make_callback(self, idx):

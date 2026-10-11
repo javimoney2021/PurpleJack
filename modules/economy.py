@@ -22,6 +22,7 @@ from core.config import (
 from core.cache import MAX_BANK
 from core.rankings import get_guild_balance_ranking
 from core.member_resolution import resolve_guild_member
+from core.halloween import CANDY, get_candy_balance
 
 TOP_COOLDOWN = 300
 EVENTO_THUMBNAIL_URL = "https://pub-a09b3609b6b34dfab5c7aa7742cd1a8a.r2.dev/Purple%20jack%20Harcode/PurpleThumb.png"
@@ -229,7 +230,7 @@ def _deletion_summary_embed(final: bool = False) -> discord.Embed:
     embed.add_field(
         name="Información que será eliminada",
         value=(
-            "• Balance, banco y posición en rankings.\n"
+            "• Balance, banco, dulces y posición en rankings.\n"
             "• Inventario, artículos y registros de uso.\n"
             "• Empleo, experiencia, maestrías e historial laboral.\n"
             "• Cooldowns, protecciones, boosts y progreso de juegos.\n"
@@ -582,6 +583,15 @@ class FinanceView(ui.View):
             WithdrawModal(self.user_id, interaction.message)
         )
 
+    @ui.button(label="Craft", style=ButtonStyle.secondary)
+    async def craft(self, interaction: Interaction, button: ui.Button):
+        if interaction.user.id != self.user_id:
+            return await interaction.response.send_message(
+                "❌ No es tu menú.", ephemeral=True,
+            )
+        from modules.craft import open_craft_panel
+        await open_craft_panel(interaction)
+
     @ui.button(label="Salir", style=ButtonStyle.danger)
     async def salir(self, interaction: Interaction, button: ui.Button):
         if interaction.user.id != self.user_id:
@@ -709,12 +719,14 @@ class Economy(commands.Cog):
     @commands.command(name="bal")
     async def balance(self, ctx):
         user = await get_user(ctx.author.id)
+        candy_balance = await get_candy_balance(ctx.author.id)
         embed = discord.Embed(
             title=f"💰 Finanzas de {ctx.author.display_name}",
             color=discord.Color.purple(),
         )
         embed.add_field(name=f"{COIN} Balance", value=f"{user['balance']} {COIN}", inline=True)
         embed.add_field(name="🏦 Banco",        value=f"{user['bank']} {COIN}",    inline=True)
+        embed.add_field(name=f"{CANDY} Dulces", value=f"{candy_balance} {CANDY}", inline=True)
         embed.set_thumbnail(url=ctx.author.display_avatar.url)
         await ctx.message.reply(embed=embed, view=FinanceView(ctx.author.id), delete_after=120)
 

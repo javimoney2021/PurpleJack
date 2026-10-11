@@ -6,6 +6,7 @@ from core.database import get_user
 from core.config import game_config, COIN
 from core import cache as _cache_mod
 from core.cd_boost import resolve_cd_boost, send_cd_boost_notice
+from core.halloween import award_and_notify
 
 WORK_MESSAGES = [
     "🔧 Trabajaste duro y ganaste **{monto}** " + COIN,
@@ -82,6 +83,7 @@ class BasicGames(commands.Cog):
         nick = ctx.author.nick or ctx.author.display_name
         response = await ctx.message.reply(f"{nick} {msg}", mention_author=False)
         await send_cd_boost_notice(response, ctx.author, cd_boost)
+        await award_and_notify(ctx.channel, ctx.author.id, f"work:{ctx.message.id}")
 
     @commands.command()
     async def crime(self, ctx):
@@ -122,6 +124,8 @@ class BasicGames(commands.Cog):
         nick = ctx.author.nick or ctx.author.display_name
         response = await ctx.message.reply(f"{nick} {msg}", mention_author=False)
         await send_cd_boost_notice(response, ctx.author, cd_boost)
+        if success:
+            await award_and_notify(ctx.channel, ctx.author.id, f"crime:{ctx.message.id}")
 
 
 async def setup(bot):

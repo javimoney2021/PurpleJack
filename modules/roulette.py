@@ -15,6 +15,7 @@ from core.database import (
 )
 from core.config import game_config, ruleta_config, COIN   # ← COIN desde config (no duplicar)
 from core import cache
+from core.halloween import award_and_notify
 
 ROULETTE_THUMBNAIL_URL = "https://pub-a09b3609b6b34dfab5c7aa7742cd1a8a.r2.dev/Purple%20jack%20Harcode/RuletaPJ.gif"
 ROULETTE_WIN_THUMBNAIL_URL = "https://pub-a09b3609b6b34dfab5c7aa7742cd1a8a.r2.dev/Purple%20jack%20Harcode/RuletaWinPJ.png"
@@ -184,7 +185,9 @@ class Roulette(commands.Cog):
             if gano:
                 pago_total = apuesta * multiplicador
                 ganancia_neta = pago_total - apuesta
-                await settle_wager(wager["id"], pago_total)
+                settlement = await settle_wager(wager["id"], pago_total)
+                if not settlement["ok"]:
+                    return
                 embed_resultado = discord.Embed(
                     title="🎰 Resultado de la Ruleta",
                     description=(
@@ -198,7 +201,9 @@ class Roulette(commands.Cog):
                 )
                 embed_resultado.set_thumbnail(url=ROULETTE_WIN_THUMBNAIL_URL)
             else:
-                await lose_wager(wager["id"])
+                settlement = await lose_wager(wager["id"])
+                if not settlement["ok"]:
+                    return
                 embed_resultado = discord.Embed(
                     title="🎰 Resultado de la Ruleta",
                     description=(
@@ -212,6 +217,8 @@ class Roulette(commands.Cog):
                 embed_resultado.set_thumbnail(url=ROULETTE_LOSE_THUMBNAIL_URL)
 
             await ctx.send(embed=embed_resultado)
+            if gano:
+                await award_and_notify(ctx.channel, ctx.author.id, f"ruleta:{wager['id']}")
         except Exception:
             await refund_wager(wager["id"])
             raise

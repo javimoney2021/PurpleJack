@@ -28,6 +28,7 @@ from core.database import (
     add_cargo_temporal, delete_cargo_temporal, get_cargo_temporal,
 )
 from core import cache
+from core.halloween import add_craft_item
 from core.member_resolution import resolve_guild_member
 from core.config import (
     ruleta_config, game_config, dados_config, memo_config,
@@ -1197,6 +1198,51 @@ class Staff(commands.Cog):
             f"⏱️ Intervalo: **{self.parse_cooldown_str(min_seconds)}** — **{self.parse_cooldown_str(max_seconds)}**\n"
             f"💰 Ganancias: **{min_ganancia}** — **{max_ganancia}** {COIN}",
             ephemeral=True,
+        )
+
+    @app_commands.command(name="add_craft", description="Agrega un artículo al crafteo de Halloween")
+    @app_commands.describe(
+        item_name="Nombre del artículo",
+        precio="Costo en dulces",
+        icon="Emoji que se mostrará junto al artículo",
+        descripcion="Descripción breve del artículo",
+    )
+    @is_staff()
+    async def add_craft(
+        self,
+        interaction: discord.Interaction,
+        item_name: str,
+        precio: int,
+        icon: str,
+        descripcion: str,
+    ):
+        nombre = item_name.strip()
+        icono = icon.strip()
+        descripcion = descripcion.strip()
+        if not nombre or not icono or not descripcion or precio <= 0:
+            return await interaction.response.send_message(
+                "❌ Completa nombre, icono y descripción; el precio debe ser mayor que cero.",
+                ephemeral=True,
+            )
+        if len(nombre) > 80 or len(icono) > 100 or len(descripcion) > 300:
+            return await interaction.response.send_message(
+                "❌ Límite: nombre 80, icono 100 y descripción 300 caracteres.",
+                ephemeral=True,
+            )
+        await interaction.response.defer(ephemeral=True)
+        try:
+            created = await add_craft_item(nombre, precio, icono, descripcion)
+        except Exception:
+            logger.exception("No se pudo agregar el artículo de crafteo %r", nombre)
+            return await interaction.followup.send(
+                "❌ No pude crear el artículo. Inténtalo de nuevo.", ephemeral=True,
+            )
+        if not created:
+            return await interaction.followup.send(
+                f"❌ Ya existe un artículo de crafteo llamado **{nombre}**.", ephemeral=True,
+            )
+        await interaction.followup.send(
+            f"✅ **{nombre}** añadido al crafteo por **{precio}** dulces.", ephemeral=True,
         )
 
     # ── ADD ITEM (nuevo flujo: campos de texto directos) ───
