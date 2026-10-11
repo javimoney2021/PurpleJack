@@ -726,7 +726,7 @@ class Economy(commands.Cog):
         )
         embed.add_field(name=f"{COIN} Balance", value=f"{user['balance']} {COIN}", inline=True)
         embed.add_field(name="🏦 Banco",        value=f"{user['bank']} {COIN}",    inline=True)
-        embed.add_field(name=f"{CANDY} Dulces", value=f"{candy_balance} {CANDY}", inline=True)
+        embed.add_field(name="🎃 Dulces", value=f"{candy_balance} {CANDY}", inline=True)
         embed.set_thumbnail(url=ctx.author.display_avatar.url)
         await ctx.message.reply(embed=embed, view=FinanceView(ctx.author.id), delete_after=120)
 
