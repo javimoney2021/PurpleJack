@@ -161,7 +161,7 @@ async def get_craft_items() -> list[dict]:
     async with database.pool.acquire() as conn:
         rows = await conn.fetch(
             "SELECT id, nombre, precio, icono, descripcion "
-            "FROM halloween_craft_items ORDER BY id"
+            "FROM halloween_craft_items ORDER BY precio ASC, id ASC"
         )
     return [dict(row) for row in rows]
 

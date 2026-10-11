@@ -1,8 +1,9 @@
+import asyncio
 import unittest
 from unittest.mock import AsyncMock, MagicMock, patch
 
 from core import halloween
-from modules.craft import CraftLayout
+from modules.craft import CraftBuyButton, CraftConfirmButton, CraftLayout
 from modules.economy import FinanceView
 
 
@@ -88,8 +89,77 @@ class HalloweenTests(unittest.IsolatedAsyncioTestCase):
              "descripcion": "Prueba", "precio": 2}
             for index in range(1, 7)
         ]
-        self.assertEqual(len(CraftLayout(items[:5], 42, 10).children), 1)
-        self.assertEqual(len(CraftLayout(items, 42, 10).children), 2)
+        self.assertEqual(len(CraftLayout(items[:3], 42, 10).children), 1)
+        self.assertEqual(len(CraftLayout(items[:4], 42, 10).children), 2)
+        view = CraftLayout(items, 42, 10)
+        self.assertEqual([child.item_id for child in view.walk_children()
+                          if isinstance(child, CraftBuyButton)], [1, 2, 3])
+        view.page = 1
+        view.build()
+        self.assertEqual([child.item_id for child in view.walk_children()
+                          if isinstance(child, CraftBuyButton)], [4, 5, 6])
+
+    async def test_craft_catalog_orders_by_price_then_id(self):
+        conn = MagicMock()
+        conn.fetch = AsyncMock(return_value=[])
+        with patch.object(halloween.database, "pool", self._pool(conn)):
+            await halloween.get_craft_items()
+        self.assertIn("ORDER BY precio ASC, id ASC", conn.fetch.await_args.args[0])
+
+    async def test_craft_requires_confirmation_and_can_cancel(self):
+        item = {"id": 1, "nombre": "Calabaza", "icono": "🎃",
+                "descripcion": "Prueba", "precio": 3}
+        view = CraftLayout([item], 42, 10)
+        interaction = MagicMock()
+        interaction.user.id = 42
+        interaction.response.edit_message = AsyncMock()
+        interaction.response.send_message = AsyncMock()
+        buy = next(child for child in view.walk_children()
+                   if isinstance(child, CraftBuyButton))
+        self.assertEqual(buy.label, "Craft")
+        with patch("modules.craft.purchase_craft_item", new=AsyncMock()) as purchase:
+            await buy.callback(interaction)
+            self.assertEqual(view.pending_item, item)
+            purchase.assert_not_awaited()
+            cancel = next(child for child in view.walk_children()
+                          if isinstance(child, CraftConfirmButton) and not child.accept)
+            await cancel.callback(interaction)
+            purchase.assert_not_awaited()
+        self.assertIsNone(view.pending_item)
+        self.assertEqual(view.balance, 10)
+
+    async def test_accept_crafts_once_and_updates_balance(self):
+        item = {"id": 1, "nombre": "Calabaza", "icono": "🎃",
+                "descripcion": "Prueba", "precio": 3}
+        view = CraftLayout([item], 42, 10)
+        view.pending_item = item
+        view.build()
+        interaction = MagicMock()
+        interaction.user.id = 42
+        interaction.response.defer = AsyncMock()
+        interaction.response.send_message = AsyncMock()
+        interaction.edit_original_response = AsyncMock()
+        accept = next(child for child in view.walk_children()
+                      if isinstance(child, CraftConfirmButton) and child.accept)
+        result = {"ok": True, "balance": 7, "item_name": "Calabaza"}
+        entered = asyncio.Event()
+        release = asyncio.Event()
+
+        async def delayed_purchase(*_args):
+            entered.set()
+            await release.wait()
+            return result
+
+        with patch("modules.craft.purchase_craft_item", new=AsyncMock(side_effect=delayed_purchase)) as purchase:
+            first = asyncio.create_task(accept.callback(interaction))
+            await entered.wait()
+            await accept.callback(interaction)
+            release.set()
+            await first
+        purchase.assert_awaited_once_with(42, 1)
+        self.assertEqual(view.balance, 7)
+        self.assertIsNone(view.pending_item)
+        self.assertIn("Canjeaste", view.notice)
 
 
 if __name__ == "__main__":
