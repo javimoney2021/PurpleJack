@@ -5,7 +5,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 from core import halloween
 from modules.craft import CraftBuyButton, CraftConfirmButton, CraftLayout
 from modules.economy import FinanceView
-from modules.staff import Staff
+from modules.staff import CandyRankingView, Staff
 
 
 class _AsyncContext:
@@ -49,6 +49,52 @@ class HalloweenTests(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(await halloween.award_candy(42, "dados:1"), 0)
         self.assertEqual(halloween._candy_balances[42], 7)
         self.assertEqual(conn.fetchval.await_count, 3)
+
+    async def test_staff_candy_credit_is_atomic_and_updates_ram(self):
+        conn = MagicMock()
+        conn.fetchval = AsyncMock(return_value=17)
+        with patch.object(halloween.database, "pool", self._pool(conn)):
+            self.assertEqual(await halloween.add_candy_balance(42, 5), 17)
+        self.assertEqual(halloween._candy_balances[42], 17)
+        self.assertIn("ON CONFLICT (user_id) DO UPDATE", conn.fetchval.await_args.args[0])
+        with self.assertRaises(ValueError):
+            await halloween.add_candy_balance(42, 0)
+
+    async def test_candy_ranking_page_reads_sorted_persistent_balance(self):
+        conn = MagicMock()
+        conn.fetchval = AsyncMock(return_value=12)
+        conn.fetch = AsyncMock(return_value=[{"user_id": 42, "balance": 9}])
+        with patch.object(halloween.database, "pool", self._pool(conn)):
+            rows, total = await halloween.get_candy_ranking_page(10, 10)
+        self.assertEqual((rows, total), ([{"user_id": 42, "balance": 9}], 12))
+        self.assertIn("ORDER BY balance DESC, user_id ASC", conn.fetch.await_args.args[0])
+        self.assertEqual(conn.fetch.await_args.args[1:], (10, 10))
+
+    async def test_staff_candy_ranking_paginates_ten_users(self):
+        self.assertIn("dulces_balance", [command.name for command in Staff.__cog_app_commands__])
+        self.assertIn("add_candy", [command.name for command in Staff.__cog_app_commands__])
+        view = CandyRankingView(7, MagicMock(), MagicMock())
+        rows = [{"user_id": user_id, "balance": 100 - user_id}
+                for user_id in range(1, 11)]
+        member = MagicMock()
+        member.nick = "Piloto"
+        with patch("modules.staff.get_candy_ranking_page", new=AsyncMock(return_value=(rows, 12))), \
+             patch("modules.staff.resolve_guild_member", new=AsyncMock(return_value=member)):
+            embed = await view.get_embed()
+        self.assertEqual(embed.title, "🍬 Top 10 Dulces")
+        self.assertIn("Página 1/2", embed.footer.text)
+        self.assertFalse(view.siguiente.disabled)
+        self.assertTrue(view.anterior.disabled)
+        self.assertIn("**99**", embed.description)
+        view.page = 1
+        with patch("modules.staff.get_candy_ranking_page", new=AsyncMock(return_value=(
+            [{"user_id": 11, "balance": 10}, {"user_id": 12, "balance": 8}], 12,
+        ))), patch("modules.staff.resolve_guild_member", new=AsyncMock(return_value=member)):
+            second = await view.get_embed()
+        self.assertIn("`11.`", second.description)
+        self.assertIn("Página 2/2", second.footer.text)
+        self.assertTrue(view.siguiente.disabled)
+        self.assertFalse(view.anterior.disabled)
 
     async def test_notice_is_separate_and_not_scheduled_for_deletion(self):
         channel = MagicMock()

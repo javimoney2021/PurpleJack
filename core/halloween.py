@@ -88,6 +88,47 @@ async def get_candy_balance(user_id: int) -> int:
         return amount
 
 
+async def add_candy_balance(user_id: int, amount: int) -> int:
+    """Acredita dulces manualmente y refleja el saldo confirmado en RAM."""
+    if not 0 < amount <= 2_147_483_647:
+        raise ValueError("La cantidad debe ser positiva y caber en INTEGER.")
+    async with _get_user_lock(user_id):
+        async with database.pool.acquire() as conn:
+            balance = await conn.fetchval(
+                """
+                INSERT INTO halloween_candy_balances (user_id, balance)
+                VALUES ($1, $2)
+                ON CONFLICT (user_id) DO UPDATE
+                SET balance=halloween_candy_balances.balance + EXCLUDED.balance
+                RETURNING balance
+                """,
+                user_id,
+                amount,
+            )
+        _candy_balances[user_id] = int(balance)
+        return int(balance)
+
+
+async def get_candy_ranking_page(offset: int, limit: int = 10) -> tuple[list[dict], int]:
+    """Consulta el ranking persistente sin solicitar la lista completa del servidor."""
+    async with database.pool.acquire() as conn:
+        total = await conn.fetchval(
+            "SELECT COUNT(*) FROM halloween_candy_balances WHERE balance > 0"
+        )
+        rows = await conn.fetch(
+            """
+            SELECT user_id, balance
+            FROM halloween_candy_balances
+            WHERE balance > 0
+            ORDER BY balance DESC, user_id ASC
+            LIMIT $1 OFFSET $2
+            """,
+            limit,
+            offset,
+        )
+    return [dict(row) for row in rows], int(total or 0)
+
+
 async def award_candy(user_id: int, source_key: str) -> int:
     """Decide el 50 % y persiste una sola tirada por resultado de juego."""
     amount = random.randint(1, 3) if random.random() < 0.5 else 0

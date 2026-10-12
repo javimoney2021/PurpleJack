@@ -28,7 +28,14 @@ from core.database import (
     add_cargo_temporal, delete_cargo_temporal, get_cargo_temporal,
 )
 from core import cache
-from core.halloween import add_craft_item, delete_craft_item, get_craft_items
+from core.halloween import (
+    CANDY,
+    add_candy_balance,
+    add_craft_item,
+    delete_craft_item,
+    get_candy_ranking_page,
+    get_craft_items,
+)
 from core.member_resolution import resolve_guild_member
 from core.config import (
     ruleta_config, game_config, dados_config, memo_config,
@@ -234,6 +241,105 @@ class SaldosPaginationView(discord.ui.View):
         if interaction.user.id != self.author_id:
             return await interaction.response.send_message("❌ Solo el creador puede usar estos botones.", ephemeral=True)
         await interaction.response.edit_message(embed=create_economia_menu_embed(), view=EconomiaView(self.author_id))
+
+
+class CandyRankingView(discord.ui.View):
+    PAGE_SIZE = 10
+
+    def __init__(self, author_id: int, guild: discord.Guild, bot: commands.Bot):
+        super().__init__(timeout=300)
+        self.author_id = author_id
+        self.guild = guild
+        self.bot = bot
+        self.page = 0
+        self.message = None
+        self._names: dict[int, str] = {}
+
+    async def _display_name(self, user_id: int, semaphore: asyncio.Semaphore) -> str:
+        if user_id in self._names:
+            return self._names[user_id]
+        async with semaphore:
+            member = await resolve_guild_member(self.guild, user_id)
+            if member is not None:
+                name = member.nick or member.display_name
+            else:
+                try:
+                    user = await self.bot.fetch_user(user_id)
+                    name = user.display_name
+                except (discord.HTTPException, discord.ClientException):
+                    name = f"Usuario {user_id}"
+        name = discord.utils.escape_markdown(discord.utils.escape_mentions(name))[:40]
+        self._names[user_id] = name
+        return name
+
+    async def get_embed(self) -> discord.Embed:
+        rows, total = await get_candy_ranking_page(self.page * self.PAGE_SIZE, self.PAGE_SIZE)
+        pages = max(1, ceil(total / self.PAGE_SIZE))
+        if self.page >= pages:
+            self.page = pages - 1
+            rows, total = await get_candy_ranking_page(self.page * self.PAGE_SIZE, self.PAGE_SIZE)
+        self.anterior.disabled = self.page == 0
+        self.siguiente.disabled = self.page >= pages - 1
+
+        embed = discord.Embed(title="🍬 Top 10 Dulces", color=discord.Color.orange())
+        if not rows:
+            embed.description = "Todavía no hay usuarios con dulces."
+        else:
+            semaphore = asyncio.Semaphore(3)
+            names = await asyncio.gather(*(
+                self._display_name(row["user_id"], semaphore) for row in rows
+            ))
+            lines = []
+            for position, (row, name) in enumerate(
+                zip(rows, names), start=self.page * self.PAGE_SIZE + 1
+            ):
+                rank = ("🥇", "🥈", "🥉")[position - 1] if position <= 3 else f"`{position}.`"
+                lines.append(
+                    f"{rank} **{name}** (<@{row['user_id']}>) — "
+                    f"**{row['balance']:,}** {CANDY}"
+                )
+            embed.description = "\n".join(lines)
+        embed.set_footer(text=f"Página {self.page + 1}/{pages} • {total} usuarios con dulces")
+        return embed
+
+    async def interaction_check(self, interaction: discord.Interaction) -> bool:
+        if interaction.user.id == self.author_id:
+            return True
+        await interaction.response.send_message(
+            "❌ Solo quien abrió este ranking puede usar los botones.", ephemeral=True,
+        )
+        return False
+
+    async def _change_page(self, interaction: discord.Interaction, direction: int) -> None:
+        previous_page = self.page
+        await interaction.response.defer()
+        self.page = max(0, self.page + direction)
+        try:
+            embed = await self.get_embed()
+            await interaction.edit_original_response(embed=embed, view=self)
+        except Exception:
+            self.page = previous_page
+            logger.exception("No se pudo cambiar la página del ranking de dulces")
+            await interaction.followup.send(
+                "❌ No pude actualizar el ranking. Inténtalo de nuevo.", ephemeral=True,
+            )
+
+    @discord.ui.button(label="Anterior", style=discord.ButtonStyle.secondary)
+    async def anterior(self, interaction: discord.Interaction, button: discord.ui.Button):
+        await self._change_page(interaction, -1)
+
+    @discord.ui.button(label="Siguiente", style=discord.ButtonStyle.secondary)
+    async def siguiente(self, interaction: discord.Interaction, button: discord.ui.Button):
+        await self._change_page(interaction, 1)
+
+    async def on_timeout(self):
+        for child in self.children:
+            child.disabled = True
+        if self.message is not None:
+            try:
+                await self.message.edit(view=self)
+            except (discord.HTTPException, discord.NotFound):
+                pass
 
 
 class ExperienciaLaboralPaginationView(discord.ui.View):
@@ -601,6 +707,52 @@ class Staff(commands.Cog):
         embed.add_field(name="🏦 Banco", value=f"{user['bank']} {COIN}", inline=True)
         embed.set_thumbnail(url=usuario.display_avatar.url)
         await interaction.followup.send(embed=embed, ephemeral=True)
+
+    @app_commands.command(name="dulces_balance", description="Consulta el ranking de saldos de dulces")
+    @is_staff()
+    async def dulces_balance(self, interaction: discord.Interaction):
+        await interaction.response.defer(ephemeral=True)
+        view = CandyRankingView(interaction.user.id, interaction.guild, self.bot)
+        try:
+            embed = await view.get_embed()
+            view.message = await interaction.followup.send(
+                embed=embed,
+                view=view,
+                ephemeral=True,
+                wait=True,
+                allowed_mentions=discord.AllowedMentions.none(),
+            )
+        except Exception:
+            logger.exception("No se pudo abrir el ranking de dulces")
+            await interaction.followup.send(
+                "❌ No pude consultar los saldos de dulces. Inténtalo de nuevo.",
+                ephemeral=True,
+            )
+
+    @app_commands.command(name="add_candy", description="Añade dulces al saldo de un miembro")
+    @app_commands.describe(usuario="Miembro que recibirá los dulces", cantidad="Dulces a añadir")
+    @is_staff()
+    async def add_candy(self, interaction: discord.Interaction,
+                        usuario: discord.Member, cantidad: int):
+        if not 0 < cantidad <= 2_147_483_647:
+            return await interaction.response.send_message(
+                "❌ La cantidad debe estar entre 1 y 2.147.483.647.", ephemeral=True,
+            )
+        await interaction.response.defer(ephemeral=True)
+        try:
+            balance = await add_candy_balance(usuario.id, cantidad)
+        except Exception:
+            logger.exception("No se pudieron acreditar dulces a %s", usuario.id)
+            return await interaction.followup.send(
+                "❌ No pude acreditar los dulces. Comprueba el saldo e inténtalo de nuevo.",
+                ephemeral=True,
+            )
+        await interaction.followup.send(
+            f"✅ Se añadieron **{cantidad:,}** {CANDY} a **{usuario.display_name}**. "
+            f"Saldo actual: **{balance:,}** {CANDY}.",
+            ephemeral=True,
+            allowed_mentions=discord.AllowedMentions.none(),
+        )
 
     @app_commands.command(name="addcoins", description="Añade PurpleCoins a un miembro")
     @app_commands.describe(usuario="Miembro", cantidad="Cantidad a añadir", destino="Balance o Banco")
