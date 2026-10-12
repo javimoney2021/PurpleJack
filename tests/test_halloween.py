@@ -5,6 +5,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 from core import halloween
 from modules.craft import CraftBuyButton, CraftConfirmButton, CraftLayout
 from modules.economy import FinanceView
+from modules.staff import Staff
 
 
 class _AsyncContext:
@@ -104,7 +105,37 @@ class HalloweenTests(unittest.IsolatedAsyncioTestCase):
         conn.fetch = AsyncMock(return_value=[])
         with patch.object(halloween.database, "pool", self._pool(conn)):
             await halloween.get_craft_items()
+        self.assertIn("WHERE active=TRUE", conn.fetch.await_args.args[0])
         self.assertIn("ORDER BY precio ASC, id ASC", conn.fetch.await_args.args[0])
+
+    async def test_delete_craft_hides_listing_without_deleting_owned_copies(self):
+        conn = MagicMock()
+        conn.fetchval = AsyncMock(side_effect=["Calabaza", None])
+        with patch.object(halloween.database, "pool", self._pool(conn)):
+            self.assertEqual(await halloween.delete_craft_item(7), "Calabaza")
+            self.assertIsNone(await halloween.delete_craft_item(7))
+        query = conn.fetchval.await_args_list[0].args[0]
+        self.assertIn("SET active=FALSE", query)
+        self.assertNotIn("DELETE FROM", query)
+
+    async def test_delete_craft_autocomplete_lists_current_items(self):
+        items = [
+            {"id": 7, "nombre": "Calabaza", "icono": "🎃", "precio": 4},
+            {"id": 8, "nombre": "Fantasma", "icono": "👻", "precio": 2},
+        ]
+        with patch("modules.staff.get_craft_items", new=AsyncMock(return_value=items)):
+            choices = await Staff(None).delete_craft_autocomplete(MagicMock(), "cala")
+        self.assertEqual(len(choices), 1)
+        self.assertEqual(choices[0].value, "7")
+        self.assertIn("Calabaza", choices[0].name)
+
+    async def test_purchase_rechecks_that_listing_is_active(self):
+        conn = MagicMock()
+        conn.fetchrow = AsyncMock(return_value=None)
+        with patch.object(halloween.database, "pool", self._pool(conn)):
+            result = await halloween.purchase_craft_item(42, 7)
+        self.assertEqual(result["reason"], "not_found")
+        self.assertIn("active=TRUE FOR UPDATE", conn.fetchrow.await_args.args[0])
 
     async def test_craft_requires_confirmation_and_can_cancel(self):
         item = {"id": 1, "nombre": "Calabaza", "icono": "🎃",

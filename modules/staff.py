@@ -28,7 +28,7 @@ from core.database import (
     add_cargo_temporal, delete_cargo_temporal, get_cargo_temporal,
 )
 from core import cache
-from core.halloween import add_craft_item
+from core.halloween import add_craft_item, delete_craft_item, get_craft_items
 from core.member_resolution import resolve_guild_member
 from core.config import (
     ruleta_config, game_config, dados_config, memo_config,
@@ -1244,6 +1244,53 @@ class Staff(commands.Cog):
         await interaction.followup.send(
             f"✅ **{nombre}** añadido al crafteo por **{precio}** dulces.", ephemeral=True,
         )
+
+    @app_commands.command(name="delete_craft", description="Retira un artículo del crafteo de Halloween")
+    @app_commands.describe(item="Selecciona el artículo que deseas retirar")
+    @is_staff()
+    async def delete_craft(self, interaction: discord.Interaction, item: str):
+        try:
+            item_id = int(item)
+        except ValueError:
+            return await interaction.response.send_message(
+                "❌ Selecciona un artículo del desplegable.", ephemeral=True,
+            )
+        await interaction.response.defer(ephemeral=True)
+        try:
+            nombre = await delete_craft_item(item_id)
+        except Exception:
+            logger.exception("No se pudo retirar el artículo de crafteo %s", item_id)
+            return await interaction.followup.send(
+                "❌ No pude retirar el artículo. Inténtalo de nuevo.", ephemeral=True,
+            )
+        if nombre is None:
+            return await interaction.followup.send(
+                "❌ Ese artículo ya no está disponible en el crafteo.", ephemeral=True,
+            )
+        await interaction.followup.send(
+            f"✅ **{nombre}** retirado del crafteo. "
+            "Las unidades ya canjeadas permanecen en los inventarios.",
+            ephemeral=True,
+        )
+
+    @delete_craft.autocomplete("item")
+    async def delete_craft_autocomplete(
+        self, interaction: discord.Interaction, current: str,
+    ):
+        try:
+            items = await get_craft_items()
+        except Exception:
+            logger.exception("No se pudo cargar el desplegable de /delete_craft")
+            return []
+        filtro = current.casefold().strip()
+        return [
+            app_commands.Choice(
+                name=f"{item['icono'] or '🎁'} {item['nombre']} · {item['precio']} dulces"[:100],
+                value=str(item["id"]),
+            )
+            for item in items
+            if filtro in item["nombre"].casefold()
+        ][:25]
 
     # ── ADD ITEM (nuevo flujo: campos de texto directos) ───
     @app_commands.command(name="add_item", description="Agrega un nuevo item a la tienda")

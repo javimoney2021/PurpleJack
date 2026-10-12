@@ -57,8 +57,13 @@ async def init_halloween_tables() -> None:
                 nombre TEXT NOT NULL UNIQUE,
                 precio INTEGER NOT NULL CHECK (precio > 0),
                 icono TEXT NOT NULL DEFAULT '',
-                descripcion TEXT NOT NULL DEFAULT ''
+                descripcion TEXT NOT NULL DEFAULT '',
+                active BOOLEAN NOT NULL DEFAULT TRUE
             )
+        """)
+        await conn.execute("""
+            ALTER TABLE halloween_craft_items
+            ADD COLUMN IF NOT EXISTS active BOOLEAN NOT NULL DEFAULT TRUE
         """)
         await conn.execute("""
             CREATE TABLE IF NOT EXISTS halloween_craft_inventory (
@@ -146,7 +151,12 @@ async def add_craft_item(nombre: str, precio: int, icono: str, descripcion: str)
             """
             INSERT INTO halloween_craft_items (nombre, precio, icono, descripcion)
             VALUES ($1, $2, $3, $4)
-            ON CONFLICT (nombre) DO NOTHING
+            ON CONFLICT (nombre) DO UPDATE
+            SET precio=EXCLUDED.precio,
+                icono=EXCLUDED.icono,
+                descripcion=EXCLUDED.descripcion,
+                active=TRUE
+            WHERE halloween_craft_items.active=FALSE
             RETURNING id
             """,
             nombre,
@@ -161,9 +171,20 @@ async def get_craft_items() -> list[dict]:
     async with database.pool.acquire() as conn:
         rows = await conn.fetch(
             "SELECT id, nombre, precio, icono, descripcion "
-            "FROM halloween_craft_items ORDER BY precio ASC, id ASC"
+            "FROM halloween_craft_items WHERE active=TRUE "
+            "ORDER BY precio ASC, id ASC"
         )
     return [dict(row) for row in rows]
+
+
+async def delete_craft_item(item_id: int) -> str | None:
+    """Retira el artículo del catálogo sin borrar copias ya canjeadas."""
+    async with database.pool.acquire() as conn:
+        return await conn.fetchval(
+            "UPDATE halloween_craft_items SET active=FALSE "
+            "WHERE id=$1 AND active=TRUE RETURNING nombre",
+            item_id,
+        )
 
 
 async def purchase_craft_item(user_id: int, item_id: int) -> dict:
@@ -172,7 +193,8 @@ async def purchase_craft_item(user_id: int, item_id: int) -> dict:
         async with database.pool.acquire() as conn:
             async with conn.transaction():
                 item = await conn.fetchrow(
-                    "SELECT id, nombre, precio FROM halloween_craft_items WHERE id=$1",
+                    "SELECT id, nombre, precio FROM halloween_craft_items "
+                    "WHERE id=$1 AND active=TRUE FOR UPDATE",
                     item_id,
                 )
                 if item is None:
