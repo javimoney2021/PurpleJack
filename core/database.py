@@ -396,9 +396,11 @@ async def init_db():
         await conn.execute("""
         CREATE TABLE IF NOT EXISTS user_activity (
             user_id BIGINT PRIMARY KEY,
-            last_activity DOUBLE PRECISION NOT NULL
+            last_activity DOUBLE PRECISION NOT NULL,
+            display_name TEXT
         )
         """)
+        await conn.execute("ALTER TABLE user_activity ADD COLUMN IF NOT EXISTS display_name TEXT")
         await conn.execute("""
         INSERT INTO user_activity (user_id, last_activity)
         SELECT id, $1 FROM users
@@ -490,6 +492,30 @@ async def load_balance_index():
         rows = await conn.fetch("SELECT id, balance FROM users")
     cache.restore_balance_index(rows)
     return len(rows)
+
+
+async def load_member_names():
+    """Carga los últimos apodos conocidos sin usar la API de Discord."""
+    async with pool.acquire() as conn:
+        rows = await conn.fetch(
+            "SELECT user_id, display_name FROM user_activity WHERE display_name IS NOT NULL"
+        )
+    cache.restore_member_names(rows)
+    return len(rows)
+
+
+async def remember_member_name(user_id: int, name: str) -> None:
+    """Persiste un apodo solo cuando cambia; la purga borra la misma fila."""
+    name = " ".join(str(name).split())[:80]
+    if not name or cache.get_member_name(user_id) == name:
+        return
+    async with pool.acquire() as conn:
+        await conn.execute("""
+            INSERT INTO user_activity (user_id, last_activity, display_name)
+            VALUES ($1, $2, $3)
+            ON CONFLICT (user_id) DO UPDATE SET display_name=EXCLUDED.display_name
+        """, int(user_id), time.time(), name)
+    cache.set_member_name(user_id, name)
 
 
 async def get_user(user_id):

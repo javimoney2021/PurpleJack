@@ -56,7 +56,7 @@ except ImportError:
 
 from core.database import (
     init_db, load_items_to_cache, load_cargos_to_cache,
-    load_balance_index,
+    load_balance_index, load_member_names, remember_member_name,
     load_collect_config_to_cache, claim_expired_cargos,
     get_cargo_temporal_by_id, mark_cargo_removal_failed,
     release_cargo_claim, delete_cargo_temporal_by_id,
@@ -145,15 +145,26 @@ async def record_user_activity(user_id: int) -> None:
         logger.exception("No se pudo registrar actividad para el usuario %s", user_id)
 
 
+async def record_member_name(user) -> None:
+    if not isinstance(user, discord.Member):
+        return
+    try:
+        await remember_member_name(user.id, user.display_name)
+    except Exception:
+        logger.exception("No se pudo guardar el apodo del usuario %s", user.id)
+
+
 @bot.listen("on_command")
 async def track_prefix_command_activity(ctx):
     if not ctx.author.bot:
+        await record_member_name(ctx.author)
         await record_user_activity(ctx.author.id)
 
 
 @bot.listen("on_interaction")
 async def track_interaction_activity(interaction: discord.Interaction):
     if interaction.user and not interaction.user.bot:
+        await record_member_name(interaction.user)
         await record_user_activity(interaction.user.id)
 
 
@@ -650,6 +661,8 @@ def run_bot():
             "Índice económico en RAM iniciado con %s usuario(s).",
             indexed_balances,
         )
+        indexed_names = await load_member_names()
+        logger.info("Caché ligera de nombres iniciada con %s usuario(s).", indexed_names)
         await ensure_wager_constraints()
         await create_game_config_table()
         await load_game_config()

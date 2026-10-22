@@ -16,7 +16,7 @@ from core.config import rob_config, COIN, ROB_VICTIM_PROTECTION_SECONDS
 from core import cache
 from core.cache import get_rob_cooldown, set_rob_cooldown
 from core.cd_boost import resolve_cd_boost, send_cd_boost_notice
-from core.rankings import get_guild_balance_ranking
+from core.rankings import get_balance_ranking
 from core.member_resolution import resolve_explicit_member, resolve_reply_member
 
 SABOTEADOR_EXITO_PROB = 0.60
@@ -65,12 +65,18 @@ class Rob(commands.Cog):
         return cd_boost
 
     async def _get_top_target(self, ctx, position: int):
-        """Resuelve una posición del Top 15 al miembro correspondiente."""
-        rankings = await get_guild_balance_ranking(ctx.guild, limit=15)
+        """Valida únicamente al objetivo de la posición mostrada en !top."""
+        if ctx.guild is None:
+            return None
+        rankings = get_balance_ranking(limit=15)
 
         if position > len(rankings):
             return None
-        return rankings[position - 1][0]
+        user_id = rankings[position - 1][0]
+        try:
+            return await ctx.guild.fetch_member(user_id)
+        except (discord.NotFound, discord.Forbidden, discord.HTTPException, discord.ClientException):
+            return None
 
     @commands.command()
     async def rob(self, ctx, target_input: str = None):

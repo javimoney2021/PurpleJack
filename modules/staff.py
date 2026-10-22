@@ -246,31 +246,17 @@ class SaldosPaginationView(discord.ui.View):
 class CandyRankingView(discord.ui.View):
     PAGE_SIZE = 10
 
-    def __init__(self, author_id: int, guild: discord.Guild, bot: commands.Bot):
+    def __init__(self, author_id: int):
         super().__init__(timeout=300)
         self.author_id = author_id
-        self.guild = guild
-        self.bot = bot
         self.page = 0
         self.message = None
-        self._names: dict[int, str] = {}
 
-    async def _display_name(self, user_id: int, semaphore: asyncio.Semaphore) -> str:
-        if user_id in self._names:
-            return self._names[user_id]
-        async with semaphore:
-            member = await resolve_guild_member(self.guild, user_id)
-            if member is not None:
-                name = member.nick or member.display_name
-            else:
-                try:
-                    user = await self.bot.fetch_user(user_id)
-                    name = user.display_name
-                except (discord.HTTPException, discord.ClientException):
-                    name = f"Usuario {user_id}"
-        name = discord.utils.escape_markdown(discord.utils.escape_mentions(name))[:40]
-        self._names[user_id] = name
-        return name
+    def _display_name(self, user_id: int) -> str:
+        name = cache.get_member_name(user_id)
+        if name:
+            return discord.utils.escape_markdown(discord.utils.escape_mentions(name))[:80]
+        return f"<@{user_id}>"
 
     async def get_embed(self) -> discord.Embed:
         rows, total = await get_candy_ranking_page(self.page * self.PAGE_SIZE, self.PAGE_SIZE)
@@ -285,14 +271,9 @@ class CandyRankingView(discord.ui.View):
         if not rows:
             embed.description = "Todavía no hay usuarios con dulces."
         else:
-            semaphore = asyncio.Semaphore(3)
-            names = await asyncio.gather(*(
-                self._display_name(row["user_id"], semaphore) for row in rows
-            ))
             lines = []
-            for position, (row, name) in enumerate(
-                zip(rows, names), start=self.page * self.PAGE_SIZE + 1
-            ):
+            for position, row in enumerate(rows, start=self.page * self.PAGE_SIZE + 1):
+                name = self._display_name(row["user_id"])
                 rank = ("🥇", "🥈", "🥉")[position - 1] if position <= 3 else f"`{position}.`"
                 lines.append(
                     f"{rank} **{name}** (<@{row['user_id']}>) — "
@@ -712,7 +693,7 @@ class Staff(commands.Cog):
     @is_staff()
     async def dulces_balance(self, interaction: discord.Interaction):
         await interaction.response.defer(ephemeral=True)
-        view = CandyRankingView(interaction.user.id, interaction.guild, self.bot)
+        view = CandyRankingView(interaction.user.id)
         try:
             embed = await view.get_embed()
             view.message = await interaction.followup.send(

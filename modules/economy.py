@@ -20,7 +20,7 @@ from core.config import (
     memo_config, blackjack_config, COORDINADOR_ROLE_ID,
 )
 from core.cache import MAX_BANK
-from core.rankings import get_guild_balance_ranking
+from core.rankings import get_balance_ranking
 from core.member_resolution import resolve_guild_member
 from core.halloween import CANDY, get_candy_balance
 
@@ -765,6 +765,8 @@ class Economy(commands.Cog):
 
     @commands.command()
     async def top(self, ctx):
+        if ctx.guild is None:
+            return await ctx.send("❌ Este ranking solo está disponible en un servidor.")
         user_id = ctx.author.id
 
         if cache.check_top_cooldown(user_id):
@@ -774,13 +776,17 @@ class Economy(commands.Cog):
             )
 
         cache.set_top_cooldown(user_id)
-        resultados = await get_guild_balance_ranking(ctx.guild, limit=15)
+        resultados = get_balance_ranking(limit=15)
 
         medallas    = ["🥇", "🥈", "🥉"]
         descripcion = ""
 
-        for i, (member, balance) in enumerate(resultados):
-            nombre = member.display_name
+        for i, (ranked_user_id, balance) in enumerate(resultados):
+            nombre_guardado = cache.get_member_name(ranked_user_id)
+            nombre = (
+                discord.utils.escape_markdown(discord.utils.escape_mentions(nombre_guardado))
+                if nombre_guardado else f"<@{ranked_user_id}>"
+            )
             posicion     = medallas[i] if i < 3 else f"**{i+1}.**"
             descripcion += f"{posicion} {nombre} —— {COIN} **{balance}**\n"
 
@@ -790,7 +796,10 @@ class Economy(commands.Cog):
             color=discord.Color.blue(),
         )
         embed.set_footer(text="Solo se muestra el Top 15 de los más ricos.")
-        await ctx.send(embed=embed, delete_after=60)
+        await ctx.send(
+            embed=embed, delete_after=60,
+            allowed_mentions=discord.AllowedMentions.none(),
+        )
 
     @commands.command(name="evento")
     async def evento(self, ctx):

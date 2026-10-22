@@ -73,13 +73,11 @@ class HalloweenTests(unittest.IsolatedAsyncioTestCase):
     async def test_staff_candy_ranking_paginates_ten_users(self):
         self.assertIn("dulces_balance", [command.name for command in Staff.__cog_app_commands__])
         self.assertIn("add_candy", [command.name for command in Staff.__cog_app_commands__])
-        view = CandyRankingView(7, MagicMock(), MagicMock())
+        view = CandyRankingView(7)
         rows = [{"user_id": user_id, "balance": 100 - user_id}
                 for user_id in range(1, 11)]
-        member = MagicMock()
-        member.nick = "Piloto"
         with patch("modules.staff.get_candy_ranking_page", new=AsyncMock(return_value=(rows, 12))), \
-             patch("modules.staff.resolve_guild_member", new=AsyncMock(return_value=member)):
+             patch("modules.staff.cache.get_member_name", return_value="Piloto"):
             embed = await view.get_embed()
         self.assertEqual(embed.title, "🍬 Top 10 Dulces")
         self.assertIn("Página 1/2", embed.footer.text)
@@ -89,7 +87,7 @@ class HalloweenTests(unittest.IsolatedAsyncioTestCase):
         view.page = 1
         with patch("modules.staff.get_candy_ranking_page", new=AsyncMock(return_value=(
             [{"user_id": 11, "balance": 10}, {"user_id": 12, "balance": 8}], 12,
-        ))), patch("modules.staff.resolve_guild_member", new=AsyncMock(return_value=member)):
+        ))), patch("modules.staff.cache.get_member_name", return_value="Piloto"):
             second = await view.get_embed()
         self.assertIn("`11.`", second.description)
         self.assertIn("Página 2/2", second.footer.text)

@@ -11,6 +11,7 @@ _dirty = set()
 _last_activity = {}
 _balance_index = {}
 _balance_index_version = 0
+_member_names = {}
 
 FLUSH_INTERVAL = 120   # 2 minutos — reduce pérdida potencial ante reinicios
 CACHE_EXPIRE   = 7200  # 2 horas de inactividad
@@ -143,6 +144,23 @@ def get_indexed_balance(user_id: int, default: int = 0) -> int:
     return int(_balance_index.get(int(user_id), default))
 
 
+def restore_member_names(rows) -> None:
+    """Restaura solo los nombres ya vistos; no consulta miembros de Discord."""
+    _member_names.clear()
+    _member_names.update({
+        int(row["user_id"]): row["display_name"]
+        for row in rows if row["display_name"]
+    })
+
+
+def get_member_name(user_id: int) -> str | None:
+    return _member_names.get(int(user_id))
+
+
+def set_member_name(user_id: int, name: str) -> None:
+    _member_names[int(user_id)] = name
+
+
 def reset_balance_index(balance: int = 0) -> None:
     """Conserva los usuarios conocidos y reinicia todos sus balances."""
     global _balance_index_version
@@ -229,6 +247,7 @@ def purge_user_cache(user_id: int) -> None:
     """Retira toda referencia personal del usuario conservada en RAM."""
     global _balance_index_version
     _cache.pop(user_id, None)
+    _member_names.pop(user_id, None)
     if _balance_index.pop(user_id, None) is not None:
         _balance_index_version += 1
     _dirty.discard(user_id)
