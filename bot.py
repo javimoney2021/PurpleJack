@@ -1,6 +1,7 @@
 # Deployment refresh: 2026-08-17
 import discord
 from discord.ext import commands
+from discord import app_commands
 import asyncio
 import time
 import signal
@@ -70,6 +71,7 @@ from core.database import (
     delete_expired_failed_item_use_logs,
 )
 from core import cache
+from core.member_tenure import NEW_MEMBER_MESSAGE, has_minimum_server_tenure
 from core.halloween import init_halloween_tables
 from core.config import (
     AYUDA_CHANNEL_ID, LOG_CHANNEL_ID, STAFF_ROLE_ID, PUNISHMENT_ROLE_ID,
@@ -86,12 +88,51 @@ async def get_prefix(bot, message):
     """Normaliza el prefijo '!' aceptando '!comando' y '! comando' indistintamente."""
     return ["! ", "!"]
 
+
+async def check_invoker_tenure(user, guild) -> bool | None:
+    """No enumera miembros; consulta por ID solo si falta joined_at."""
+    if guild is None:
+        return None
+    joined_at = getattr(user, "joined_at", None)
+    if joined_at is None:
+        try:
+            member = await asyncio.wait_for(guild.fetch_member(user.id), timeout=2.0)
+            joined_at = member.joined_at
+        except (
+            asyncio.TimeoutError, discord.NotFound, discord.Forbidden,
+            discord.HTTPException, discord.ClientException,
+        ):
+            return None
+    if joined_at is None:
+        return None
+    return has_minimum_server_tenure(joined_at)
+
+
+class PurpleJackCommandTree(app_commands.CommandTree):
+    async def interaction_check(self, interaction: discord.Interaction) -> bool:
+        command_name = (interaction.data or {}).get("name")
+        if command_name in {"ayuda_nave", "eliminar_mis_datos"}:
+            return True
+        eligible = await check_invoker_tenure(interaction.user, interaction.guild)
+        if eligible is True:
+            return True
+        if interaction.type is discord.InteractionType.autocomplete:
+            await interaction.response.autocomplete([])
+            return False
+        message = (
+            NEW_MEMBER_MESSAGE if eligible is False
+            else "No pude verificar tu antigüedad en el servidor. Inténtalo nuevamente."
+        )
+        await interaction.response.send_message(message, ephemeral=True)
+        return False
+
 bot = commands.Bot(
     command_prefix=get_prefix,
     intents=intents,
     help_command=None,
     member_cache_flags=discord.MemberCacheFlags.none(),
     chunk_guilds_at_startup=False,
+    tree_cls=PurpleJackCommandTree,
 )
 evento_flush_task = None
 cargos_task = None
@@ -130,6 +171,19 @@ async def block_restricted_prefix_commands(ctx: commands.Context) -> bool:
         mention_author=False,
         delete_after=3,
     )
+    raise CommandAccessRestricted()
+
+
+@bot.check
+async def block_new_prefix_members(ctx: commands.Context) -> bool:
+    eligible = await check_invoker_tenure(ctx.author, ctx.guild)
+    if eligible is True:
+        return True
+    message = (
+        NEW_MEMBER_MESSAGE if eligible is False
+        else "No pude verificar tu antigüedad en el servidor. Inténtalo nuevamente."
+    )
+    await ctx.reply(message, mention_author=False)
     raise CommandAccessRestricted()
 
 
