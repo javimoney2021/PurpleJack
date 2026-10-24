@@ -6,6 +6,7 @@ import asyncio
 import time
 import signal
 import logging
+from importlib.metadata import PackageNotFoundError, version
 from datetime import datetime, timedelta, timezone
 
 # ── LOGGING ────────────────────────────────────────────
@@ -48,6 +49,11 @@ logging.getLogger("discord").addFilter(_VoiceWarningFilter())
 logger = logging.getLogger("purplejack")
 
 logger.info(f"discord.py version: {discord.__version__}")
+for package_name in ("Brotli", "brotlicffi"):
+    try:
+        logger.info("[SEGURIDAD] %s instalado: %s", package_name, version(package_name))
+    except PackageNotFoundError:
+        logger.info("[SEGURIDAD] %s no instalado", package_name)
 
 from settings import TOKEN
 try:
