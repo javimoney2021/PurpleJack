@@ -43,9 +43,15 @@ async def init_halloween_tables() -> None:
             CREATE TABLE IF NOT EXISTS halloween_candy_awards (
                 source_key TEXT PRIMARY KEY,
                 user_id BIGINT NOT NULL,
-                amount SMALLINT NOT NULL CHECK (amount BETWEEN 0 AND 3),
+                amount SMALLINT NOT NULL CHECK (amount BETWEEN 0 AND 8),
                 created_at DOUBLE PRECISION NOT NULL
             )
+        """)
+        await conn.execute("""
+            ALTER TABLE halloween_candy_awards
+            DROP CONSTRAINT IF EXISTS halloween_candy_awards_amount_check,
+            ADD CONSTRAINT halloween_candy_awards_amount_check
+            CHECK (amount BETWEEN 0 AND 8)
         """)
         await conn.execute("""
             CREATE INDEX IF NOT EXISTS halloween_candy_awards_user_idx
@@ -129,9 +135,9 @@ async def get_candy_ranking_page(offset: int, limit: int = 10) -> tuple[list[dic
     return [dict(row) for row in rows], int(total or 0)
 
 
-async def award_candy(user_id: int, source_key: str) -> int:
-    """Decide el 50 % y persiste una sola tirada por resultado de juego."""
-    amount = random.randint(1, 3) if random.random() < 0.5 else 0
+async def award_candy(user_id: int, source_key: str, *, won: bool = True) -> int:
+    """Persiste una tirada del 60 % en victoria o un dulce por derrota."""
+    amount = (random.randint(4, 8) if random.random() < 0.6 else 0) if won else 1
     async with _get_user_lock(user_id):
         async with database.pool.acquire() as conn:
             async with conn.transaction():
@@ -166,17 +172,23 @@ async def award_candy(user_id: int, source_key: str) -> int:
     return amount
 
 
-async def award_and_notify(channel, user_id: int, source_key: str) -> int:
-    """Entrega dulces y publica un aviso separado solo si la tirada ganó."""
+async def award_and_notify(channel, user_id: int, source_key: str, *, won: bool = True) -> int:
+    """Entrega dulces y publica el aviso correspondiente a victoria o derrota."""
     try:
-        amount = await award_candy(user_id, source_key)
+        amount = await award_candy(user_id, source_key, won=won)
     except Exception:
         logger.exception("No se pudieron acreditar dulces para %s (%s)", user_id, source_key)
         return 0
     if amount and channel is not None:
         try:
+            message = (
+                f"<@{user_id}> Has recibido ({amount} {CANDY}) por tu victoria reciente {GHOST}"
+                if won else
+                f"<@{user_id}> Premio de consolación: recibiste (1 {CANDY}) "
+                f"aunque esta vez perdiste {GHOST}"
+            )
             await channel.send(
-                f"<@{user_id}> Has recibido ({amount} {CANDY}) por tu victoria reciente {GHOST}",
+                message,
                 allowed_mentions=discord.AllowedMentions(
                     everyone=False, roles=False, users=True, replied_user=False,
                 ),

@@ -217,8 +217,9 @@ class Roulette(commands.Cog):
                 embed_resultado.set_thumbnail(url=ROULETTE_LOSE_THUMBNAIL_URL)
 
             await ctx.send(embed=embed_resultado)
-            if gano:
-                await award_and_notify(ctx.channel, ctx.author.id, f"ruleta:{wager['id']}")
+            await award_and_notify(
+                ctx.channel, ctx.author.id, f"ruleta:{wager['id']}", won=gano,
+            )
         except Exception:
             await refund_wager(wager["id"])
             raise

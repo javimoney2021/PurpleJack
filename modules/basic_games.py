@@ -124,8 +124,9 @@ class BasicGames(commands.Cog):
         nick = ctx.author.nick or ctx.author.display_name
         response = await ctx.message.reply(f"{nick} {msg}", mention_author=False)
         await send_cd_boost_notice(response, ctx.author, cd_boost)
-        if success:
-            await award_and_notify(ctx.channel, ctx.author.id, f"crime:{ctx.message.id}")
+        await award_and_notify(
+            ctx.channel, ctx.author.id, f"crime:{ctx.message.id}", won=success,
+        )
 
 
 async def setup(bot):

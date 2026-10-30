@@ -209,8 +209,9 @@ class DadosRollView(discord.ui.View):
             except Exception:
                 pass
 
-            if exito:
-                await award_and_notify(interaction.channel, self.author_id, f"dados:{self.wager_id}")
+            await award_and_notify(
+                interaction.channel, self.author_id, f"dados:{self.wager_id}", won=exito,
+            )
 
     async def on_error(self, interaction, error, item):
         self.finished = True

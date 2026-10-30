@@ -295,11 +295,12 @@ class BlackjackView(discord.ui.View):
                     self.game.wager_id,
                 )
             if self.game.message is not None:
-                if outcome in {"win", "blackjack"}:
+                if outcome in {"win", "blackjack", "loss"}:
                     await award_and_notify(
                         self.game.message.channel,
                         self.game.user_id,
                         f"bj:{self.game.wager_id}",
+                        won=outcome != "loss",
                     )
                 asyncio.create_task(self.game.message.delete(delay=120))
         except Exception as error:

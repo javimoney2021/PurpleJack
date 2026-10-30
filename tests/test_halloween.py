@@ -30,7 +30,7 @@ class HalloweenTests(unittest.IsolatedAsyncioTestCase):
         conn.transaction.return_value = _AsyncContext(None)
         return pool
 
-    async def test_losing_roll_records_zero_without_credit(self):
+    async def test_victory_without_drop_records_zero_without_credit(self):
         conn = MagicMock()
         conn.fetchval = AsyncMock(return_value=0)
         with patch.object(halloween.database, "pool", self._pool(conn)), \
@@ -41,14 +41,36 @@ class HalloweenTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_winning_roll_credits_once_in_db_and_ram(self):
         conn = MagicMock()
-        conn.fetchval = AsyncMock(side_effect=[2, 7, None])
+        conn.fetchval = AsyncMock(side_effect=[6, 11, None])
         with patch.object(halloween.database, "pool", self._pool(conn)), \
              patch.object(halloween.random, "random", return_value=0.1), \
-             patch.object(halloween.random, "randint", return_value=2):
-            self.assertEqual(await halloween.award_candy(42, "dados:1"), 2)
+             patch.object(halloween.random, "randint", return_value=6) as draw:
+            self.assertEqual(await halloween.award_candy(42, "dados:1"), 6)
             self.assertEqual(await halloween.award_candy(42, "dados:1"), 0)
-        self.assertEqual(halloween._candy_balances[42], 7)
+        draw.assert_called_with(4, 8)
+        self.assertEqual(halloween._candy_balances[42], 11)
         self.assertEqual(conn.fetchval.await_count, 3)
+
+    async def test_defeat_grants_one_consolation_candy_once(self):
+        conn = MagicMock()
+        conn.fetchval = AsyncMock(side_effect=[1, 5, None])
+        with patch.object(halloween.database, "pool", self._pool(conn)), \
+             patch.object(halloween.random, "random") as chance, \
+             patch.object(halloween.random, "randint") as draw:
+            self.assertEqual(await halloween.award_candy(42, "crime:1", won=False), 1)
+            self.assertEqual(await halloween.award_candy(42, "crime:1", won=False), 0)
+        chance.assert_not_called()
+        draw.assert_not_called()
+        self.assertEqual(halloween._candy_balances[42], 5)
+
+    async def test_victory_drop_requires_less_than_sixty_percent(self):
+        conn = MagicMock()
+        conn.fetchval = AsyncMock(return_value=0)
+        with patch.object(halloween.database, "pool", self._pool(conn)), \
+             patch.object(halloween.random, "random", return_value=0.6), \
+             patch.object(halloween.random, "randint") as draw:
+            self.assertEqual(await halloween.award_candy(42, "work:2"), 0)
+        draw.assert_not_called()
 
     async def test_staff_candy_credit_is_atomic_and_updates_ram(self):
         conn = MagicMock()
@@ -103,6 +125,18 @@ class HalloweenTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("<@42>", args[0])
         self.assertIn("3 <:Candy:1558963919492481055>", args[0])
         self.assertNotIn("delete_after", kwargs)
+
+    async def test_defeat_notice_says_consolation(self):
+        channel = MagicMock()
+        channel.send = AsyncMock()
+        with patch.object(halloween, "award_candy", new=AsyncMock(return_value=1)) as award:
+            await halloween.award_and_notify(channel, 42, "bj:1", won=False)
+        award.assert_awaited_once_with(42, "bj:1", won=False)
+        message = channel.send.await_args.args[0]
+        self.assertIn("<@42>", message)
+        self.assertIn("Premio de consolación", message)
+        self.assertIn("1 <:Candy:1558963919492481055>", message)
+        self.assertNotIn("delete_after", channel.send.await_args.kwargs)
 
     async def test_craft_purchase_is_atomic_and_capped(self):
         conn = MagicMock()
