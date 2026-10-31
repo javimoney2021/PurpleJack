@@ -14,7 +14,6 @@ from core.database import (
     set_game_cooldown,
     settle_wager,
 )
-from core.halloween import award_and_notify
 
 BLACKJACK_THUMBNAIL_URL = "https://pub-a09b3609b6b34dfab5c7aa7742cd1a8a.r2.dev/Purple%20jack%20Harcode/BlackjackPJ.png"
 
@@ -295,13 +294,6 @@ class BlackjackView(discord.ui.View):
                     self.game.wager_id,
                 )
             if self.game.message is not None:
-                if outcome in {"win", "blackjack", "loss"}:
-                    await award_and_notify(
-                        self.game.message.channel,
-                        self.game.user_id,
-                        f"bj:{self.game.wager_id}",
-                        won=outcome != "loss",
-                    )
                 asyncio.create_task(self.game.message.delete(delay=120))
         except Exception as error:
             # Si la liquidación alcanzó a confirmarse, refund_wager no podrá

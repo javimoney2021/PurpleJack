@@ -13,7 +13,6 @@ from core.database import (
 from core.config import COIN, dados_config
 from core import cache
 from core.cd_boost import resolve_cd_boost, send_cd_boost_notice
-from core.halloween import award_and_notify
 
 DICE_GIF = "https://pub-a09b3609b6b34dfab5c7aa7742cd1a8a.r2.dev/Purple%20jack%20Harcode/DadosPJ.gif"
 _ACTIVE_DADOS: set[int] = set()
@@ -209,9 +208,6 @@ class DadosRollView(discord.ui.View):
             except Exception:
                 pass
 
-            await award_and_notify(
-                interaction.channel, self.author_id, f"dados:{self.wager_id}", won=exito,
-            )
 
     async def on_error(self, interaction, error, item):
         self.finished = True
