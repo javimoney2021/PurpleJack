@@ -134,14 +134,18 @@ class HalloweenTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_staff_craft_inventory_lists_five_users_per_page(self):
         self.assertIn("inventarios_craft", [command.name for command in Staff.__cog_app_commands__])
-        view = CraftInventoryPaginationView(7)
+        guild = MagicMock()
+        view = CraftInventoryPaginationView(7, guild)
         users = [{"user_id": user_id, "items": [{"nombre": "Calabaza", "cantidad": 2}]}
                  for user_id in range(1, 6)]
-        with patch("modules.staff.get_craft_inventory_page", new=AsyncMock(return_value=(users, 6))) as load:
+        member = MagicMock(nick="Piloto")
+        with patch("modules.staff.get_craft_inventory_page", new=AsyncMock(return_value=(users, 6))) as load, \
+             patch("modules.staff.resolve_guild_member", new=AsyncMock(return_value=member)) as resolve:
             embed = await view.get_embed()
         load.assert_awaited_once_with(0, 5)
+        self.assertEqual(resolve.await_count, 5)
         self.assertEqual(len(embed.fields), 5)
-        self.assertEqual(embed.fields[0].name, "<@1>")
+        self.assertEqual(embed.fields[0].name, "👤 Piloto")
         self.assertIn("Calabaza — x2", embed.fields[0].value)
         self.assertIn("Página 1/2", embed.footer.text)
         self.assertTrue(view.anterior.disabled)
@@ -149,13 +153,21 @@ class HalloweenTests(unittest.IsolatedAsyncioTestCase):
         view.page = 1
         with patch("modules.staff.get_craft_inventory_page", new=AsyncMock(return_value=(
             [{"user_id": 6, "items": [{"nombre": "Fantasma", "cantidad": 1}]}], 6,
-        ))) as load:
+        ))) as load, patch("modules.staff.resolve_guild_member", new=AsyncMock(return_value=member)):
             second = await view.get_embed()
         load.assert_awaited_once_with(5, 5)
         self.assertEqual(len(second.fields), 1)
         self.assertIn("Página 2/2", second.footer.text)
         self.assertFalse(view.anterior.disabled)
         self.assertTrue(view.siguiente.disabled)
+
+    async def test_craft_inventory_name_falls_back_to_saved_name_without_member(self):
+        view = CraftInventoryPaginationView(7, None)
+        with patch("modules.staff.resolve_guild_member", new=AsyncMock(return_value=None)) as resolve, \
+             patch("modules.staff.cache.get_member_name", return_value="Nick guardado"):
+            self.assertEqual(await view._display_name(42), "Nick guardado")
+            self.assertEqual(await view._display_name(42), "Nick guardado")
+        resolve.assert_awaited_once_with(None, 42)
 
     async def test_notice_is_separate_and_not_scheduled_for_deletion(self):
         channel = MagicMock()

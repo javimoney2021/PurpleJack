@@ -485,11 +485,26 @@ class StockListPaginationView(discord.ui.View):
 class CraftInventoryPaginationView(discord.ui.View):
     PAGE_SIZE = 5
 
-    def __init__(self, author_id: int):
+    def __init__(self, author_id: int, guild: discord.Guild | None):
         super().__init__(timeout=300)
         self.author_id = author_id
+        self.guild = guild
         self.page = 0
         self.message = None
+        self._names: dict[int, str] = {}
+
+    async def _display_name(self, user_id: int) -> str:
+        if user_id not in self._names:
+            member = await resolve_guild_member(self.guild, user_id)
+            if member is not None:
+                name = member.nick or member.display_name
+                cache.set_member_name(user_id, name)
+            else:
+                name = cache.get_member_name(user_id) or f"Usuario {user_id}"
+            self._names[user_id] = discord.utils.escape_markdown(
+                discord.utils.escape_mentions(name)
+            ).replace("\n", " ")[:200]
+        return self._names[user_id]
 
     async def get_embed(self) -> discord.Embed:
         users, total = await get_craft_inventory_page(self.page * self.PAGE_SIZE, self.PAGE_SIZE)
@@ -518,7 +533,8 @@ class CraftInventoryPaginationView(discord.ui.View):
                     lines.append(f"… y {len(user['items']) - index} artículo(s) más.")
                     break
                 lines.append(line)
-            embed.add_field(name=f"<@{user['user_id']}>", value="\n".join(lines), inline=False)
+            display_name = await self._display_name(user["user_id"])
+            embed.add_field(name=f"👤 {display_name}", value="\n".join(lines), inline=False)
         embed.set_footer(text=f"Página {self.page + 1}/{pages} • {total} usuarios con artículos de Craft")
         return embed
 
@@ -794,7 +810,7 @@ class Staff(commands.Cog):
     @is_staff()
     async def inventarios_craft(self, interaction: discord.Interaction):
         await interaction.response.defer(ephemeral=True)
-        view = CraftInventoryPaginationView(interaction.user.id)
+        view = CraftInventoryPaginationView(interaction.user.id, interaction.guild)
         try:
             embed = await view.get_embed()
             view.message = await interaction.followup.send(
