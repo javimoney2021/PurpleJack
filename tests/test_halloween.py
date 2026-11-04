@@ -5,7 +5,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 from core import halloween
 from modules.craft import CraftBuyButton, CraftConfirmButton, CraftLayout
 from modules.economy import FinanceView
-from modules.staff import CandyRankingView, Staff
+from modules.staff import CandyRankingView, CraftInventoryPaginationView, Staff
 
 
 class _AsyncContext:
@@ -115,6 +115,47 @@ class HalloweenTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("Página 2/2", second.footer.text)
         self.assertTrue(view.siguiente.disabled)
         self.assertFalse(view.anterior.disabled)
+
+    async def test_craft_inventory_page_groups_five_owners_and_keeps_retired_items(self):
+        conn = MagicMock()
+        conn.fetchval = AsyncMock(return_value=6)
+        conn.fetch = AsyncMock(return_value=[
+            {"user_id": 10, "nombre": "Calabaza", "cantidad": 2},
+            {"user_id": 10, "nombre": "Sombrero retirado", "cantidad": 1},
+            {"user_id": 11, "nombre": "Fantasma", "cantidad": 3},
+        ])
+        with patch.object(halloween.database, "pool", self._pool(conn)):
+            users, total = await halloween.get_craft_inventory_page(0, 5)
+        self.assertEqual(total, 6)
+        self.assertEqual([user["user_id"] for user in users], [10, 11])
+        self.assertEqual(users[0]["items"][1], {"nombre": "Sombrero retirado", "cantidad": 1})
+        self.assertEqual(conn.fetch.await_args.args[1:], (5, 0))
+        self.assertNotIn("active=TRUE", conn.fetch.await_args.args[0])
+
+    async def test_staff_craft_inventory_lists_five_users_per_page(self):
+        self.assertIn("inventarios_craft", [command.name for command in Staff.__cog_app_commands__])
+        view = CraftInventoryPaginationView(7)
+        users = [{"user_id": user_id, "items": [{"nombre": "Calabaza", "cantidad": 2}]}
+                 for user_id in range(1, 6)]
+        with patch("modules.staff.get_craft_inventory_page", new=AsyncMock(return_value=(users, 6))) as load:
+            embed = await view.get_embed()
+        load.assert_awaited_once_with(0, 5)
+        self.assertEqual(len(embed.fields), 5)
+        self.assertEqual(embed.fields[0].name, "<@1>")
+        self.assertIn("Calabaza — x2", embed.fields[0].value)
+        self.assertIn("Página 1/2", embed.footer.text)
+        self.assertTrue(view.anterior.disabled)
+        self.assertFalse(view.siguiente.disabled)
+        view.page = 1
+        with patch("modules.staff.get_craft_inventory_page", new=AsyncMock(return_value=(
+            [{"user_id": 6, "items": [{"nombre": "Fantasma", "cantidad": 1}]}], 6,
+        ))) as load:
+            second = await view.get_embed()
+        load.assert_awaited_once_with(5, 5)
+        self.assertEqual(len(second.fields), 1)
+        self.assertIn("Página 2/2", second.footer.text)
+        self.assertFalse(view.anterior.disabled)
+        self.assertTrue(view.siguiente.disabled)
 
     async def test_notice_is_separate_and_not_scheduled_for_deletion(self):
         channel = MagicMock()

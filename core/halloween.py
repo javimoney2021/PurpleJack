@@ -230,6 +230,44 @@ async def get_craft_items() -> list[dict]:
     return [dict(row) for row in rows]
 
 
+async def get_craft_inventory_page(offset: int, limit: int = 5) -> tuple[list[dict], int]:
+    """Lista propietarios de Craft desde PostgreSQL, sin consultar miembros de Discord."""
+    async with database.pool.acquire() as conn:
+        total = await conn.fetchval(
+            "SELECT COUNT(DISTINCT user_id) FROM halloween_craft_inventory "
+            "WHERE cantidad > 0"
+        )
+        rows = await conn.fetch(
+            """
+            WITH holders AS (
+                SELECT user_id
+                FROM halloween_craft_inventory
+                WHERE cantidad > 0
+                GROUP BY user_id
+                ORDER BY user_id
+                LIMIT $1 OFFSET $2
+            )
+            SELECT inv.user_id, craft.nombre, inv.cantidad
+            FROM holders
+            JOIN halloween_craft_inventory AS inv ON inv.user_id = holders.user_id
+            JOIN halloween_craft_items AS craft ON craft.id = inv.item_id
+            WHERE inv.cantidad > 0
+            ORDER BY inv.user_id, craft.nombre, craft.id
+            """,
+            limit,
+            offset,
+        )
+    users: dict[int, dict] = {}
+    for row in rows:
+        user_id = int(row["user_id"])
+        user = users.setdefault(user_id, {"user_id": user_id, "items": []})
+        user["items"].append({
+            "nombre": row["nombre"],
+            "cantidad": int(row["cantidad"]),
+        })
+    return list(users.values()), int(total or 0)
+
+
 async def delete_craft_item(item_id: int) -> str | None:
     """Retira el artículo del catálogo sin borrar copias ya canjeadas."""
     async with database.pool.acquire() as conn:
