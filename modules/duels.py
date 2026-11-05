@@ -30,7 +30,7 @@ GRID_SIZE = 5
 MAX_DUEL_BET = 5_000
 RETAL_THUMBNAIL = "https://pub-a09b3609b6b34dfab5c7aa7742cd1a8a.r2.dev/Purple%20jack%20Harcode/Kill_pj.png"
 WIN_THUMBNAIL = "https://pub-a09b3609b6b34dfab5c7aa7742cd1a8a.r2.dev/Purple%20jack%20Harcode/winpj.png"
-DUEL_LOCK_ROLE_ID = 1527103455313793136  # Rol bloqueado durante !retar
+DUEL_LOCK_ROLE_ID = 1527103455313793136  # Rol bloqueado durante /retar
 
 # ── GLOBAL STATE ───────────────────────────────────────
 _active_duels = set()  # {guild_id} para evitar múltiples duelos por servidor
@@ -73,6 +73,10 @@ class AcceptDuelView(discord.ui.View):
         self.session_id = None
         self.resolved = False
 
+    async def interaction_check(self, interaction: discord.Interaction) -> bool:
+        from bot import check_restricted_interaction
+        return await check_restricted_interaction(interaction)
+
     async def on_timeout(self):
         if self.resolved:
             return
@@ -91,7 +95,6 @@ class AcceptDuelView(discord.ui.View):
             )
         except discord.HTTPException:
             pass
-        self.ctx.command.reset_cooldown(self.ctx)
 
     @discord.ui.button(label="Aceptar Reto", style=discord.ButtonStyle.success)
     async def aceptar(self, interaction: discord.Interaction, button: discord.ui.Button):
@@ -262,7 +265,6 @@ class AcceptDuelView(discord.ui.View):
         await interaction.response.edit_message(embed=embed, view=None)
         
         # Resetear cooldown para que otros puedan retar
-        self.ctx.command.reset_cooldown(self.ctx)
         _last_duel_times.pop(self.ctx.guild.id, None)
         _active_duels.discard(self.ctx.guild.id)
         await clear_command_cooldown("guild", self.ctx.guild.id, "retar")
@@ -355,6 +357,10 @@ class DuelGameView(discord.ui.View):
         for y in range(GRID_SIZE):
             for x in range(GRID_SIZE):
                 self.add_item(DuelButton(x, y, self))
+
+    async def interaction_check(self, interaction: discord.Interaction) -> bool:
+        from bot import check_restricted_interaction
+        return await check_restricted_interaction(interaction)
 
     async def start_game(self):
         _active_duels.add(self.guild_id)
@@ -545,7 +551,6 @@ class Duels(commands.Cog):
     def __init__(self, bot):
         self.bot = bot
 
-    @commands.command(name="retar")
     async def retar(
         self,
         ctx,
@@ -574,7 +579,9 @@ class Duels(commands.Cog):
             timestamp = int(expira_en)
             return await ctx.reply(f"🚀 La Arena de combate esta ocupada por Jugadores de otros universos Intenta <t:{timestamp}:R>")
 
-        if ctx.message.reference is not None and amount_input is None:
+        if isinstance(target_input, discord.Member):
+            usuario = target_input
+        elif ctx.message.reference is not None and amount_input is None:
             usuario = await resolve_reply_member(ctx)
             amount_input = target_input
         else:
@@ -587,8 +594,7 @@ class Duels(commands.Cog):
 
         if usuario is None or monto is None:
             return await ctx.reply(
-                f"{ctx.author.mention} Formatos válidos: `!retar @usuario monto`, "
-                "`!retar ID monto` o responde a su mensaje con `!retar monto`."
+                f"{ctx.author.mention} Usa **/retar usuario apuesta**."
             )
 
         if ctx.author.id == usuario.id:
@@ -634,24 +640,6 @@ class Duels(commands.Cog):
             _active_duels.discard(ctx.guild.id)
             await clear_command_cooldown("guild", ctx.guild.id, "retar")
             raise
-
-    @retar.error
-    async def retar_error(self, ctx, error):
-        if ctx.guild is not None and not await _is_duel_enabled(ctx.guild.id):
-            return await ctx.reply(
-                "La Arena de batalla no se encuentra disponible por el momento."
-            )
-        if isinstance(error, (commands.MissingRequiredArgument, commands.TooManyArguments)):
-            await ctx.send(
-                f"{ctx.author.mention} Formatos válidos: `!retar @usuario monto`, "
-                "`!retar ID monto` o responde a su mensaje con `!retar monto`."
-            )
-        elif isinstance(error, commands.CommandOnCooldown):
-            retry_after = error.retry_after
-            timestamp = int(ctx.message.created_at.timestamp()) + int(retry_after)
-            await ctx.reply(f"🚀 La Arena de combate esta ocupada por Jugadores de otros universos Intenta <t:{timestamp}:R>")
-        else:
-            raise error
 
 
 async def setup(bot):

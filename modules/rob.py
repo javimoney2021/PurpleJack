@@ -16,13 +16,11 @@ from core.config import rob_config, COIN, ROB_VICTIM_PROTECTION_SECONDS
 from core import cache
 from core.cache import get_rob_cooldown, set_rob_cooldown
 from core.cd_boost import resolve_cd_boost, send_cd_boost_notice
-from core.rankings import get_balance_ranking
-from core.member_resolution import resolve_explicit_member, resolve_reply_member
+from core.member_resolution import resolve_explicit_member
 
 SABOTEADOR_EXITO_PROB = 0.60
 SABOTEADOR_ROBO_PORCENTAJE = 0.20
 SABOTEADOR_FALLO_PORCENTAJE = 0.15
-EVENT_ROB_VICTIM_PENALTY_PERCENT = 30
 
 
 def _format_rob_cooldown(seconds: int) -> str:
@@ -35,11 +33,6 @@ def _format_rob_cooldown(seconds: int) -> str:
     if minutos > 0:
         return f"{minutos}m {segs}s"
     return f"{segs}s"
-
-
-def _apply_event_victim_penalty(user_id: int, stolen_amount: int) -> None:
-    penalty = stolen_amount * EVENT_ROB_VICTIM_PENALTY_PERCENT // 100
-    cache.record_evento_balance_delta(user_id, -penalty)
 
 
 async def _reply_recent_victim(ctx, target: discord.Member) -> None:
@@ -64,52 +57,27 @@ class Rob(commands.Cog):
         await set_command_cooldown("user", user_id, "rob", expira_en)
         return cd_boost
 
-    async def _get_top_target(self, ctx, position: int):
-        """Valida únicamente al objetivo de la posición mostrada en !top."""
-        if ctx.guild is None:
-            return None
-        rankings = get_balance_ranking(limit=15)
-
-        if position > len(rankings):
-            return None
-        user_id = rankings[position - 1][0]
-        try:
-            return await ctx.guild.fetch_member(user_id)
-        except (discord.NotFound, discord.Forbidden, discord.HTTPException, discord.ClientException):
-            return None
-
-    @commands.command()
-    async def rob(self, ctx, target_input: str = None):
+    async def rob(self, ctx, target_input: discord.Member | str | None = None):
         if not rob_config["activa"]:
             return await ctx.send(
                 "🔫 Las calles están llenas de Sheriffs y Veteranos, "
                 "está siendo imposible atracar a alguien."
             )
 
-        target = None
-        if target_input is None:
-            target = await resolve_reply_member(ctx)
-            if target is None:
-                return await ctx.send(
-                    f"❌ {ctx.author.mention} Responde al mensaje de un usuario o usa "
-                    "`!rob @usuario`, `!rob ID` o `!rob <posición del top>`."
-                )
-        elif target_input.isdigit() and len(target_input) <= 2:
-            position = int(target_input)
-            if not 1 <= position <= 15:
-                return await ctx.send("❌ Indica una posición válida del **1** al **15**.")
-            target = await self._get_top_target(ctx, position)
-            if target is None:
-                return await ctx.send(
-                    f"❌ No se encontró un jugador disponible en la posición **{position}.**"
-                )
-        else:
+        if isinstance(target_input, discord.Member):
+            target = target_input
+        elif target_input is not None:
             target = await resolve_explicit_member(ctx.guild, target_input)
             if target is None:
                 return await ctx.send(
-                    "❌ No se pudo encontrar a ese usuario. Usa una mención, su ID, "
-                    "responde a su mensaje o indica una posición del Top 15."
+                    "❌ No se pudo encontrar a ese usuario. Usa /rob usuario o "
+                    "selecciona Apps → Robar en su mensaje."
                 )
+        else:
+            return await ctx.send(
+                "❌ Indica un usuario con **/rob usuario** o selecciona "
+                "**Apps → Robar** sobre su mensaje."
+            )
 
         if target == ctx.author:
             return await ctx.send(
@@ -195,7 +163,6 @@ class Rob(commands.Cog):
                     return await ctx.send(
                         "⚠️ El saldo del objetivo cambió durante el robo. Inténtalo de nuevo."
                     )
-                _apply_event_victim_penalty(target_id, monto_robo)
                 response_message = await ctx.message.reply(
                     f"😈 Logras romper la Protección del **Veterano** de {target_nick} "
                     f"y le sacas **{monto_robo:,}** {COIN}.",
@@ -227,7 +194,6 @@ class Rob(commands.Cog):
                     return await ctx.send(
                         "⚠️ El saldo del objetivo cambió durante el robo. Inténtalo de nuevo."
                     )
-                _apply_event_victim_penalty(target_id, monto_robo)
                 response_message = await ctx.message.reply(
                     f"✅ Robo exitoso. Le sacaste **{monto_robo:,}** {COIN} a {target.mention} "
                     f"sin que se diera cuenta."

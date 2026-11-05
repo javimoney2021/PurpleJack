@@ -1,11 +1,15 @@
 import asyncio
+import os
 import unittest
 from unittest.mock import AsyncMock, MagicMock, patch
+
+os.environ.setdefault("DISCORD_TOKEN", "test-token")
+os.environ.setdefault("DATABASE_URL", "postgresql://test:test@localhost/test")
 
 from core import halloween
 from modules.craft import CraftBuyButton, CraftConfirmButton, CraftLayout
 from modules.economy import FinanceView
-from modules.staff import CandyRankingView, CraftInventoryPaginationView, Staff
+from modules.staff import CandyRankingView, Staff
 
 
 class _AsyncContext:
@@ -23,64 +27,15 @@ class HalloweenTests(unittest.IsolatedAsyncioTestCase):
     def setUp(self):
         halloween._candy_balances.clear()
         halloween._user_locks.clear()
+        access_patch = patch("bot.check_player_access", new=AsyncMock(return_value=True))
+        access_patch.start()
+        self.addCleanup(access_patch.stop)
 
     def _pool(self, conn):
         pool = MagicMock()
         pool.acquire.return_value = _AsyncContext(conn)
         conn.transaction.return_value = _AsyncContext(None)
         return pool
-
-    async def test_victory_without_drop_records_zero_without_credit(self):
-        conn = MagicMock()
-        conn.fetchval = AsyncMock(return_value=0)
-        with patch.object(halloween.database, "pool", self._pool(conn)), \
-             patch.object(halloween.random, "random", return_value=0.9):
-            self.assertEqual(await halloween.award_candy(42, "work:1"), 0)
-        conn.fetchval.assert_awaited_once()
-        self.assertNotIn(42, halloween._candy_balances)
-
-    async def test_winning_roll_credits_once_in_db_and_ram(self):
-        conn = MagicMock()
-        conn.fetchval = AsyncMock(side_effect=[6, 11, None])
-        with patch.object(halloween.database, "pool", self._pool(conn)), \
-             patch.object(halloween.random, "random", return_value=0.1), \
-             patch.object(halloween.random, "randint", return_value=6) as draw:
-            self.assertEqual(await halloween.award_candy(42, "dados:1"), 6)
-            self.assertEqual(await halloween.award_candy(42, "dados:1"), 0)
-        draw.assert_called_with(4, 8)
-        self.assertEqual(halloween._candy_balances[42], 11)
-        self.assertEqual(conn.fetchval.await_count, 3)
-
-    async def test_defeat_grants_one_consolation_candy_once(self):
-        conn = MagicMock()
-        conn.fetchval = AsyncMock(side_effect=[1, 5, None])
-        with patch.object(halloween.database, "pool", self._pool(conn)), \
-             patch.object(halloween.random, "random") as chance, \
-             patch.object(halloween.random, "randint") as draw:
-            self.assertEqual(await halloween.award_candy(42, "crime:1", won=False), 1)
-            self.assertEqual(await halloween.award_candy(42, "crime:1", won=False), 0)
-        chance.assert_not_called()
-        draw.assert_not_called()
-        self.assertEqual(halloween._candy_balances[42], 5)
-
-    async def test_victory_drop_requires_less_than_sixty_percent(self):
-        conn = MagicMock()
-        conn.fetchval = AsyncMock(return_value=0)
-        with patch.object(halloween.database, "pool", self._pool(conn)), \
-             patch.object(halloween.random, "random", return_value=0.6), \
-             patch.object(halloween.random, "randint") as draw:
-            self.assertEqual(await halloween.award_candy(42, "work:2"), 0)
-        draw.assert_not_called()
-
-    async def test_staff_candy_credit_is_atomic_and_updates_ram(self):
-        conn = MagicMock()
-        conn.fetchval = AsyncMock(return_value=17)
-        with patch.object(halloween.database, "pool", self._pool(conn)):
-            self.assertEqual(await halloween.add_candy_balance(42, 5), 17)
-        self.assertEqual(halloween._candy_balances[42], 17)
-        self.assertIn("ON CONFLICT (user_id) DO UPDATE", conn.fetchval.await_args.args[0])
-        with self.assertRaises(ValueError):
-            await halloween.add_candy_balance(42, 0)
 
     async def test_candy_ranking_page_reads_sorted_persistent_balance(self):
         conn = MagicMock()
@@ -94,7 +49,7 @@ class HalloweenTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_staff_candy_ranking_paginates_ten_users(self):
         self.assertIn("dulces_balance", [command.name for command in Staff.__cog_app_commands__])
-        self.assertIn("add_candy", [command.name for command in Staff.__cog_app_commands__])
+        self.assertNotIn("add_candy", [command.name for command in Staff.__cog_app_commands__])
         view = CandyRankingView(7)
         rows = [{"user_id": user_id, "balance": 100 - user_id}
                 for user_id in range(1, 11)]
@@ -115,81 +70,6 @@ class HalloweenTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("Página 2/2", second.footer.text)
         self.assertTrue(view.siguiente.disabled)
         self.assertFalse(view.anterior.disabled)
-
-    async def test_craft_inventory_page_groups_five_owners_and_keeps_retired_items(self):
-        conn = MagicMock()
-        conn.fetchval = AsyncMock(return_value=6)
-        conn.fetch = AsyncMock(return_value=[
-            {"user_id": 10, "nombre": "Calabaza", "cantidad": 2},
-            {"user_id": 10, "nombre": "Sombrero retirado", "cantidad": 1},
-            {"user_id": 11, "nombre": "Fantasma", "cantidad": 3},
-        ])
-        with patch.object(halloween.database, "pool", self._pool(conn)):
-            users, total = await halloween.get_craft_inventory_page(0, 5)
-        self.assertEqual(total, 6)
-        self.assertEqual([user["user_id"] for user in users], [10, 11])
-        self.assertEqual(users[0]["items"][1], {"nombre": "Sombrero retirado", "cantidad": 1})
-        self.assertEqual(conn.fetch.await_args.args[1:], (5, 0))
-        self.assertNotIn("active=TRUE", conn.fetch.await_args.args[0])
-
-    async def test_staff_craft_inventory_lists_five_users_per_page(self):
-        self.assertIn("inventarios_craft", [command.name for command in Staff.__cog_app_commands__])
-        guild = MagicMock()
-        view = CraftInventoryPaginationView(7, guild)
-        users = [{"user_id": user_id, "items": [{"nombre": "Calabaza", "cantidad": 2}]}
-                 for user_id in range(1, 6)]
-        member = MagicMock(nick="Piloto")
-        with patch("modules.staff.get_craft_inventory_page", new=AsyncMock(return_value=(users, 6))) as load, \
-             patch("modules.staff.resolve_guild_member", new=AsyncMock(return_value=member)) as resolve:
-            embed = await view.get_embed()
-        load.assert_awaited_once_with(0, 5)
-        self.assertEqual(resolve.await_count, 5)
-        self.assertEqual(len(embed.fields), 5)
-        self.assertEqual(embed.fields[0].name, "👤 Piloto")
-        self.assertIn("Calabaza — x2", embed.fields[0].value)
-        self.assertIn("Página 1/2", embed.footer.text)
-        self.assertTrue(view.anterior.disabled)
-        self.assertFalse(view.siguiente.disabled)
-        view.page = 1
-        with patch("modules.staff.get_craft_inventory_page", new=AsyncMock(return_value=(
-            [{"user_id": 6, "items": [{"nombre": "Fantasma", "cantidad": 1}]}], 6,
-        ))) as load, patch("modules.staff.resolve_guild_member", new=AsyncMock(return_value=member)):
-            second = await view.get_embed()
-        load.assert_awaited_once_with(5, 5)
-        self.assertEqual(len(second.fields), 1)
-        self.assertIn("Página 2/2", second.footer.text)
-        self.assertFalse(view.anterior.disabled)
-        self.assertTrue(view.siguiente.disabled)
-
-    async def test_craft_inventory_name_falls_back_to_saved_name_without_member(self):
-        view = CraftInventoryPaginationView(7, None)
-        with patch("modules.staff.resolve_guild_member", new=AsyncMock(return_value=None)) as resolve, \
-             patch("modules.staff.cache.get_member_name", return_value="Nick guardado"):
-            self.assertEqual(await view._display_name(42), "Nick guardado")
-            self.assertEqual(await view._display_name(42), "Nick guardado")
-        resolve.assert_awaited_once_with(None, 42)
-
-    async def test_notice_is_separate_and_not_scheduled_for_deletion(self):
-        channel = MagicMock()
-        channel.send = AsyncMock()
-        with patch.object(halloween, "award_candy", new=AsyncMock(return_value=3)):
-            await halloween.award_and_notify(channel, 42, "bj:1")
-        args, kwargs = channel.send.await_args
-        self.assertIn("<@42>", args[0])
-        self.assertIn("3 <:Candy:1558963919492481055>", args[0])
-        self.assertNotIn("delete_after", kwargs)
-
-    async def test_defeat_notice_says_consolation(self):
-        channel = MagicMock()
-        channel.send = AsyncMock()
-        with patch.object(halloween, "award_candy", new=AsyncMock(return_value=1)) as award:
-            await halloween.award_and_notify(channel, 42, "bj:1", won=False)
-        award.assert_awaited_once_with(42, "bj:1", won=False)
-        message = channel.send.await_args.args[0]
-        self.assertIn("<@42>", message)
-        self.assertIn("Premio de consolación", message)
-        self.assertIn("1 <:Candy:1558963919492481055>", message)
-        self.assertNotIn("delete_after", channel.send.await_args.kwargs)
 
     async def test_craft_purchase_is_atomic_and_capped(self):
         conn = MagicMock()

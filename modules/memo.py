@@ -14,6 +14,7 @@ from core.database import (
     refund_wager,
 )
 from core.config import COIN, memo_config
+from core.game_reminders import send_game_reminder_prompt
 
 logger = logging.getLogger("purplejack.memo")
 
@@ -57,6 +58,10 @@ class MemoView(discord.ui.View):
         # varias pestañas o latencia de Discord).
         self._interaction_lock = asyncio.Lock()
         self._build_buttons()
+
+    async def interaction_check(self, interaction: discord.Interaction) -> bool:
+        from bot import check_restricted_interaction
+        return await check_restricted_interaction(interaction)
 
     def _build_buttons(self):
         self.clear_items()
@@ -112,6 +117,13 @@ class MemoView(discord.ui.View):
             await self.message.delete()
         except (discord.HTTPException, discord.NotFound):
             pass
+
+    async def _start_cooldown(self):
+        """Inicia el CD solo tras liquidar una victoria o derrota."""
+        expira_en = time.time() + memo_config["cooldown"]
+        await set_command_cooldown("user", self.author.id, "memo", expira_en)
+        _memo_cooldowns[self.author.id] = expira_en
+        return expira_en
 
     def _make_callback(self, idx: int):
         async def callback(interaction: discord.Interaction):
@@ -173,6 +185,11 @@ class MemoView(discord.ui.View):
                         if not settlement.get("ok"):
                             raise RuntimeError(f"No se pudo liquidar Memo: {settlement.get('reason')}")
                         self._wager_finalizada = True
+                        expires_at = None
+                        try:
+                            expires_at = await self._start_cooldown()
+                        except Exception:
+                            logger.exception("Memo %s terminó sin poder guardar el cooldown.", self.wager_id)
                         embed = self._build_embed(
                             estado=(
                                 f"🏆 ¡Ganaste! Recibes **+{recompensa_total}** {COIN} en total "
@@ -185,6 +202,10 @@ class MemoView(discord.ui.View):
                         _active_memo.discard(self.author.id)
                         await self._editar_tablero(interaction, embed=embed)
                         asyncio.create_task(self._programar_eliminacion())
+                        if expires_at is not None:
+                            await send_game_reminder_prompt(
+                                interaction, self.author.id, "memo", expires_at,
+                            )
                         return
 
                     self.bloqueado = False
@@ -200,6 +221,11 @@ class MemoView(discord.ui.View):
                     if not settlement.get("ok"):
                         raise RuntimeError(f"No se pudo liquidar Memo: {settlement.get('reason')}")
                     self._wager_finalizada = True
+                    expires_at = None
+                    try:
+                        expires_at = await self._start_cooldown()
+                    except Exception:
+                        logger.exception("Memo %s terminó sin poder guardar el cooldown.", self.wager_id)
                     self.revelado = [True] * 16
                     self._build_buttons()
                     self._deshabilitar_todo()
@@ -211,6 +237,10 @@ class MemoView(discord.ui.View):
                     _active_memo.discard(self.author.id)
                     await self._editar_tablero(interaction, embed=embed)
                     asyncio.create_task(self._programar_eliminacion())
+                    if expires_at is not None:
+                        await send_game_reminder_prompt(
+                            interaction, self.author.id, "memo", expires_at,
+                        )
                     return
 
                 # Las dos incorrectas quedan visibles brevemente y el lock
@@ -317,7 +347,6 @@ class Memo(commands.Cog):
     def __init__(self, bot):
         self.bot = bot
 
-    @commands.command(name="memo")
     async def memo(self, ctx, monto: int = None):
         user_id = ctx.author.id
         now     = time.time()
@@ -337,7 +366,7 @@ class Memo(commands.Cog):
         if monto is None:
             nick = ctx.author.nick or ctx.author.display_name
             return await ctx.reply(
-                f"❌ **{nick}** Formato correcto: `!memo {{monto}}`",
+                f"❌ **{nick}** Abre **/jugar apuesta** y selecciona **Memo**.",
                 mention_author=False,
             )
         if not memo_config["activa"]:
@@ -372,17 +401,22 @@ class Memo(commands.Cog):
             "memo",
             monto,
             expires_in=180,
+            idempotency_key=f"memo:interaction:{ctx.message.id}",
+            exclusive_pending=True,
         )
         if not wager["ok"]:
+            if wager.get("reason") == "duplicate_request":
+                return
+            if wager.get("reason") == "already_pending":
+                return await ctx.send(
+                    f"❌ {ctx.author.mention} Ya tienes una partida de Memo en curso."
+                )
             return await ctx.send(
                 f"❌ {ctx.author.mention} No tienes suficiente balance. "
                 f"Necesitas **{monto}** {COIN}."
             )
 
-        expira_en = now + memo_config["cooldown"]
         try:
-            _memo_cooldowns[user_id] = expira_en
-            await set_command_cooldown("user", user_id, "memo", expira_en)
             _active_memo.add(user_id)
             view = MemoView(ctx.author, monto, tablero, wager["id"])
             msg = await ctx.send(embed=view._build_embed(), view=view)
@@ -391,16 +425,6 @@ class Memo(commands.Cog):
             _active_memo.discard(user_id)
             await refund_wager(wager["id"])
             raise
-
-    @memo.error
-    async def memo_error(self, ctx, error):
-        if isinstance(error, commands.BadArgument):
-            await ctx.send(
-                f"❌ {ctx.author.mention} El monto debe ser un número entero. "
-                f"Formato: `!memo {{monto}}`"
-            )
-        else:
-            raise error
 
 
 async def setup(bot):

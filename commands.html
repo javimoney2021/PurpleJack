@@ -21,47 +21,33 @@
   <header class="topbar"><div class="shell bar"><a class="brand" href="index.html">PURPLEJACK</a><a class="toplink" href="#juegos">Juegos</a><a class="doc-switch" href="terms.html">Términos</a><a class="doc-switch" href="privacy.html">Privacidad</a></div></header>
   <div class="shell">
     <section class="hero" aria-labelledby="titulo">
-      <div class="hero-copy"><span class="kicker">Motor de la Nave · Guía pública</span><h1 id="titulo">PurpleJack<br>Comandos</h1><p class="lead">Explora las funciones de economía, empleos, inventario y entretenimiento disponibles para la tripulación. El prefijo principal para comandos de usuario es <strong>!</strong>.</p></div>
+      <div class="hero-copy"><span class="kicker">Motor de la Nave · Guía pública</span><h1 id="titulo">PurpleJack<br>Comandos</h1><p class="lead">Explora las funciones de economía, empleos, inventario y entretenimiento disponibles para la tripulación. Los paneles se abren con comandos de barra y sus botones.</p></div>
       <div class="hero-art"><img src="assets/purplejack-character.jpg" alt="Personaje anfitrión de PurpleJack con ambientación morada espacial"><span>ANFITRIÓN DE LA NAVE</span></div>
     </section>
     <nav class="nav" aria-label="Categorías de comandos"><a href="#economia">Economía</a><a href="#empleos">Empleos</a><a href="#tienda">Inventario</a><a href="#juegos">Juegos</a><a href="#cuenta">Cuenta</a></nav>
     <main id="contenido">
-      <div class="toolbar"><label for="buscar" class="skip">Buscar comandos</label><input class="search" id="buscar" type="search" placeholder="Buscar un comando o función…" autocomplete="off"><span class="count" id="contador">26 comandos disponibles</span></div>
+      <div class="toolbar"><label for="buscar" class="skip">Buscar comandos</label><input class="search" id="buscar" type="search" placeholder="Buscar un comando o función…" autocomplete="off"><span class="count" id="contador">12 comandos disponibles</span></div>
 
       <section class="section" id="economia"><div class="section-head"><div><span class="section-tag">01 · Recursos</span><h2>Economía y progreso</h2></div><p>Consulta tus recursos, posiciones y recompensas.</p></div><div class="commands">
-        <article class="command"><code>!bal</code><span>Consulta tu balance disponible y el dinero guardado en el banco.</span></article>
-        <article class="command"><code>!cd</code><span>Muestra los cooldowns que tienes activos y su tiempo restante.</span></article>
-        <article class="command"><code>!top</code><span>Consulta la clasificación de los balances más altos.</span></article>
-        <article class="command"><code>!evento</code><span>Muestra la clasificación vigente del evento.</span></article>
-        <article class="command"><code>!collect</code><span>Reclama la recompensa disponible según tu rol.</span></article>
-        <article class="command"><code>!exp</code><span>Consulta tu experiencia laboral y progreso profesional.</span></article>
+        <article class="command"><code>/consultar</code><span>Abre Balance, inventario, cooldowns, ranking económico, tiempo e información de artículos.</span></article>
+        <article class="command"><code>/collect</code><span>Reclama la recompensa disponible según tu rol.</span></article>
       </div></section>
 
       <section class="section" id="empleos"><div class="section-head"><div><span class="section-tag">02 · Profesiones</span><h2>Empleos y jornadas</h2></div><p>Trabaja, especialízate y desarrolla maestrías.</p></div><div class="commands">
-        <article class="command"><code>!work</code><span>Realiza un trabajo económico básico y recibe su resultado.</span></article>
-        <article class="command"><code>!crime</code><span>Intenta un crimen virtual con posibilidad de ganar o perder monedas.</span></article>
-        <article class="command"><code>!empleos</code><span>Consulta la lista de empleos disponibles y sus requisitos.</span></article>
-        <article class="command"><code>!aplicar</code><span>Solicita el empleo indicado cuando cumples sus condiciones.</span></article>
-        <article class="command"><code>!renunciar</code><span>Abandona tu empleo actual y activa la espera correspondiente.</span></article>
-        <article class="command"><code>!oficina</code><span>Accede al panel de empleos especializados y de maestría.</span></article>
-        <article class="command"><code>!trabajar</code><span>Inicia la jornada interactiva del empleo que posees.</span></article>
+        <article class="command"><code>/work</code><span>Realiza un trabajo económico básico y recibe su resultado.</span></article>
+        <article class="command"><code>/crime</code><span>Intenta un crimen virtual con posibilidad de ganar o perder monedas.</span></article>
+        <article class="command"><code>/trabajar</code><span>Abre el centro laboral: jornada, aplicación, renuncia, oficina, empleos y XP.</span></article>
       </div></section>
 
       <section class="section" id="tienda"><div class="section-head"><div><span class="section-tag">03 · Colección</span><h2>Tienda e inventario</h2></div><p>Compra, consulta y administra tus artículos virtuales.</p></div><div class="commands">
-        <article class="command"><code>!tienda</code><span>Abre el catálogo de artículos disponibles para comprar.</span></article>
-        <article class="command"><code>!info</code><span>Muestra la información y propiedades de un artículo.</span></article>
-        <article class="command"><code>!inv</code><span>Abre tu inventario paginado y permite usar artículos compatibles.</span></article>
-        <article class="command"><code>!time</code><span>Consulta el tiempo restante de tus artículos temporales.</span></article>
+        <article class="command"><code>/tienda</code><span>Abre directamente el catálogo interactivo de artículos.</span></article>
       </div></section>
 
       <section class="section" id="juegos"><div class="section-head"><div><span class="section-tag">04 · Competición</span><h2>Juegos y desafíos</h2></div><p>Apuestas exclusivamente virtuales, sin valor monetario real.</p></div><div class="commands">
-        <article class="command"><code>!dados</code><span>Juega una ronda de dados contra el bot con una apuesta virtual.</span></article>
-        <article class="command"><code>!ruleta</code><span>Realiza una apuesta virtual en la ruleta.</span></article>
-        <article class="command"><code>!bj</code><span>Juega una partida de Blackjack contra el dealer.</span></article>
-        <article class="command"><code>!memo</code><span>Inicia el juego interactivo de memoria por parejas.</span></article>
-        <article class="command"><code>!carrera</code><span>Convoca una carrera y permite que otros corredores se unan.</span></article>
-        <article class="command"><code>!retar</code><span>Desafía a otro miembro a un duelo con monedas virtuales.</span></article>
-        <article class="command"><code>!rob</code><span>Intenta robar monedas virtuales a otro miembro elegible.</span></article>
+        <article class="command"><code>/jugar</code><span>Abre el panel de Ruleta, Dados, Blackjack y Memo con la apuesta elegida.</span></article>
+        <article class="command"><code>/carrera</code><span>Convoca una carrera y permite que otros corredores se unan.</span></article>
+        <article class="command"><code>/retar</code><span>Desafía a otro miembro a un duelo con monedas virtuales.</span></article>
+        <article class="command"><code>/rob</code><span>Intenta robar monedas virtuales a otro miembro elegible.</span></article>
       </div></section>
 
       <section class="section slash" id="cuenta"><div class="section-head"><div><span class="section-tag">05 · Información</span><h2>Cuenta, ayuda y privacidad</h2></div><p>Estas funciones se ejecutan como comandos de barra.</p></div><div class="commands">

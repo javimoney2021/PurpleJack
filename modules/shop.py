@@ -175,11 +175,17 @@ class ConfirmBuyView(discord.ui.View):
         if interaction.user.id != self.author_id:
             return await interaction.response.send_message("❌ No es tu confirmación.", ephemeral=True)
 
+        from bot import check_restricted_interaction
+        if not await check_restricted_interaction(interaction):
+            return
+
         await interaction.response.defer(ephemeral=True)
 
         for item in self.children:
             item.disabled = True
 
+        purchase_completed = False
+        result_shown = False
         try:
             tiene_tarjeta = any(r.id == TARJETA_CREDITO_ROL_ID for r in interaction.user.roles)
             purchase = await purchase_item(
@@ -244,6 +250,7 @@ class ConfirmBuyView(discord.ui.View):
                 )
 
             item_fresh = purchase["item"]
+            purchase_completed = True
             precio_unitario = purchase["precio_unitario"]
             total = purchase["total"]
             cantidad_compra = purchase["cantidad_compra"]
@@ -257,7 +264,7 @@ class ConfirmBuyView(discord.ui.View):
                 await interaction.edit_original_response(
                     content=(
                         f"✅ **{nombre_display}** Has comprado **{cantidad_compra}x {icono} {item_fresh['nombre']}** "
-                        f"por **{total}** {COIN} exitosamente. Consulta tu `!inv` para verificarlo.\n"
+                        f"por **{total}** {COIN} exitosamente. Usa /consultar → Inventario para verificarlo.\n"
                         f"💳 Por poseer **Tarjeta de Credito** Recibes: **{cashback}** {COIN} de Cashback depositado en tu banco."
                     ),
                     view=self
@@ -266,10 +273,11 @@ class ConfirmBuyView(discord.ui.View):
                 await interaction.edit_original_response(
                     content=(
                         f"✅ **{nombre_display}** Has comprado **{cantidad_compra}x {icono} {item_fresh['nombre']}** "
-                        f"por **{total}** {COIN} exitosamente. Consulta tu `!inv` para verificarlo."
+                        f"por **{total}** {COIN} exitosamente. Usa /consultar → Inventario para verificarlo."
                     ),
                     view=self
                 )
+            result_shown = True
 
             # ── Log de compra ──────────────────────────
             log_channel = self.bot.get_channel(LOG_CHANNEL_ID)
@@ -279,12 +287,22 @@ class ConfirmBuyView(discord.ui.View):
                     f"🛒 **{nombre_log}** compró {cantidad_compra}x {icono} **{item_fresh['nombre']}** por **{total}** {COIN}"
                 )
 
-        except Exception as e:
-            logger.error(f"ERROR ConfirmBuyView confirmar: {e}")
+        except Exception:
+            logger.exception("ERROR ConfirmBuyView confirmar para usuario %s", interaction.user.id)
             try:
-                await interaction.edit_original_response(content="❌ Error al procesar la compra.", view=self)
-            except Exception:
-                pass
+                if purchase_completed:
+                    if not result_shown:
+                        await interaction.followup.send(
+                            "✅ La compra fue procesada, pero no pude actualizar la confirmación. "
+                            "Abre **/consultar** → **Inventario** para comprobarla antes de comprar otra vez.",
+                            ephemeral=True,
+                        )
+                else:
+                    await interaction.edit_original_response(
+                        content="❌ Error al procesar la compra.", view=self,
+                    )
+            except discord.HTTPException:
+                logger.warning("No se pudo avisar del resultado de compra a %s", interaction.user.id)
 
     @discord.ui.button(label="Cancelar", style=discord.ButtonStyle.danger)
     async def cancelar(self, interaction: discord.Interaction, button: discord.ui.Button):
@@ -321,6 +339,9 @@ class QuantityModal(discord.ui.Modal):
         self.add_item(self.cantidad_input)
 
     async def on_submit(self, interaction: discord.Interaction):
+        from bot import check_player_access
+        if not await check_player_access(interaction):
+            return
         # ── Validar que sea un número entero positivo ──────────
         try:
             unidades = int(self.cantidad_input.value.strip())
@@ -465,6 +486,10 @@ class TiendaLayout(discord.ui.LayoutView):
         self.expires_at = time.time() + SHOP_EXPIRE_SECONDS
         self._build()
 
+    async def interaction_check(self, interaction: discord.Interaction) -> bool:
+        from bot import check_player_access
+        return await check_player_access(interaction)
+
     def is_shop_expired(self) -> bool:
         return time.time() >= self.expires_at
 
@@ -485,7 +510,7 @@ class TiendaLayout(discord.ui.LayoutView):
 
         container.add_item(discord.ui.TextDisplay(
             f"## 🛒 TIENDA - NAVE SUS\n"
-            f"<@{self.author_id}> Compra el item de tu preferencia o Usa `!info [nombre]` para ver la info completa del item.\n"
+            f"<@{self.author_id}> Compra el item de tu preferencia o abre **/consultar** → **Info** para ver sus detalles.\n"
         ))
         container.add_item(discord.ui.Separator())
 
@@ -535,43 +560,6 @@ class TiendaLayout(discord.ui.LayoutView):
 
     async def on_timeout(self):
         pass
-
-
-class OpenShopView(discord.ui.View):
-    def __init__(self, author_id: int, bot, command_message: discord.Message):
-        super().__init__(timeout=60)
-        self.author_id = author_id
-        self.bot = bot
-        self.command_message = command_message
-
-    @discord.ui.button(label="Abrir Tienda", style=discord.ButtonStyle.success)
-    async def abrir_tienda(self, interaction: discord.Interaction, button: discord.ui.Button):
-        if interaction.user.id != self.author_id:
-            return await interaction.response.send_message(
-                "❌ Este panel no fue generado por ti.", ephemeral=True
-            )
-
-        items = await get_all_items()
-        if not items:
-            return await interaction.response.send_message(
-                "🛒 La tienda está vacía por ahora.", ephemeral=True
-            )
-
-        items = sorted(items, key=lambda i: i["precio"])
-        await interaction.response.send_message(
-            view=TiendaLayout(items, interaction.user.id, self.bot),
-            ephemeral=True
-        )
-
-        asyncio.create_task(self._delete_public_messages(interaction.message))
-
-    async def _delete_public_messages(self, prompt_message: discord.Message):
-        await asyncio.sleep(3)
-        for message in (prompt_message, self.command_message):
-            try:
-                await message.delete()
-            except Exception:
-                pass
 
 
 # ── BOTON DE USAR ITEM (inventario) ───────────────────
@@ -884,25 +872,22 @@ class UseButton(discord.ui.Button):
                 )
             if consumption.get("cd_boost"):
                 mensaje += (
-                    "\n⚡ Cooldowns de **!work, !crime, !dados y !rob** "
+                    "\n⚡ Cooldowns de **/work, /crime, Dados (/jugar) y /rob** "
                     "reducidos al **50%** hasta "
                     f"<t:{int(consumption['cd_boost']['expires_at'])}:F>."
                 )
 
+            # El consumo ya fue confirmado: una falla visual no debe parecer
+            # un fallo del artículo ni provocar un segundo uso por confusión.
+            if not await _refresh_inventory_after_use(self.view, interaction.user.id):
+                mensaje += (
+                    "\nEl artículo se aplicó, pero el panel ya no pudo actualizarse. "
+                    "Abre **/consultar** → **Inventario** para ver el estado actual."
+                )
             await interaction.followup.send(
                 content=f"{interaction.user.mention} {mensaje}",
-                ephemeral=True
+                ephemeral=True,
             )
-
-            # Recargar inventario real y reconstruir el layout
-            items_actualizados = await get_inventory(interaction.user.id)
-            inv_view: InventarioLayout = self.view
-            if items_actualizados:
-                inv_view.items = items_actualizados
-                inv_view._build()
-                await interaction.message.edit(view=inv_view)
-            else:
-                await interaction.message.delete()
 
         except Exception:
             logger.exception(
@@ -926,8 +911,8 @@ class UseButton(discord.ui.Button):
             try:
                 if consumed:
                     await interaction.followup.send(
-                        f"✅ **{self.item['nombre']} fue utilizado correctamente**, "
-                        "pero no pude actualizar el panel del inventario.",
+                        f"✅ **{self.item['nombre']} fue utilizado correctamente**. "
+                        "Abre **/consultar** → **Inventario** para comprobar el estado actual.",
                         ephemeral=True,
                     )
                 else:
@@ -945,6 +930,30 @@ class UseButton(discord.ui.Button):
 
 
 # ── INVENTARIO LAYOUT ──────────────────────────────────
+
+async def _refresh_inventory_after_use(view: "InventarioLayout", user_id: int) -> bool:
+    """Refresca el mensaje original sin afectar el consumo ya confirmado."""
+    try:
+        items = await get_inventory(user_id)
+        message = view.message
+        if message is None:
+            return False
+        if items:
+            view.items = items
+            view._build()
+            await message.edit(view=view)
+        else:
+            view.stop()
+            await message.delete()
+        return True
+    except discord.NotFound:
+        return False  # Panel efímero eliminado o vencido; el uso ya quedó aplicado.
+    except discord.HTTPException as error:
+        logger.warning("No se pudo refrescar el inventario de %s: %s", user_id, error)
+        return False
+    except Exception:
+        logger.exception("No se pudo refrescar el inventario de %s tras usar un item", user_id)
+        return False
 
 class InventoryPrevButton(discord.ui.Button):
     def __init__(self):
@@ -995,8 +1004,13 @@ class InventarioLayout(discord.ui.LayoutView):
         self.author_id = author_id
         self.guild = guild
         self.bot = bot
+        self.message: discord.Message | discord.WebhookMessage | None = None
         self.page = 0
         self._build()
+
+    async def interaction_check(self, interaction: discord.Interaction) -> bool:
+        from bot import check_player_access
+        return await check_player_access(interaction)
 
     def _build(self):
         try:
@@ -1096,6 +1110,9 @@ class Shop(commands.Cog):
         self._item_expiration_task = None
 
     async def cog_load(self):
+        from settings import TEST_MODE
+        if TEST_MODE:
+            return
         if self._item_use_log_task is None or self._item_use_log_task.done():
             self._item_use_log_task = asyncio.create_task(
                 self._item_use_log_worker(),
@@ -1146,7 +1163,7 @@ class Shop(commands.Cog):
                         channel = await self.bot.fetch_channel(ITEM_EXPIRATION_CHANNEL_ID)
                     if hasattr(channel, "send"):
                         await channel.send(
-                            "Varios items vencidos fueron retirados y reestablecidos al Stock en **!tienda** 😉"
+                            "Varios items vencidos fueron retirados y reestablecidos al Stock en **/tienda** 😉"
                         )
                 if retiradas:
                     logger.info(
@@ -1160,43 +1177,9 @@ class Shop(commands.Cog):
                 logger.exception("Error procesando vencimientos de inventario")
             await asyncio.sleep(ITEM_EXPIRATION_WORKER_SECONDS)
 
-    async def cog_command_error(self, ctx, error):
-        if isinstance(error, commands.CommandOnCooldown):
-            retry = int(error.retry_after)
-            if retry >= 60:
-                tiempo = f"{retry // 60}m {retry % 60}s" if retry % 60 else f"{retry // 60}m"
-            else:
-                tiempo = f"{retry}s"
-            await ctx.send(
-                f"⏳ {ctx.author.mention} Podrás usar este comando de nuevo en **{tiempo}**.",
-                delete_after=10
-            )
-        else:
-            raise error
-
-    @commands.command()
-    @commands.cooldown(1, 30, commands.BucketType.user)
-    async def tienda(self, ctx):
-        items = await get_all_items()
-        if not items:
-            return await ctx.send("🛒 La tienda está vacía por ahora.")
-
-        embed = discord.Embed(
-            title="🛒 Tienda de Articulos - Nave SUS",
-            description=(
-                "Ingresa ahora a la tienda de articulos exclusivos de la **Nave**\n"
-                "Exp del Servidor, Roles, Oroestrellas y mas !!!"
-            ),
-            color=discord.Color.blue()
-        )
-        embed.set_thumbnail(url=ctx.author.display_avatar.url)
-        embed.set_footer(text="Presiona Abrir Tienda para revisar el stock disponible.")
-        await ctx.message.reply(embed=embed, view=OpenShopView(ctx.author.id, self.bot, ctx.message))
-
-    @commands.command()
     async def info(self, ctx, *, nombre: str = None):
         if nombre is None:
-            return await ctx.send(f"❌ Formato: `!info {{nombre del item}}`")
+            return await ctx.send("❌ Abre **/consultar** → **Info** e indica el nombre del artículo.")
 
         item = await get_item_by_name(nombre)
         if not item:
@@ -1248,7 +1231,6 @@ class Shop(commands.Cog):
 
         await ctx.send(embed=embed)
 
-    @commands.command(name="time")
     async def tiempo_restante(self, ctx):
         cargos = cache.get_cargos_cache().get(ctx.author.id, [])
         ahora = time.time()
@@ -1287,7 +1269,6 @@ class Shop(commands.Cog):
 
         await ctx.reply(embed=embed)
 
-    @commands.command(name="inv")
     async def inventario(self, ctx):
         try:
             items = await get_inventory(ctx.author.id)
@@ -1297,6 +1278,7 @@ class Shop(commands.Cog):
             import asyncio
             view = InventarioLayout(items, ctx.author.id, ctx.guild, self.bot)
             msg = await ctx.send(view=view)
+            view.message = msg
 
             async def auto_delete():
                 await asyncio.sleep(60)

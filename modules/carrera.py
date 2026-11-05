@@ -125,6 +125,10 @@ class JoinRaceView(discord.ui.View):
         self.started = False
         self.join_lock = asyncio.Lock()
 
+    async def interaction_check(self, interaction: discord.Interaction) -> bool:
+        from bot import check_restricted_interaction
+        return await check_restricted_interaction(interaction)
+
     def build_embed(self, countdown=None):
         inscritos = "\n".join(
             f"🏎️ {p.display_name}"
@@ -255,6 +259,10 @@ class SoloVsJackView(discord.ui.View):
         self.wagers = wagers
         self.message = None
         self.resolved = False
+
+    async def interaction_check(self, interaction: discord.Interaction) -> bool:
+        from bot import check_restricted_interaction
+        return await check_restricted_interaction(interaction)
 
     async def _reject_other_user(self, interaction):
         await interaction.response.send_message(
@@ -569,13 +577,12 @@ class Carrera(commands.Cog):
     def __init__(self, bot):
         self.bot = bot
 
-    @commands.command(name="carrera")
     async def carrera(self, ctx, monto: int = None):
         if not _carrera_activa:
             return await ctx.send(f"❌ {ctx.author.mention} El sistema de carreras está desactivado.")
 
         if monto is None:
-            return await ctx.send(f"❌ {ctx.author.mention} Formato correcto: `!carrera {{monto}}`")
+            return await ctx.send(f"❌ {ctx.author.mention} Usa **/carrera apuesta**.")
 
         if monto < 100:
             return await ctx.message.reply(
@@ -700,20 +707,6 @@ class Carrera(commands.Cog):
         await interaction.followup.send(
             f"🏎️ Sistema de Carreras: **{estado}**", ephemeral=False
         )
-
-    @carrera.error
-    async def carrera_error(self, ctx, error):
-        if isinstance(error, commands.MissingRequiredArgument):
-            await ctx.send(f"❌ {ctx.author.mention} Formato correcto: `!carrera {{monto}}`")
-        elif isinstance(error, commands.CommandOnCooldown):
-            retry = int(error.retry_after)
-            tiempo = f"{retry // 60}m {retry % 60}s" if retry >= 60 else f"{retry}s"
-            await ctx.send(
-                f"⏳ {ctx.author.mention} Podrás convocar otra carrera en **{tiempo}**.",
-                delete_after=10
-            )
-        else:
-            raise error
 
 
 async def setup(bot):

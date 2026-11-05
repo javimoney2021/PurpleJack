@@ -7,6 +7,7 @@ import discord
 from discord.ext import commands
 
 from core import cache
+from core.game_reminders import send_game_reminder_prompt
 from core.config import COIN, blackjack_config
 from core.database import (
     refund_wager,
@@ -90,6 +91,7 @@ class BlackjackGame:
         self.dealer: list[tuple[str, str]] = []
         self.cooldown = int(blackjack_config["cooldown"])
         self.message: discord.Message | None = None
+        self.source_interaction: discord.Interaction | None = None
         self.finished = False
         self.processing = False
         self.action_lock = asyncio.Lock()
@@ -146,7 +148,8 @@ class BlackjackView(discord.ui.View):
 
     async def interaction_check(self, interaction: discord.Interaction) -> bool:
         if interaction.user.id == self.game.user_id:
-            return True
+            from bot import check_restricted_interaction
+            return await check_restricted_interaction(interaction)
         await interaction.response.send_message(
             "❌ Esta mesa de Blackjack no te pertenece.",
             ephemeral=True,
@@ -225,16 +228,18 @@ class BlackjackView(discord.ui.View):
         if last_error:
             raise last_error
 
-    async def _apply_cooldown(self) -> None:
+    async def _apply_cooldown(self) -> float | None:
         expires_at = time.time() + self.game.cooldown
         try:
             await set_game_cooldown(self.game.user_id, "bj", expires_at)
             cache.set_game_cooldown_cache(self.game.user_id, "bj", expires_at)
+            return expires_at
         except Exception:
             logger.exception(
                 "La partida BJ %s se liquidó, pero no se pudo guardar el cooldown.",
                 self.game.wager_id,
             )
+            return None
 
     def _result_description(self, outcome: str, net: int, detail: str) -> tuple[str, discord.Color]:
         if outcome in {"win", "blackjack"}:
@@ -278,7 +283,7 @@ class BlackjackView(discord.ui.View):
             self.disable_all()
             self.stop()
             _ACTIVE_BLACKJACK.discard(self.game.user_id)
-            await self._apply_cooldown()
+            expires_at = await self._apply_cooldown()
 
             description, color = self._result_description(outcome, net, detail)
             embed = self.build_embed(
@@ -295,6 +300,11 @@ class BlackjackView(discord.ui.View):
                 )
             if self.game.message is not None:
                 asyncio.create_task(self.game.message.delete(delay=120))
+            if expires_at is not None:
+                await send_game_reminder_prompt(
+                    interaction or self.game.source_interaction,
+                    self.game.user_id, "bj", expires_at,
+                )
         except Exception as error:
             # Si la liquidación alcanzó a confirmarse, refund_wager no podrá
             # tocarla. Si quedó pendiente, intenta devolverla inmediatamente.
@@ -479,7 +489,6 @@ class Blackjack(commands.Cog):
     def __init__(self, bot):
         self.bot = bot
 
-    @commands.command(name="bj")
     async def blackjack(self, ctx, apuesta: int = None):
         message_id = ctx.message.id
         if message_id in _SEEN_BLACKJACK_MESSAGES:
@@ -498,7 +507,7 @@ class Blackjack(commands.Cog):
             )
         if apuesta is None:
             return await ctx.send(
-                f"❌ {ctx.author.mention} Formato correcto: `!bj {{apuesta}}`."
+                f"❌ {ctx.author.mention} Abre **/jugar apuesta** y selecciona **Blackjack**."
             )
         if apuesta < 100:
             return await ctx.message.reply(
@@ -553,6 +562,7 @@ class Blackjack(commands.Cog):
                 apuesta,
                 wager["id"],
             )
+            game.source_interaction = getattr(ctx, "interaction", None)
             view = BlackjackView(game)
             _ACTIVE_BLACKJACK.add(ctx.author.id)
             try:
@@ -572,15 +582,6 @@ class Blackjack(commands.Cog):
                 except Exception:
                     logger.exception("No se pudo reembolsar el inicio fallido de BJ.")
                 raise
-
-    @blackjack.error
-    async def blackjack_error(self, ctx, error):
-        if isinstance(error, (commands.BadArgument, commands.MissingRequiredArgument)):
-            await ctx.send(
-                f"❌ {ctx.author.mention} Formato correcto: `!bj {{apuesta}}`."
-            )
-            return
-        raise error
 
 
 async def setup(bot):

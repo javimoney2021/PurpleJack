@@ -18,83 +18,6 @@ CACHE_EXPIRE   = 7200  # 2 horas de inactividad
 MAX_BANK       = 150_000  # Límite máximo de almacenamiento en banco
 
 
-# ── EVENTO PURPLE COINS ───────────────────────────────
-# El ranking se consulta desde RAM. Sus cambios se persisten de forma separada
-# para no mezclar su frecuencia de guardado con la caché principal de usuarios.
-EVENT_FLUSH_INTERVAL = 600
-_evento_activo = False
-_evento_iniciado_en = 0.0
-_evento_puntos = {}
-_evento_dirty = set()
-
-
-def is_evento_activo() -> bool:
-    return _evento_activo
-
-
-def start_evento(iniciado_en: float) -> None:
-    global _evento_activo, _evento_iniciado_en, _evento_puntos, _evento_dirty
-    _evento_activo = True
-    _evento_iniciado_en = iniciado_en
-    _evento_puntos = {}
-    _evento_dirty = set()
-
-
-def stop_evento() -> None:
-    global _evento_activo
-    _evento_activo = False
-
-
-def resume_evento() -> None:
-    global _evento_activo
-    _evento_activo = True
-
-
-def restore_evento(activo: bool, iniciado_en: float, puntos: dict) -> None:
-    global _evento_activo, _evento_iniciado_en, _evento_puntos, _evento_dirty
-    _evento_activo = activo
-    _evento_iniciado_en = iniciado_en
-    _evento_puntos = {int(user_id): int(monto) for user_id, monto in puntos.items() if monto > 0}
-    _evento_dirty = set()
-
-
-def record_evento_balance_delta(user_id: int, amount: int) -> None:
-    """Registra el cambio efectivo de balance mientras el evento está activo."""
-    if not _evento_activo or amount == 0:
-        return
-
-    actual = _evento_puntos.get(user_id, 0)
-    nuevo = max(0, actual + amount)
-    if nuevo == actual:
-        return
-
-    if nuevo > 0:
-        _evento_puntos[user_id] = nuevo
-    else:
-        _evento_puntos.pop(user_id, None)
-    _evento_dirty.add(user_id)
-
-
-def get_evento_top(limit: int = 10) -> list[tuple[int, int]]:
-    return sorted(_evento_puntos.items(), key=lambda entry: (-entry[1], entry[0]))[:limit]
-
-
-def get_evento_dirty_snapshot() -> dict[int, int]:
-    return {user_id: _evento_puntos.get(user_id, 0) for user_id in _evento_dirty}
-
-
-def clear_evento_dirty_if_unchanged(snapshot: dict[int, int]) -> None:
-    for user_id, puntos in snapshot.items():
-        if _evento_puntos.get(user_id, 0) == puntos:
-            _evento_dirty.discard(user_id)
-
-
-def clear_evento_puntos() -> None:
-    """Marca los puntajes actuales para que el próximo flush los elimine de DB."""
-    _evento_dirty.update(_evento_puntos)
-    _evento_puntos.clear()
-
-
 def touch_user(user_id):
     _last_activity[user_id] = time.time()
 
@@ -189,8 +112,6 @@ def update_cached_balance(user_id, amount, track_event=True):
     if user_id in _cache:
         _cache[user_id]["balance"] += amount
         _set_balance_index_value(user_id, _cache[user_id]["balance"])
-        if track_event:
-            record_evento_balance_delta(user_id, amount)
         mark_dirty(user_id)
 
 def update_cached_bank(user_id, amount, track_event=True):
@@ -220,8 +141,6 @@ def update_cached_bank(user_id, amount, track_event=True):
 
     if excedente_balance > 0:
         _cache[user_id]["balance"] += excedente_balance
-        if track_event:
-            record_evento_balance_delta(user_id, excedente_balance)
 
     _set_balance_index_value(user_id, _cache[user_id]["balance"])
 
@@ -258,8 +177,6 @@ def purge_user_cache(user_id: int) -> None:
     _cargos_cache.pop(user_id, None)
     _collect_cooldowns.pop(user_id, None)
     _top_cooldowns.pop(user_id, None)
-    _evento_puntos.pop(user_id, None)
-    _evento_dirty.discard(user_id)
     for key in [key for key in _game_cooldowns if key[0] == user_id]:
         _game_cooldowns.pop(key, None)
     for key in [key for key in _role_assignment_locks if key[0] == user_id]:
@@ -588,10 +505,3 @@ async def flush_loop():
         await asyncio.sleep(FLUSH_INTERVAL)
         await flush_to_db()
         cleanup_cache()
-
-
-async def evento_flush_loop():
-    while True:
-        await asyncio.sleep(EVENT_FLUSH_INTERVAL)
-        from core.database import flush_evento_puntos
-        await flush_evento_puntos()

@@ -2,10 +2,6 @@
 
 import asyncio
 import logging
-import random
-import time
-
-import discord
 
 from core import database
 from core.config import INVENTORY_ITEM_MAX_QUANTITY
@@ -13,7 +9,6 @@ from core.config import INVENTORY_ITEM_MAX_QUANTITY
 
 logger = logging.getLogger(__name__)
 CANDY = "<:Candy:1558963919492481055>"
-GHOST = "<:fantasma:1556828340843974748>"
 _candy_balances: dict[int, int] = {}
 _user_locks: dict[int, asyncio.Lock] = {}
 
@@ -39,24 +34,7 @@ async def init_halloween_tables() -> None:
                 balance INTEGER NOT NULL DEFAULT 0 CHECK (balance >= 0)
             )
         """)
-        await conn.execute("""
-            CREATE TABLE IF NOT EXISTS halloween_candy_awards (
-                source_key TEXT PRIMARY KEY,
-                user_id BIGINT NOT NULL,
-                amount SMALLINT NOT NULL CHECK (amount BETWEEN 0 AND 8),
-                created_at DOUBLE PRECISION NOT NULL
-            )
-        """)
-        await conn.execute("""
-            ALTER TABLE halloween_candy_awards
-            DROP CONSTRAINT IF EXISTS halloween_candy_awards_amount_check,
-            ADD CONSTRAINT halloween_candy_awards_amount_check
-            CHECK (amount BETWEEN 0 AND 8)
-        """)
-        await conn.execute("""
-            CREATE INDEX IF NOT EXISTS halloween_candy_awards_user_idx
-            ON halloween_candy_awards (user_id)
-        """)
+        await conn.execute("DROP TABLE IF EXISTS halloween_candy_awards")
         await conn.execute("""
             CREATE TABLE IF NOT EXISTS halloween_craft_items (
                 id SERIAL PRIMARY KEY,
@@ -94,27 +72,6 @@ async def get_candy_balance(user_id: int) -> int:
         return amount
 
 
-async def add_candy_balance(user_id: int, amount: int) -> int:
-    """Acredita dulces manualmente y refleja el saldo confirmado en RAM."""
-    if not 0 < amount <= 2_147_483_647:
-        raise ValueError("La cantidad debe ser positiva y caber en INTEGER.")
-    async with _get_user_lock(user_id):
-        async with database.pool.acquire() as conn:
-            balance = await conn.fetchval(
-                """
-                INSERT INTO halloween_candy_balances (user_id, balance)
-                VALUES ($1, $2)
-                ON CONFLICT (user_id) DO UPDATE
-                SET balance=halloween_candy_balances.balance + EXCLUDED.balance
-                RETURNING balance
-                """,
-                user_id,
-                amount,
-            )
-        _candy_balances[user_id] = int(balance)
-        return int(balance)
-
-
 async def get_candy_ranking_page(offset: int, limit: int = 10) -> tuple[list[dict], int]:
     """Consulta el ranking persistente sin solicitar la lista completa del servidor."""
     async with database.pool.acquire() as conn:
@@ -133,69 +90,6 @@ async def get_candy_ranking_page(offset: int, limit: int = 10) -> tuple[list[dic
             offset,
         )
     return [dict(row) for row in rows], int(total or 0)
-
-
-async def award_candy(user_id: int, source_key: str, *, won: bool = True) -> int:
-    """Persiste una tirada del 60 % en victoria o un dulce por derrota."""
-    amount = (random.randint(4, 8) if random.random() < 0.6 else 0) if won else 1
-    async with _get_user_lock(user_id):
-        async with database.pool.acquire() as conn:
-            async with conn.transaction():
-                inserted = await conn.fetchval(
-                    """
-                    INSERT INTO halloween_candy_awards
-                        (source_key, user_id, amount, created_at)
-                    VALUES ($1, $2, $3, $4)
-                    ON CONFLICT (source_key) DO NOTHING
-                    RETURNING amount
-                    """,
-                    source_key,
-                    user_id,
-                    amount,
-                    time.time(),
-                )
-                if inserted is None:
-                    return 0
-                if amount:
-                    balance = await conn.fetchval(
-                        """
-                        INSERT INTO halloween_candy_balances (user_id, balance)
-                        VALUES ($1, $2)
-                        ON CONFLICT (user_id) DO UPDATE
-                        SET balance=halloween_candy_balances.balance + EXCLUDED.balance
-                        RETURNING balance
-                        """,
-                        user_id,
-                        amount,
-                    )
-                    _candy_balances[user_id] = int(balance)
-    return amount
-
-
-async def award_and_notify(channel, user_id: int, source_key: str, *, won: bool = True) -> int:
-    """Entrega dulces y publica el aviso correspondiente a victoria o derrota."""
-    try:
-        amount = await award_candy(user_id, source_key, won=won)
-    except Exception:
-        logger.exception("No se pudieron acreditar dulces para %s (%s)", user_id, source_key)
-        return 0
-    if amount and channel is not None:
-        try:
-            message = (
-                f"<@{user_id}> Has recibido ({amount} {CANDY}) por tu victoria reciente {GHOST}"
-                if won else
-                f"<@{user_id}> Premio de consolación: recibiste (1 {CANDY}) "
-                f"aunque esta vez perdiste {GHOST}"
-            )
-            await channel.send(
-                message,
-                allowed_mentions=discord.AllowedMentions(
-                    everyone=False, roles=False, users=True, replied_user=False,
-                ),
-            )
-        except Exception:
-            logger.exception("Dulces acreditados, pero falló el aviso de %s", user_id)
-    return amount
 
 
 async def add_craft_item(nombre: str, precio: int, icono: str, descripcion: str) -> bool:
@@ -228,44 +122,6 @@ async def get_craft_items() -> list[dict]:
             "ORDER BY precio ASC, id ASC"
         )
     return [dict(row) for row in rows]
-
-
-async def get_craft_inventory_page(offset: int, limit: int = 5) -> tuple[list[dict], int]:
-    """Lista propietarios de Craft desde PostgreSQL, sin consultar miembros de Discord."""
-    async with database.pool.acquire() as conn:
-        total = await conn.fetchval(
-            "SELECT COUNT(DISTINCT user_id) FROM halloween_craft_inventory "
-            "WHERE cantidad > 0"
-        )
-        rows = await conn.fetch(
-            """
-            WITH holders AS (
-                SELECT user_id
-                FROM halloween_craft_inventory
-                WHERE cantidad > 0
-                GROUP BY user_id
-                ORDER BY user_id
-                LIMIT $1 OFFSET $2
-            )
-            SELECT inv.user_id, craft.nombre, inv.cantidad
-            FROM holders
-            JOIN halloween_craft_inventory AS inv ON inv.user_id = holders.user_id
-            JOIN halloween_craft_items AS craft ON craft.id = inv.item_id
-            WHERE inv.cantidad > 0
-            ORDER BY inv.user_id, craft.nombre, craft.id
-            """,
-            limit,
-            offset,
-        )
-    users: dict[int, dict] = {}
-    for row in rows:
-        user_id = int(row["user_id"])
-        user = users.setdefault(user_id, {"user_id": user_id, "items": []})
-        user["items"].append({
-            "nombre": row["nombre"],
-            "cantidad": int(row["cantidad"]),
-        })
-    return list(users.values()), int(total or 0)
 
 
 async def delete_craft_item(item_id: int) -> str | None:

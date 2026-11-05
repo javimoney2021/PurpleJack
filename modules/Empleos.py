@@ -16,6 +16,7 @@ from core.database import (
     pool, _get_economy_lock, _flush_user_to_db_unlocked, get_system_toggle,
 )
 from core import cache as economy_cache
+from core.game_reminders import send_game_reminder_prompt
 
 logger = logging.getLogger("purplejack.empleos")
 
@@ -143,6 +144,16 @@ def _es_coordinador(member: discord.Member) -> bool:
     )
 
 
+def _ofrecer_recordatorio_trabajo(interaction, author, settlement: dict) -> None:
+    """Ofrece el aviso tras liquidar y mostrar el resultado de una jornada."""
+    expires_at = settlement.get("cooldown_expires_at")
+    if interaction is None or not expires_at:
+        return
+    asyncio.create_task(send_game_reminder_prompt(
+        interaction, author.id, "trabajar", expires_at,
+    ))
+
+
 def _puede_acceder_oficina(data: dict | None, member: discord.Member) -> bool:
     if not data:
         return False
@@ -156,7 +167,7 @@ def _puede_acceder_oficina(data: dict | None, member: discord.Member) -> bool:
 
 # ── DEBUG DE INTERACCIONES ───────────────────────────────
 def _log_trabajar_error(empleo: str, error: Exception, usuario: str = "?", contexto: str = ""):
-    """Log estandarizado para errores en tableros de !trabajar."""
+    """Log estandarizado para errores en tableros de /trabajar."""
     tipo   = type(error).__name__
     lineas = traceback.extract_tb(error.__traceback__)
     ultima = lineas[-1] if lineas else None
@@ -172,12 +183,12 @@ async def _notificar_error_interaccion(interaction: Interaction):
     try:
         if interaction.response.is_done():
             await interaction.followup.send(
-                "❌ Ocurrió un error en la jornada. Consulta **!trabajar** nuevamente.",
+                "❌ Ocurrió un error en la jornada. Abre **/trabajar** nuevamente.",
                 ephemeral=True,
             )
         else:
             await interaction.response.send_message(
-                "❌ Ocurrió un error en la jornada. Consulta **!trabajar** nuevamente.",
+                "❌ Ocurrió un error en la jornada. Abre **/trabajar** nuevamente.",
                 ephemeral=True,
             )
     except (discord.HTTPException, discord.NotFound):
@@ -196,7 +207,7 @@ async def _caducar_tablero(view: ui.View):
     try:
         embed = view.build_embed()
         embed.color = discord.Color.dark_grey()
-        embed.set_footer(text="Jornada caducada. Consulta !trabajar para iniciar otra.")
+        embed.set_footer(text="Jornada caducada. Abre /trabajar para iniciar otra.")
         await view.message.edit(embed=embed, view=view)
     except (discord.HTTPException, discord.NotFound):
         pass
@@ -263,14 +274,14 @@ async def _cerrar_tablero_con_error(
 
     descripcion = (
         "La jornada fue procesada, pero no fue posible mostrar el resultado. "
-        "Consulta **!exp** para verificar tu progreso."
+        "Consulta tu balance y vuelve a revisar el centro laboral."
         if liquidada
         else (
-            "No fue posible liquidar la jornada. Puedes consultar **!trabajar** nuevamente."
+            "No fue posible liquidar la jornada. Abre **/trabajar** nuevamente."
             if cancelada
             else (
                 "No fue posible liquidar ni cerrar la jornada en Aiven. "
-                "Espera unos minutos antes de consultar **!trabajar** nuevamente."
+                "Espera unos minutos antes de abrir **/trabajar** nuevamente."
             )
         )
     )
@@ -334,7 +345,7 @@ async def _cerrar_tablero_por_inactividad(view: ui.View, empleo: str):
     else:
         descripcion = (
             "No fue posible cerrar la jornada en este momento. "
-            "El sistema la revisará automáticamente; intenta usar **!trabajar** más tarde."
+            "El sistema la revisará automáticamente; abre **/trabajar** más tarde."
         )
         color = discord.Color.red()
 
@@ -692,7 +703,7 @@ async def cancelar_jornada_por_inactividad(
     """Cancela una sesión sin liquidación y deja su cooldown correctamente fijado.
 
     El lock laboral se toma antes que el de la sesión, igual que al crear o
-    liquidar una jornada. Así un clic tardío, el worker y ``!trabajar`` no
+    liquidar una jornada. Así un clic tardío, el worker y ``/trabajar`` no
     pueden duplicar pagos ni dejar una sesión activa bloqueada.
     """
     now = time.time()
@@ -823,7 +834,7 @@ async def _finalizar_jornada_atomica_unlocked(
     async with pool.acquire() as conn:
         async with conn.transaction():
             # Mismo orden de locks que crear_jornada: empleo -> sesión -> economía.
-            # Evita deadlocks entre un clic final y otro !trabajar simultáneo.
+            # Evita deadlocks entre un clic final y otro /trabajar simultáneo.
             empleo_row = await conn.fetchrow(
                 "SELECT * FROM empleos_users WHERE user_id=$1 FOR UPDATE",
                 user_id,
@@ -964,15 +975,18 @@ async def _finalizar_jornada_atomica_unlocked(
 
     if user_row:
         economy_cache.set_cache(user_id, dict(user_row))
-    if overflow_balance:
-        economy_cache.record_evento_balance_delta(user_id, overflow_balance)
     if empleo_actualizado:
         data = dict(empleo_actualizado)
         data["historial_reciente_de_jornadas"] = _parse_historial_jornadas(
             data["historial_reciente_de_jornadas"]
         )
         _EMPLEOS_CACHE[user_id] = data
-    return {"ok": True, "bonus": bonus}
+    info = EMPLEOS.get(normalizar_empleo(empleo)) or EMPLEOS_MAESTRIA.get(normalizar_empleo(empleo))
+    return {
+        "ok": True,
+        "bonus": bonus,
+        "cooldown_expires_at": now + info["duracion_horas"] * 3600 if info else 0,
+    }
 
 
 async def finalizar_jornada_atomica(
@@ -1291,7 +1305,7 @@ def nombre_empleo(empleo: str | None) -> str:
 
 
 def build_exp_embed(member: discord.Member, data: dict) -> discord.Embed:
-    """Construye el mismo resumen laboral que muestra el comando !exp."""
+    """Construye el resumen laboral mostrado desde /trabajar."""
     empleo = data.get("empleo_actual") or "Sin empleo"
     embed = discord.Embed(
         title=f"📊 Experiencia Laboral - {member.display_name}",
@@ -1352,7 +1366,7 @@ def build_empleos_maestria_embed() -> discord.Embed:
 
 
 async def renunciar_empleo(member: discord.Member) -> tuple[bool, str]:
-    """Aplica la misma baja y cooldown que el comando !renunciar."""
+    """Aplica la baja y cooldown desde /trabajar."""
     if await get_jornada_activa(member.id):
         return False, "⌛ Finaliza primero tu jornada laboral activa."
 
@@ -1392,6 +1406,9 @@ class ConfirmarEmpleoView(ui.View):
     async def aceptar(self, interaction: Interaction, button: ui.Button):
         if interaction.user.id != self.user_id:
             return await interaction.response.send_message("❌ No es tu confirmación.", ephemeral=True)
+        from bot import check_restricted_interaction
+        if not await check_restricted_interaction(interaction):
+            return
         if self._interaction_lock.locked() or self.procesado:
             return await interaction.response.send_message(
                 "⌛ Esta solicitud ya se está procesando.",
@@ -1496,7 +1513,7 @@ class ConfirmarEmpleoView(ui.View):
 
         mensaje = (
             f"🎉 {interaction.user.mention} ahora eres **{info['nombre'] if es_maestria else self.empleo.title()}**. "
-            "Usa `!trabajar` para iniciar tu jornada de 3 horas."
+            "Usa el panel **/trabajar** para iniciar tu jornada de 3 horas."
         )
         if xp_consumida:
             mensaje += f"\n📊 Se consumieron **{xp_consumida}** XP Laboral."
@@ -1539,9 +1556,12 @@ class OficinaBaseView(ui.View):
         if interaction.user.id != self.owner_id:
             await interaction.response.send_message("❌ Este panel no es tuyo.", ephemeral=True)
             return False
+        from bot import check_restricted_interaction
+        if not await check_restricted_interaction(interaction):
+            return False
         if time.time() >= self.expires_at:
             await interaction.response.send_message(
-                "Panel Vencido consulta nuevamente. **!oficina**",
+                "Panel vencido. Abre **/trabajar** → **Oficina** nuevamente.",
                 ephemeral=True,
             )
             return False
@@ -1561,7 +1581,7 @@ class AbrirOficinaView(ui.View):
         data = await get_empleo_user(self.owner_id, force_refresh=True)
         if not _puede_acceder_oficina(data, interaction.user):
             return await interaction.response.send_message(
-                "Para acceder a la oficina necesitas tener 30 de exp laboral, consulta **!exp** continua trabajando.",
+                "Para acceder a la oficina necesitas 30 de XP laboral. Continúa trabajando para alcanzarlos.",
                 ephemeral=True,
             )
 
@@ -1641,7 +1661,7 @@ class MaestriaModal(ui.Modal, title="Adquirir Maestrías"):
             return await interaction.response.send_message("❌ Este panel no es tuyo.", ephemeral=True)
         if time.time() >= self.expires_at:
             return await interaction.response.send_message(
-                "Panel Vencido consulta nuevamente. **!oficina**",
+                "Panel vencido. Abre **/trabajar** → **Oficina** nuevamente.",
                 ephemeral=True,
             )
 
@@ -1732,7 +1752,7 @@ class EmpleosMaestriaSelect(ui.Select):
             return await interaction.response.send_message("❌ Este panel no es tuyo.", ephemeral=True)
         if time.time() >= self.expires_at:
             return await interaction.response.send_message(
-                "Panel Vencido consulta nuevamente. **!oficina**",
+                "Panel vencido. Abre **/trabajar** → **Oficina** nuevamente.",
                 ephemeral=True,
             )
 
@@ -1871,7 +1891,6 @@ class Empleos(commands.Cog):
             name="empleos-jornadas-inactivas",
         )
 
-    @commands.command(name="empleos", aliases=["trabajos"])
     async def empleos(self, ctx):
         embed = discord.Embed(title="💼 Empleos Disponibles", color=discord.Color.blue())
         for nombre, info in EMPLEOS.items():
@@ -1886,16 +1905,15 @@ class Empleos(commands.Cog):
                 inline=False,
             )
         embed.set_thumbnail(url="https://pub-a09b3609b6b34dfab5c7aa7742cd1a8a.r2.dev/Purple%20jack%20Harcode/EmpleosPJ.png")
-        embed.set_footer(text="Aplica con: !aplicar <empleo>")
+        embed.set_footer(text="Abre /trabajar y pulsa Aplicar para elegir un empleo.")
         await ctx.send(embed=embed)
 
-    @commands.command(name="aplicar")
     async def aplicar(self, ctx, empleo: str = None):
         if not empleo:
-            return await ctx.send("❌ Usa: `!aplicar <empleo>`")
+            return await ctx.send("❌ Abre **/trabajar** y pulsa **Aplicar**.")
         empleo = normalizar_empleo(empleo)
         if empleo not in EMPLEOS:
-            return await ctx.send("⭕ Empleo **Invalido** Consulta **!empleos.**")
+            return await ctx.send("⭕ Empleo inválido. Opciones: Limpiador, Ingeniero o Plomero.")
 
         data = await get_empleo_user(ctx.author.id)
         bypass = _es_coordinador(ctx.author)
@@ -1920,31 +1938,27 @@ class Empleos(commands.Cog):
         )
         await ctx.send(embed=embed, view=ConfirmarEmpleoView(self.bot, ctx.author.id, empleo))
 
-    @commands.command(name="renunciar")
     async def renunciar(self, ctx):
         _, mensaje = await renunciar_empleo(ctx.author)
         await ctx.send(mensaje)
 
-    @commands.command(name="exp")
     async def exp(self, ctx):
         data = await get_empleo_user(ctx.author.id, force_refresh=True)
         await ctx.send(embed=build_exp_embed(ctx.author, data))
 
-    @commands.command(name="oficina")
     async def oficina(self, ctx):
         data = await get_empleo_user(ctx.author.id, force_refresh=True)
         if not _puede_acceder_oficina(data, ctx.author):
             return await ctx.reply(
-                "Para acceder a la oficina necesitas tener 30 de exp laboral, consulta **!exp** continua trabajando.",
+                "Para acceder a la oficina necesitas 30 de XP laboral. Continúa trabajando para alcanzarlos.",
                 mention_author=False,
             )
         await ctx.reply(view=AbrirOficinaView(ctx.author.id), mention_author=False)
 
-    @commands.command(name="trabajar")
     async def trabajar(self, ctx):
         data = await get_empleo_user(ctx.author.id)
         if not data or not data.get("empleo_actual"):
-            return await ctx.send(f"❌ {ctx.author.mention} No tienes un empleo activo. Consulta **!empleos.**")
+            return await ctx.send(f"❌ {ctx.author.mention} No tienes un empleo activo. Abre **/trabajar** y pulsa **Aplicar**.")
 
         empleo = normalizar_empleo(data["empleo_actual"])
         if empleo in EMPLEOS_MAESTRIA:
@@ -1971,7 +1985,7 @@ class Empleos(commands.Cog):
                     await despedir_por_inactividad(ctx.author.id, data)
                     return await ctx.send(
                         f"⚠️ {ctx.author.mention} Has sido **despedido** por inactividad "
-                        f"(más de 24h sin trabajar). Usa **!aplicar** para conseguir un nuevo empleo."
+                        f"(más de 24h sin trabajar). Abre **/trabajar** y pulsa **Aplicar**."
                     )
 
         jornada = await crear_jornada(
@@ -2054,6 +2068,9 @@ class JornadaView(ui.View):
                 "❌ Este tablero no es tuyo.",
                 ephemeral=True,
             )
+            return False
+        from bot import check_restricted_interaction
+        if not await check_restricted_interaction(interaction):
             return False
         try:
             await interaction.response.defer()
@@ -2326,6 +2343,7 @@ class CazadorView(JornadaView):
                 )
             elif self.message is not None:
                 await self.message.edit(embed=embed, view=self)
+            _ofrecer_recordatorio_trabajo(interaction, self.author, settlement)
         except Exception as error:
             _log_trabajar_error("Cazador", error, self.author.name, "_finalizar")
             await _cerrar_tablero_con_error(
@@ -2655,6 +2673,7 @@ class PiromanoView(JornadaView):
                 self,
                 embed=self.build_embed(),
             )
+            _ofrecer_recordatorio_trabajo(interaction, self.author, settlement)
         except Exception as error:
             _log_trabajar_error("Píromano", error, self.author.name, "_finalizar")
             await _cerrar_tablero_con_error(
@@ -2912,6 +2931,7 @@ class ChantajistaView(JornadaView):
                 )
             elif self.message is not None:
                 await self.message.edit(embed=embed, view=None)
+            _ofrecer_recordatorio_trabajo(interaction, self.author, settlement)
         except Exception as error:
             _log_trabajar_error("Chantajista", error, self.author.name, "_finalizar")
             await _cerrar_tablero_con_error(
@@ -3099,6 +3119,7 @@ class LimpiadorView(JornadaView):
                     )
                 elif self.message is not None:
                     await self.message.edit(embed=result_embed, view=None)
+                _ofrecer_recordatorio_trabajo(interaction, self.author, settlement)
                 _programar_eliminacion(self)
                 return
             mensaje = random.choice(self.info['mensajes_exito']).format(monto=pago, COIN=COIN)
@@ -3123,6 +3144,7 @@ class LimpiadorView(JornadaView):
                 )
             elif self.message is not None:
                 await self.message.edit(embed=result_embed, view=None)
+            _ofrecer_recordatorio_trabajo(interaction, self.author, settlement)
             _programar_eliminacion(self)
         except Exception as e:
             _log_trabajar_error("Limpiador", e, self.author.name, "_terminar")
@@ -3366,6 +3388,7 @@ class IngenieroView(JornadaView):
                 )
             elif self.message is not None:
                 await self.message.edit(embed=result_embed, view=None)
+            _ofrecer_recordatorio_trabajo(interaction, self.author, settlement)
             _programar_eliminacion(self)
         except Exception as e:
             _log_trabajar_error("Ingeniero", e, self.author.name, "_terminar")
@@ -3551,6 +3574,7 @@ class PlomeroView(JornadaView):
                 )
             elif self.message is not None:
                 await self.message.edit(embed=result_embed, view=None)
+            _ofrecer_recordatorio_trabajo(interaction, self.author, settlement)
             _programar_eliminacion(self)
         except Exception as e:
             _log_trabajar_error("Plomero", e, self.author.name, "_terminar")

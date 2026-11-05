@@ -49,7 +49,6 @@ class BasicGames(commands.Cog):
     def __init__(self, bot):
         self.bot = bot
 
-    @commands.command()
     async def work(self, ctx):
         now = int(time.time())
         cooldown, cd_boost = await resolve_cd_boost(
@@ -69,7 +68,7 @@ class BasicGames(commands.Cog):
         if now - last < cooldown:
             remaining = cooldown - (now - last)
             return await ctx.message.reply(
-                f"⏳ Podrás volver a usar **!work** <t:{int(now + remaining)}:R>"
+                f"⏳ Podrás volver a usar **/work** <t:{int(now + remaining)}:R>"
             )
 
         amount = random.randint(game_config["work"]["min"], game_config["work"]["max"])
@@ -83,7 +82,6 @@ class BasicGames(commands.Cog):
         response = await ctx.message.reply(f"{nick} {msg}", mention_author=False)
         await send_cd_boost_notice(response, ctx.author, cd_boost)
 
-    @commands.command()
     async def crime(self, ctx):
         now = int(time.time())
         cooldown, cd_boost = await resolve_cd_boost(

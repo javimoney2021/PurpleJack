@@ -6,8 +6,8 @@ import asyncio
 import time
 import signal
 import logging
-from importlib.metadata import PackageNotFoundError, version
 from datetime import datetime, timedelta, timezone
+from urllib.parse import urlsplit
 
 # ── LOGGING ────────────────────────────────────────────
 
@@ -48,18 +48,7 @@ logging.getLogger("discord").addFilter(_VoiceWarningFilter())
 
 logger = logging.getLogger("purplejack")
 
-logger.info(f"discord.py version: {discord.__version__}")
-for package_name in ("Brotli", "brotlicffi"):
-    try:
-        logger.info("[SEGURIDAD] %s instalado: %s", package_name, version(package_name))
-    except PackageNotFoundError:
-        logger.info("[SEGURIDAD] %s no instalado", package_name)
-
-from settings import TOKEN
-try:
-    from settings import GUILD_ID
-except ImportError:
-    GUILD_ID = None
+from settings import TOKEN, DATABASE_URL, GUILD_ID, TEST_MODE
 
 from core.database import (
     init_db, load_items_to_cache, load_cargos_to_cache,
@@ -69,7 +58,7 @@ from core.database import (
     release_cargo_claim, delete_cargo_temporal_by_id,
     create_game_config_table, load_game_config, load_dados_config, load_memo_config,
     load_veterano_config_to_cache, load_saboteador_config_to_cache, load_item_role_restrictions_to_cache,
-    save_collect_cooldowns, load_evento_to_cache, flush_evento_puntos,
+    save_collect_cooldowns,
     recover_pending_wagers, ensure_wager_constraints,
     get_inactive_user_ids, get_user_deletion_blocker,
     get_user_temporary_roles, purge_user_data, touch_user_activity,
@@ -77,74 +66,140 @@ from core.database import (
     delete_expired_failed_item_use_logs,
 )
 from core import cache
-from core.member_tenure import NEW_MEMBER_MESSAGE, has_minimum_server_tenure
 from core.halloween import init_halloween_tables
+from core.game_reminders import init_game_reminders, game_reminder_worker
 from core.config import (
     AYUDA_CHANNEL_ID, LOG_CHANNEL_ID, STAFF_ROLE_ID, PUNISHMENT_ROLE_ID,
+    PLAYER_COMMAND_ROLE_ID,
     LOG_CLEANUP_INTERVAL_SECONDS, LOG_MESSAGE_RETENTION_SECONDS,
     LOG_RETENTION_CHANNEL_IDS, LOG_DELETE_DELAY_SECONDS,
     LOG_DELETE_BATCH_SIZE, LOG_CLEANUP_BACKLOG_DELAY_SECONDS,
 )
+def _safe_startup_error(error: Exception) -> str:
+    """Evita que un error de conexión imprima credenciales en los registros."""
+    message = str(error)
+    secrets = [TOKEN, DATABASE_URL]
+    try:
+        password = urlsplit(DATABASE_URL).password
+        if password:
+            secrets.append(password)
+    except ValueError:
+        pass
+    for secret in secrets:
+        if secret:
+            message = message.replace(secret, "[REDACTADO]")
+    return message[:700]
+
+
+async def _startup_step(label: str, operation):
+    """Registra esperas prolongadas y fallos de cada etapa sin exponer secretos."""
+    started = time.monotonic()
+    task = asyncio.create_task(operation, name=f"startup-{label}")
+    try:
+        while True:
+            try:
+                return await asyncio.wait_for(asyncio.shield(task), timeout=20)
+            except asyncio.TimeoutError:
+                logger.warning(
+                    "[STARTUP:WAIT] %s sigue esperando tras %.0fs",
+                    label, time.monotonic() - started,
+                )
+    except BaseException as error:
+        if not task.done():
+            task.cancel()
+        if isinstance(error, Exception):
+            safe_error = _safe_startup_error(error)
+            logger.error(
+                "[STARTUP:ERROR] %s: %s: %s",
+                label, type(error).__name__, safe_error,
+            )
+            raise RuntimeError(
+                f"Inicio fallido en {label}: {type(error).__name__}: {safe_error}"
+            ) from None
+        else:
+            logger.warning("[STARTUP:CANCELLED] %s", label)
+        raise
+
 
 intents = discord.Intents.default()
-intents.message_content = True
+intents.message_content = False
 intents.members = False
+intents.messages = False
 
-async def get_prefix(bot, message):
-    """Normaliza el prefijo '!' aceptando '!comando' y '! comando' indistintamente."""
-    return ["! ", "!"]
+async def check_restricted_interaction(interaction: discord.Interaction) -> bool:
+    """Bloquea botones y formularios abiertos antes de aplicar /punish."""
+    guild_id = getattr(interaction, "guild_id", None)
+    if guild_id is None:
+        return True
+    expires_at = cache.get_active_cargo_expiry(
+        interaction.user.id, guild_id, PUNISHMENT_ROLE_ID,
+    )
+    if not expires_at:
+        return True
+    if interaction.type is discord.InteractionType.autocomplete:
+        await interaction.response.autocomplete([])
+    else:
+        await interaction.response.send_message(
+            "Tu acceso está **Restringido** debido a un uso incorrecto del canal. "
+            f"Podrás volver a interactuar en <t:{int(expires_at)}:R>.",
+            ephemeral=True,
+        )
+    return False
 
+async def check_player_access(interaction: discord.Interaction) -> bool:
+    """Protege tanto los paneles slash como cada botón que ejecuta acciones."""
+    async def deny(message: str) -> bool:
+        if interaction.type is discord.InteractionType.autocomplete:
+            await interaction.response.autocomplete([])
+        else:
+            await interaction.response.send_message(message, ephemeral=True)
+        return False
 
-async def check_invoker_tenure(user, guild) -> bool | None:
-    """No enumera miembros; consulta por ID solo si falta joined_at."""
-    if guild is None:
-        return None
-    joined_at = getattr(user, "joined_at", None)
-    if joined_at is None:
-        try:
-            member = await asyncio.wait_for(guild.fetch_member(user.id), timeout=2.0)
-            joined_at = member.joined_at
-        except (
-            asyncio.TimeoutError, discord.NotFound, discord.Forbidden,
-            discord.HTTPException, discord.ClientException,
-        ):
-            return None
-    if joined_at is None:
-        return None
-    return has_minimum_server_tenure(joined_at)
+    if interaction.guild is None:
+        return await deny("Este panel solo está disponible en el servidor.")
+    if not await check_restricted_interaction(interaction):
+        return False
+    if PLAYER_COMMAND_ROLE_ID not in {
+        role.id for role in getattr(interaction.user, "roles", ())
+    }:
+        return await deny(
+            "No tienes el rol necesario para usar los comandos de jugador."
+        )
+    return True
 
 
 class PurpleJackCommandTree(app_commands.CommandTree):
     async def interaction_check(self, interaction: discord.Interaction) -> bool:
         command_name = (interaction.data or {}).get("name")
+        if command_name not in {"ayuda_nave", "eliminar_mis_datos"}:
+            if not await check_restricted_interaction(interaction):
+                return False
+        if command_name in {
+            "jugar", "trabajar", "consultar", "work", "crime", "collect",
+            "tienda", "rob", "Robar", "carrera", "retar",
+        }:
+            return await check_player_access(interaction)
         if command_name in {"ayuda_nave", "eliminar_mis_datos"}:
             return True
-        eligible = await check_invoker_tenure(interaction.user, interaction.guild)
-        if eligible is True:
-            return True
-        if interaction.type is discord.InteractionType.autocomplete:
-            await interaction.response.autocomplete([])
-            return False
-        message = (
-            NEW_MEMBER_MESSAGE if eligible is False
-            else "No pude verificar tu antigüedad en el servidor. Inténtalo nuevamente."
-        )
-        await interaction.response.send_message(message, ephemeral=True)
-        return False
+        return True
 
 bot = commands.Bot(
-    command_prefix=get_prefix,
+    command_prefix=[],
     intents=intents,
     help_command=None,
     member_cache_flags=discord.MemberCacheFlags.none(),
     chunk_guilds_at_startup=False,
     tree_cls=PurpleJackCommandTree,
 )
-evento_flush_task = None
+
+
 cargos_task = None
 wager_recovery_task = None
 inactive_purge_task = None
 log_cleanup_task = None
+game_reminder_task = None
+cache_flush_task = None
+slash_sync_done = False
 _activity_writes = {}
 bot._user_activity_writes = _activity_writes
 
@@ -152,45 +207,6 @@ USER_INACTIVITY_RETENTION = 30 * 24 * 60 * 60
 USER_ACTIVITY_WRITE_INTERVAL = 60 * 60
 INACTIVE_PURGE_INTERVAL = 6 * 60 * 60
 LOG_CLEANUP_JOB_NAME = "discord-log-retention"
-
-
-class CommandAccessRestricted(commands.CheckFailure):
-    """Evita que un usuario castigado ejecute comandos con prefijo."""
-
-
-@bot.check
-async def block_restricted_prefix_commands(ctx: commands.Context) -> bool:
-    if ctx.guild is None:
-        return True
-
-    expires_at = cache.get_active_cargo_expiry(
-        ctx.author.id,
-        ctx.guild.id,
-        PUNISHMENT_ROLE_ID,
-    )
-    if not expires_at:
-        return True
-
-    await ctx.reply(
-        "Tu acceso está **Restringido** debido a un uso incorrecto del canal. "
-        f"Podrás volver a interactuar en <t:{int(expires_at)}:R>",
-        mention_author=False,
-        delete_after=3,
-    )
-    raise CommandAccessRestricted()
-
-
-@bot.check
-async def block_new_prefix_members(ctx: commands.Context) -> bool:
-    eligible = await check_invoker_tenure(ctx.author, ctx.guild)
-    if eligible is True:
-        return True
-    message = (
-        NEW_MEMBER_MESSAGE if eligible is False
-        else "No pude verificar tu antigüedad en el servidor. Inténtalo nuevamente."
-    )
-    await ctx.reply(message, mention_author=False)
-    raise CommandAccessRestricted()
 
 
 async def record_user_activity(user_id: int) -> None:
@@ -214,13 +230,6 @@ async def record_member_name(user) -> None:
         logger.exception("No se pudo guardar el apodo del usuario %s", user.id)
 
 
-@bot.listen("on_command")
-async def track_prefix_command_activity(ctx):
-    if not ctx.author.bot:
-        await record_member_name(ctx.author)
-        await record_user_activity(ctx.author.id)
-
-
 @bot.listen("on_interaction")
 async def track_interaction_activity(interaction: discord.Interaction):
     if interaction.user and not interaction.user.bot:
@@ -229,21 +238,15 @@ async def track_interaction_activity(interaction: discord.Interaction):
 
 
 async def load_modules():
-    await bot.load_extension("modules.economy")
-    await bot.load_extension("modules.basic_games")
-    await bot.load_extension("modules.staff")
-    await bot.load_extension("modules.roulette")
-    await bot.load_extension("modules.rob")
-    await bot.load_extension("modules.shop")
-    await bot.load_extension("modules.Empleos")
-    await bot.load_extension("modules.collect")
-    await bot.load_extension("modules.dados")
-    await bot.load_extension("modules.duels")
-    await bot.load_extension("modules.golpear")
-    await bot.load_extension("modules.carrera")
-    await bot.load_extension("modules.memo")
-    await bot.load_extension("modules.adivinar")
-    await bot.load_extension("modules.blackjack")
+    for extension in (
+        "modules.economy", "modules.basic_games", "modules.staff",
+        "modules.roulette", "modules.rob", "modules.shop",
+        "modules.Empleos", "modules.collect", "modules.dados",
+        "modules.duels", "modules.golpear", "modules.carrera",
+        "modules.memo", "modules.blackjack", "modules.player_panels",
+        "modules.player_commands",
+    ):
+        await _startup_step(f"Extensión {extension}", bot.load_extension(extension))
 
 
 async def _alertar_fallo_retiro_cargo(cargo: dict, error: Exception, intento: int):
@@ -619,23 +622,8 @@ async def log_retention_worker():
             await asyncio.sleep(60)
 
 
-@bot.event
-async def on_command_error(ctx, error):
-    if isinstance(error, CommandAccessRestricted):
-        return
-    if isinstance(error, commands.CommandNotFound):
-        await ctx.reply(
-            "❌ Este comando no es válido, Consulta la Guia de la Nave en <#1505296434076057752>",
-            delete_after=10
-        )
-    elif isinstance(error, commands.CommandOnCooldown):
-        return  # deja que el handler del módulo lo maneje
-    else:
-        raise error
-
 async def shutdown():
     logger.warning("Apagando bot — flusheando caché a DB...")
-    await flush_evento_puntos()
     await cache.flush_to_db()
     # ── Persistir cooldowns de collect pendientes en cache ──
     all_cooldowns = cache.get_all_collect_cooldowns()
@@ -648,10 +636,72 @@ async def shutdown():
     logger.info("Caché flusheada correctamente.")
     await bot.close()
 
+_REQUIRED_PLAYER_COMMANDS = {
+    "jugar", "consultar", "trabajar", "work", "crime", "collect",
+    "tienda", "rob", "Robar", "carrera", "retar",
+}
+
+
+async def sync_slash_commands(client: commands.Bot) -> None:
+    """Publica primero los comandos del servidor; luego limpia globales heredados."""
+    guild_id = int(GUILD_ID)
+    if client.get_guild(guild_id) is None:
+        raise RuntimeError(
+            f"GUILD_ID={guild_id} no es un servidor conectado a "
+            f"{client.user}. Servidores visibles: {[guild.id for guild in client.guilds]}"
+        )
+
+    guild = discord.Object(id=guild_id)
+    local_global = client.tree.get_commands()
+    local_names = {command.name for command in local_global}
+    missing = _REQUIRED_PLAYER_COMMANDS - local_names
+    if missing:
+        raise RuntimeError(f"Faltan comandos locales antes de sincronizar: {sorted(missing)}")
+
+    client.tree.copy_global_to(guild=guild)
+    await client.tree.sync(guild=guild)
+    published = await client.tree.fetch_commands(guild=guild)
+    published_names = {command.name for command in published}
+    missing_remote = local_names - published_names
+    if missing_remote or len(published) != len(local_global):
+        raise RuntimeError(
+            f"Discord no registró todos los comandos en el servidor {guild_id}. "
+            f"Esperados: {len(local_global)}, publicados: {len(published)}, "
+            f"faltantes: {sorted(missing_remote)}"
+        )
+    logger.info(
+        "[SLASH] Servidor %s: %s comandos verificados; paneles /jugar, "
+        "/consultar y /trabajar presentes.", guild_id, len(published),
+    )
+
+    # Los comandos globales del repositorio anterior son independientes de los
+    # del servidor. Solo se retiran tras verificar que los nuevos están activos.
+    old_global = await client.tree.fetch_commands()
+    client.tree.clear_commands(guild=None)
+    if old_global:
+        try:
+            await client.tree.sync()
+            remaining = await client.tree.fetch_commands()
+            if remaining:
+                raise RuntimeError(
+                    f"Persisten {len(remaining)} comandos globales antiguos en Discord."
+                )
+        except Exception:
+            for command in local_global:
+                client.tree.add_command(command)
+            raise
+    logger.info(
+        "[SLASH] Comandos globales anteriores retirados: %s. "
+        "Comandos de PurpleJack activos solo en servidor %s.",
+        len(old_global), guild_id,
+    )
+
+
 @bot.event
 async def on_ready():
-    global evento_flush_task, cargos_task, wager_recovery_task
-    global inactive_purge_task, log_cleanup_task
+    global cargos_task, wager_recovery_task
+    global inactive_purge_task, log_cleanup_task, game_reminder_task, slash_sync_done
+    global cache_flush_task
     logger.info(f"Bot conectado como {bot.user}")
     logger.info(
         "Caché iniciada | Flush cada %s segundos",
@@ -659,40 +709,39 @@ async def on_ready():
     )
     logger.info(f"Servidores activos: {len(bot.guilds)}")
 
-    try:
-        if GUILD_ID:
-            guild = discord.Object(id=int(GUILD_ID))
-            synced = await bot.tree.sync(guild=guild)
-            logger.info(f"Comandos Slash/Staff sincronizados en el servidor {GUILD_ID}: {len(synced)} comandos.")
-        else:
-            synced = await bot.tree.sync()
-            logger.info(f"Comandos Slash/Staff sincronizados globalmente: {len(synced)} comandos.")
-    except Exception as e:
-        logger.warning(f"Error sincronizando comandos slash: {e}")
+    if not slash_sync_done:
+        try:
+            await sync_slash_commands(bot)
+            slash_sync_done = True
+        except Exception:
+            logger.exception(
+                "[SLASH:E_SYNC] No se pudo verificar la publicación de comandos. "
+                "Revisa DISCORD_TOKEN, GUILD_ID y los permisos de la aplicación."
+            )
+            await bot.close()
+            return
 
-    asyncio.create_task(cache.flush_loop())
-    if cargos_task is None or cargos_task.done():
+    if cache_flush_task is None or cache_flush_task.done():
+        cache_flush_task = asyncio.create_task(cache.flush_loop(), name="economy-cache-flush")
+    if not TEST_MODE and (cargos_task is None or cargos_task.done()):
         cargos_task = asyncio.create_task(
             check_cargos_loop(),
             name="cargos-temporales-worker",
         )
         logger.info("Task de cargos temporales iniciada | Revisión persistente cada 30 segundos")
-    if evento_flush_task is None or evento_flush_task.done():
-        evento_flush_task = asyncio.create_task(cache.evento_flush_loop())
-        logger.info("Task de evento iniciada | Flush de ranking cada 10 minutos")
     if wager_recovery_task is None or wager_recovery_task.done():
         wager_recovery_task = asyncio.create_task(
             recover_expired_wagers_loop(),
             name="apuestas-vencidas-worker",
         )
         logger.info("Task de apuestas vencidas iniciada | Revisión cada 30 segundos")
-    if inactive_purge_task is None or inactive_purge_task.done():
+    if not TEST_MODE and (inactive_purge_task is None or inactive_purge_task.done()):
         inactive_purge_task = asyncio.create_task(
             purge_inactive_users_loop(),
             name="purga-usuarios-inactivos-worker",
         )
         logger.info("Task de privacidad iniciada | Purga tras 30 días de inactividad")
-    if log_cleanup_task is None or log_cleanup_task.done():
+    if not TEST_MODE and (log_cleanup_task is None or log_cleanup_task.done()):
         log_cleanup_task = asyncio.create_task(
             log_retention_worker(),
             name="retencion-logs-worker",
@@ -700,47 +749,80 @@ async def on_ready():
         logger.info(
             "Task de retención de logs iniciada | Revisión persistente cada hora"
         )
+    if game_reminder_task is None or game_reminder_task.done():
+        game_reminder_task = asyncio.create_task(
+            game_reminder_worker(bot), name="recordatorios-juegos-worker",
+        )
     logger.info("\n⫷ 𝙋𝙐𝙍𝙋𝙇𝙀𝙅𝘼𝘾𝙆 𝙀𝙉 𝙇𝙄𝙉𝙀𝘼 ⫸\n")
+
+def _register_shutdown_signal(loop: asyncio.AbstractEventLoop) -> bool:
+    """La señal es opcional en entornos donde el event loop la restringe."""
+    try:
+        loop.add_signal_handler(
+            signal.SIGTERM, lambda: asyncio.create_task(shutdown()),
+        )
+    except (NotImplementedError, RuntimeError, ValueError) as error:
+        logger.warning(
+            "[STARTUP:SIGNAL] SIGTERM no disponible: %s. "
+            "El arranque continuará.", type(error).__name__,
+        )
+        return False
+    return True
+
 
 def run_bot():
     async def main():
-        # ── Handler de señal SIGTERM (ej: SquareCloud apagando el proceso) ──
         loop = asyncio.get_running_loop()
-        loop.add_signal_handler(signal.SIGTERM, lambda: asyncio.create_task(shutdown()))
+        _register_shutdown_signal(loop)
 
-        await init_db()
-        await init_halloween_tables()
-        reembolsadas = await recover_pending_wagers()
+        await _startup_step("PostgreSQL y esquema", init_db())
+        await _startup_step("Tablas Halloween", init_halloween_tables())
+        await _startup_step("Tabla de recordatorios", init_game_reminders())
+        reembolsadas = await _startup_step("Apuestas pendientes", recover_pending_wagers())
         if reembolsadas:
             logger.warning(
                 "Se reembolsaron %s apuestas vencidas al iniciar.",
                 reembolsadas,
             )
-        indexed_balances = await load_balance_index()
+        indexed_balances = await _startup_step("Índice de balances", load_balance_index())
         logger.info(
             "Índice económico en RAM iniciado con %s usuario(s).",
             indexed_balances,
         )
-        indexed_names = await load_member_names()
+        indexed_names = await _startup_step("Caché de nombres", load_member_names())
         logger.info("Caché ligera de nombres iniciada con %s usuario(s).", indexed_names)
-        await ensure_wager_constraints()
-        await create_game_config_table()
-        await load_game_config()
-        await load_dados_config()
-        await load_memo_config()
-        await load_items_to_cache()
-        await load_cargos_to_cache()
-        await load_item_role_restrictions_to_cache()
-        await load_collect_config_to_cache()
-        await load_veterano_config_to_cache()
-        await load_saboteador_config_to_cache()
-        await load_evento_to_cache()
-        await load_modules()
+        for label, startup_call in (
+            ("Restricciones de apuestas", ensure_wager_constraints),
+            ("Tabla de configuración de juegos", create_game_config_table),
+            ("Configuración general", load_game_config),
+            ("Configuración Dados", load_dados_config),
+            ("Configuración Memo", load_memo_config),
+            ("Caché de artículos", load_items_to_cache),
+            ("Caché de cargos", load_cargos_to_cache),
+            ("Restricciones de artículos", load_item_role_restrictions_to_cache),
+            ("Configuración Collect", load_collect_config_to_cache),
+            ("Configuración Veterano", load_veterano_config_to_cache),
+            ("Configuración Saboteador", load_saboteador_config_to_cache),
+        ):
+            await _startup_step(label, startup_call())
+        await _startup_step("Carga de extensiones", load_modules())
         try:
             await bot.start(TOKEN)
+        except Exception as error:
+            safe_error = _safe_startup_error(error)
+            logger.error(
+                "[STARTUP:ERROR] Discord: %s: %s",
+                type(error).__name__, safe_error,
+            )
+            raise RuntimeError(
+                f"Inicio fallido en Discord: {type(error).__name__}: {safe_error}"
+            ) from None
         finally:
-            await flush_evento_puntos()
             await cache.flush_to_db()
             logger.info("Flush final completado al cerrar.")
 
     asyncio.run(main())
+
+
+if __name__ == "__main__":
+    run_bot()

@@ -382,6 +382,9 @@ class Golpear(commands.Cog):
         self.bot = bot
 
     def _asegurar_supervisor(self):
+        from settings import TEST_MODE
+        if TEST_MODE:
+            return
         global _loop_task
         if _loop_task is None or _loop_task.done():
             _loop_task = asyncio.create_task(

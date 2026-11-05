@@ -307,25 +307,6 @@ async def init_db():
         """)
 
         await conn.execute("""
-        CREATE TABLE IF NOT EXISTS evento_estado (
-            id SMALLINT PRIMARY KEY CHECK (id = 1),
-            activo BOOLEAN NOT NULL DEFAULT FALSE,
-            iniciado_en DOUBLE PRECISION NOT NULL DEFAULT 0
-        )
-        """)
-        await conn.execute("""
-        INSERT INTO evento_estado (id, activo, iniciado_en)
-        VALUES (1, FALSE, 0)
-        ON CONFLICT (id) DO NOTHING
-        """)
-        await conn.execute("""
-        CREATE TABLE IF NOT EXISTS evento_puntos (
-            user_id BIGINT PRIMARY KEY,
-            puntos BIGINT NOT NULL DEFAULT 0
-        )
-        """)
-
-        await conn.execute("""
         CREATE TABLE IF NOT EXISTS command_cooldowns (
             scope_type TEXT NOT NULL,
             scope_id BIGINT NOT NULL,
@@ -414,80 +395,10 @@ async def init_db():
     logger.info("Base de datos conectada y tablas verificadas.")
 
 
-# ── EVENTO PURPLE COINS ───────────────────────────────
-
-async def load_evento_to_cache():
-    """Restaura el estado y los puntos del evento al iniciar el bot."""
-    async with pool.acquire() as conn:
-        estado = await conn.fetchrow(
-            "SELECT activo, iniciado_en FROM evento_estado WHERE id=1"
-        )
-        puntos = await conn.fetch("SELECT user_id, puntos FROM evento_puntos WHERE puntos > 0")
-
-    cache.restore_evento(
-        bool(estado["activo"]) if estado else False,
-        float(estado["iniciado_en"]) if estado else 0,
-        {row["user_id"]: row["puntos"] for row in puntos},
-    )
-
-
-async def activar_evento():
-    """Inicia un evento nuevo y elimina de forma atómica el ranking anterior."""
-    iniciado_en = time.time()
-    async with pool.acquire() as conn:
-        async with conn.transaction():
-            await conn.execute("DELETE FROM evento_puntos")
-            await conn.execute(
-                "UPDATE evento_estado SET activo=TRUE, iniciado_en=$1 WHERE id=1",
-                iniciado_en,
-            )
-    cache.start_evento(iniciado_en)
-    return iniciado_en
-
-
-async def cerrar_evento():
-    """Detiene el conteo antes de persistir el cierre para no registrar cambios tardíos."""
-    cache.stop_evento()
-    try:
-        async with pool.acquire() as conn:
-            await conn.execute("UPDATE evento_estado SET activo=FALSE WHERE id=1")
-    except Exception:
-        cache.resume_evento()
-        raise
-
-
-async def flush_evento_puntos():
-    """Guarda el snapshot pendiente sin perder cambios producidos durante el flush."""
-    snapshot = cache.get_evento_dirty_snapshot()
-    if not snapshot:
-        return
-
-    positivos = [(user_id, puntos) for user_id, puntos in snapshot.items() if puntos > 0]
-    eliminados = [user_id for user_id, puntos in snapshot.items() if puntos <= 0]
-
-    async with pool.acquire() as conn:
-        async with conn.transaction():
-            if positivos:
-                await conn.executemany(
-                    """
-                    INSERT INTO evento_puntos (user_id, puntos)
-                    VALUES ($1, $2)
-                    ON CONFLICT (user_id) DO UPDATE SET puntos=EXCLUDED.puntos
-                    """,
-                    positivos,
-                )
-            if eliminados:
-                await conn.execute(
-                    "DELETE FROM evento_puntos WHERE user_id = ANY($1::BIGINT[])",
-                    eliminados,
-                )
-    cache.clear_evento_dirty_if_unchanged(snapshot)
-
-
 # ── USUARIOS ───────────────────────────────────────────
 
 async def load_balance_index():
-    """Carga una sola vez el índice ligero usado por !top y !rob por posición."""
+    """Carga una sola vez el índice ligero del ranking económico."""
     async with pool.acquire() as conn:
         rows = await conn.fetch("SELECT id, balance FROM users")
     cache.restore_balance_index(rows)
@@ -656,14 +567,41 @@ async def purge_user_data(user_id: int, inactive_before: float | None = None):
                 await conn.execute("DELETE FROM item_use_log_outbox WHERE user_id=$1", user_id)
                 await conn.execute("DELETE FROM item_uso_diario WHERE user_id=$1", user_id)
                 await conn.execute("DELETE FROM halloween_craft_inventory WHERE user_id=$1", user_id)
-                await conn.execute("DELETE FROM halloween_candy_awards WHERE user_id=$1", user_id)
                 await conn.execute("DELETE FROM halloween_candy_balances WHERE user_id=$1", user_id)
+                inventory_rows = await conn.fetch(
+                    "SELECT item_id, cantidad FROM inventario WHERE user_id=$1 FOR UPDATE",
+                    user_id,
+                )
+                available = {row["item_id"]: int(row["cantidad"]) for row in inventory_rows}
+                expiring_rows = await conn.fetch("""
+                    SELECT item_id, cantidad, stock_unidades
+                    FROM inventario_vencimientos
+                    WHERE user_id=$1
+                    ORDER BY item_id, expira_en, id
+                    FOR UPDATE
+                """, user_id)
+                restock: dict[int, int] = {}
+                for lot in expiring_rows:
+                    item_id = lot["item_id"]
+                    quantity = int(lot["cantidad"])
+                    owned = available.get(item_id, 0)
+                    if owned >= quantity and lot["stock_unidades"]:
+                        restock[item_id] = restock.get(item_id, 0) + int(lot["stock_unidades"])
+                    available[item_id] = max(0, owned - quantity)
+                for item_id, quantity in restock.items():
+                    await conn.execute(
+                        "UPDATE items SET stock=stock+$1 WHERE id=$2 AND stock != -1",
+                        quantity, item_id,
+                    )
+                await conn.execute("DELETE FROM inventario_vencimientos WHERE user_id=$1", user_id)
                 await conn.execute("DELETE FROM inventario WHERE user_id=$1", user_id)
                 await conn.execute("DELETE FROM cargos_temporales WHERE user_id=$1", user_id)
                 await conn.execute("DELETE FROM collect_cooldowns WHERE user_id=$1", user_id)
                 await conn.execute("DELETE FROM game_cooldowns WHERE user_id=$1", user_id)
+                await conn.execute("DELETE FROM game_cooldown_reminders WHERE user_id=$1", user_id)
                 await conn.execute("DELETE FROM user_cd_boosts WHERE user_id=$1", user_id)
-                await conn.execute("DELETE FROM evento_puntos WHERE user_id=$1", user_id)
+                if await conn.fetchval("SELECT to_regclass('public.evento_puntos')"):
+                    await conn.execute("DELETE FROM evento_puntos WHERE user_id=$1", user_id)
                 await conn.execute("DELETE FROM rob_victim_protections WHERE user_id=$1", user_id)
                 await conn.execute("DELETE FROM wagers WHERE user_id=$1", user_id)
                 await conn.execute("""
@@ -1455,15 +1393,6 @@ async def finalize_wager(
             else:
                 cache.update_cached_bank(user_id, payout, track_event=False)
 
-        if wager["track_event"] and source == "balance":
-            if status == "refunded":
-                event_delta = 0
-            elif status == "lost":
-                event_delta = -wager["amount"]
-            else:
-                event_delta = payout - wager["amount"]
-            if event_delta:
-                cache.record_evento_balance_delta(user_id, event_delta)
 
         return {
             "ok": True,
@@ -1612,17 +1541,6 @@ async def finalize_wager_session(
                         track_event=False,
                     )
 
-            if wager["track_event"] and wager["source"] == "balance":
-                event_delta = (
-                    0
-                    if status == "refunded"
-                    else payout - wager["amount"]
-                )
-                if event_delta:
-                    cache.record_evento_balance_delta(
-                        wager["user_id"],
-                        event_delta,
-                    )
 
     return {"ok": True, "count": len(settlements)}
 
@@ -2036,8 +1954,6 @@ async def purchase_item(user_id, item_id, unidades=1, use_bank=False):
             "cooldown_work": user["cooldown_work"],
             "cooldown_crime": user["cooldown_crime"],
         })
-        if not use_bank:
-            cache.record_evento_balance_delta(user_id, balance - user["balance"])
         cache.clear_dirty(user_id)
         cache.invalidate_inventory_cache(user_id)
         if stock != -1:

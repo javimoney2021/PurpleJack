@@ -13,6 +13,7 @@ from core.database import (
 from core.config import COIN, dados_config
 from core import cache
 from core.cd_boost import resolve_cd_boost, send_cd_boost_notice
+from core.game_reminders import send_game_reminder_prompt
 
 DICE_GIF = "https://pub-a09b3609b6b34dfab5c7aa7742cd1a8a.r2.dev/Purple%20jack%20Harcode/DadosPJ.gif"
 _ACTIVE_DADOS: set[int] = set()
@@ -65,6 +66,10 @@ class DadosRollView(discord.ui.View):
         self.finished  = False
         self.processing = False
         self.resolution_lock = asyncio.Lock()
+
+    async def interaction_check(self, interaction: discord.Interaction) -> bool:
+        from bot import check_restricted_interaction
+        return await check_restricted_interaction(interaction)
 
     async def on_timeout(self):
         async with self.resolution_lock:
@@ -207,6 +212,9 @@ class DadosRollView(discord.ui.View):
                     asyncio.create_task(self.message.delete(delay=80))
             except Exception:
                 pass
+            await send_game_reminder_prompt(
+                interaction, self.author_id, "dados", expira_en,
+            )
 
 
     async def on_error(self, interaction, error, item):
@@ -227,7 +235,6 @@ class Dados(commands.Cog):
     def __init__(self, bot):
         self.bot = bot
 
-    @commands.command(name="dados")
     async def dados(self, ctx, monto: int = None):
         # Un mismo MessageCreate no debe ejecutarse dos veces dentro de esta
         # instancia. La idempotencia en DB cubre además las otras instancias.
@@ -245,7 +252,7 @@ class Dados(commands.Cog):
         if monto is None:
             nick = ctx.author.nick or ctx.author.display_name
             return await ctx.reply(
-                f"❌ {nick} Usa: `!dados {{monto}}`.",
+                f"❌ {nick} Abre **/jugar apuesta** y selecciona **Dados**.",
                 mention_author=False,
             )
 

@@ -19,7 +19,6 @@ class Collect(commands.Cog):
     def __init__(self, bot):
         self.bot = bot
 
-    @commands.command()
     async def collect(self, ctx):
         try:
             config = cache.get_collect_config()
@@ -38,7 +37,7 @@ class Collect(commands.Cog):
             if not roles_aplicables:
                 return await ctx.send(
                     f"❌ {ctx.author.mention} No tienes ningún Rol con collect disponible. "
-                    f"Adquiérelos en la **!tienda**"
+                    f"Adquiérelos en **/tienda**"
                 )
 
             # Leer cooldowns desde cache (sin await si ya están cargados)
@@ -122,7 +121,7 @@ class Collect(commands.Cog):
                     logger.warning(f"collect persist error [{user_id}]: {e}")
 
         except Exception as e:
-            logger.error(f"ERROR !collect: {e}")
+            logger.error(f"ERROR /collect: {e}")
             await ctx.send("❌ Ocurrió un error al procesar tu collect.")
 
 
