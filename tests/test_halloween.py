@@ -9,7 +9,7 @@ os.environ.setdefault("DATABASE_URL", "postgresql://test:test@localhost/test")
 from core import halloween
 from modules.craft import CraftBuyButton, CraftConfirmButton, CraftLayout
 from modules.economy import FinanceView
-from modules.staff import CandyRankingView, Staff
+from modules.staff import CandyRankingView, CraftInventoryPaginationView, Staff
 
 
 class _AsyncContext:
@@ -70,6 +70,49 @@ class HalloweenTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("Página 2/2", second.footer.text)
         self.assertTrue(view.siguiente.disabled)
         self.assertFalse(view.anterior.disabled)
+
+    async def test_craft_inventory_page_groups_five_users_without_discord_fetch(self):
+        conn = MagicMock()
+        conn.fetchval = AsyncMock(return_value=7)
+        conn.fetch = AsyncMock(return_value=[
+            {"user_id": 42, "nombre": "Calabaza", "cantidad": 2},
+            {"user_id": 42, "nombre": "Fantasma", "cantidad": 1},
+            {"user_id": 43, "nombre": "Calabaza", "cantidad": 3},
+        ])
+        with patch.object(halloween.database, "pool", self._pool(conn)):
+            users, total = await halloween.get_craft_inventory_page(5, 5)
+        self.assertEqual(total, 7)
+        self.assertEqual(len(users), 2)
+        self.assertEqual(users[0]["items"], [
+            {"nombre": "Calabaza", "cantidad": 2},
+            {"nombre": "Fantasma", "cantidad": 1},
+        ])
+        self.assertEqual(conn.fetch.await_args.args[1:], (5, 5))
+        self.assertIn("LIMIT $1 OFFSET $2", conn.fetch.await_args.args[0])
+
+    async def test_staff_craft_inventory_shows_nicks_and_paginates_five_users(self):
+        self.assertIn("inventarios_craft", [command.name for command in Staff.__cog_app_commands__])
+        view = CraftInventoryPaginationView(7)
+        users = [{"user_id": user_id, "items": [{"nombre": "Calabaza", "cantidad": 2}]}
+                 for user_id in range(1, 6)]
+        with patch("modules.staff.get_craft_inventory_page", new=AsyncMock(return_value=(users, 7))) as get_page, \
+             patch("modules.staff.cache.get_member_name", return_value="Piloto"):
+            embed = await view.get_embed()
+        get_page.assert_awaited_once_with(0, 5)
+        self.assertEqual(len(embed.fields), 5)
+        self.assertIn("Piloto", embed.fields[0].name)
+        self.assertIn("<@1>", embed.fields[0].name)
+        self.assertIn("Calabaza — x2", embed.fields[0].value)
+        self.assertIn("Página 1/2", embed.footer.text)
+        self.assertFalse(view.siguiente.disabled)
+        view.page = 1
+        with patch("modules.staff.get_craft_inventory_page", new=AsyncMock(return_value=(
+            [{"user_id": 6, "items": [{"nombre": "Fantasma", "cantidad": 1}]}], 7,
+        ))), patch("modules.staff.cache.get_member_name", return_value=None):
+            second = await view.get_embed()
+        self.assertIn("ID 6", second.fields[0].name)
+        self.assertIn("Página 2/2", second.footer.text)
+        self.assertTrue(view.siguiente.disabled)
 
     async def test_craft_purchase_is_atomic_and_capped(self):
         conn = MagicMock()

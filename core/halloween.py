@@ -92,6 +92,44 @@ async def get_candy_ranking_page(offset: int, limit: int = 10) -> tuple[list[dic
     return [dict(row) for row in rows], int(total or 0)
 
 
+async def get_craft_inventory_page(offset: int, limit: int = 5) -> tuple[list[dict], int]:
+    """Lista propietarios de Craft sin consultar la lista de miembros de Discord."""
+    async with database.pool.acquire() as conn:
+        total = await conn.fetchval(
+            "SELECT COUNT(DISTINCT user_id) FROM halloween_craft_inventory "
+            "WHERE cantidad > 0"
+        )
+        rows = await conn.fetch(
+            """
+            WITH holders AS (
+                SELECT user_id
+                FROM halloween_craft_inventory
+                WHERE cantidad > 0
+                GROUP BY user_id
+                ORDER BY user_id
+                LIMIT $1 OFFSET $2
+            )
+            SELECT inv.user_id, craft.nombre, inv.cantidad
+            FROM holders
+            JOIN halloween_craft_inventory AS inv ON inv.user_id = holders.user_id
+            JOIN halloween_craft_items AS craft ON craft.id = inv.item_id
+            WHERE inv.cantidad > 0
+            ORDER BY inv.user_id, craft.nombre, craft.id
+            """,
+            limit,
+            offset,
+        )
+    users: dict[int, dict] = {}
+    for row in rows:
+        user_id = int(row["user_id"])
+        user = users.setdefault(user_id, {"user_id": user_id, "items": []})
+        user["items"].append({
+            "nombre": row["nombre"],
+            "cantidad": int(row["cantidad"]),
+        })
+    return list(users.values()), int(total or 0)
+
+
 async def add_craft_item(nombre: str, precio: int, icono: str, descripcion: str) -> bool:
     async with database.pool.acquire() as conn:
         item_id = await conn.fetchval(

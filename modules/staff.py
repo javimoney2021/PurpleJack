@@ -32,6 +32,7 @@ from core.halloween import (
     add_craft_item,
     delete_craft_item,
     get_candy_ranking_page,
+    get_craft_inventory_page,
     get_craft_items,
 )
 from core.config import (
@@ -295,6 +296,94 @@ class CandyRankingView(discord.ui.View):
             logger.exception("No se pudo cambiar la página del ranking de dulces")
             await interaction.followup.send(
                 "❌ No pude actualizar el ranking. Inténtalo de nuevo.", ephemeral=True,
+            )
+
+    @discord.ui.button(label="Anterior", style=discord.ButtonStyle.secondary)
+    async def anterior(self, interaction: discord.Interaction, button: discord.ui.Button):
+        await self._change_page(interaction, -1)
+
+    @discord.ui.button(label="Siguiente", style=discord.ButtonStyle.secondary)
+    async def siguiente(self, interaction: discord.Interaction, button: discord.ui.Button):
+        await self._change_page(interaction, 1)
+
+    async def on_timeout(self):
+        for child in self.children:
+            child.disabled = True
+        if self.message is not None:
+            try:
+                await self.message.edit(view=self)
+            except (discord.HTTPException, discord.NotFound):
+                pass
+
+
+class CraftInventoryPaginationView(discord.ui.View):
+    PAGE_SIZE = 5
+
+    def __init__(self, author_id: int):
+        super().__init__(timeout=300)
+        self.author_id = author_id
+        self.page = 0
+        self.message = None
+
+    async def get_embed(self) -> discord.Embed:
+        users, total = await get_craft_inventory_page(self.page * self.PAGE_SIZE, self.PAGE_SIZE)
+        pages = max(1, ceil(total / self.PAGE_SIZE))
+        if self.page >= pages:
+            self.page = pages - 1
+            users, total = await get_craft_inventory_page(self.page * self.PAGE_SIZE, self.PAGE_SIZE)
+        self.anterior.disabled = self.page == 0
+        self.siguiente.disabled = self.page >= pages - 1
+
+        embed = discord.Embed(
+            title="🎃 Inventarios de Craft",
+            description="Artículos canjeados que permanecen en los inventarios.",
+            color=discord.Color.dark_purple(),
+        )
+        if not users:
+            embed.description = "Ningún usuario posee artículos de Craft actualmente."
+        for user in users:
+            lines = []
+            for index, item in enumerate(user["items"]):
+                name = discord.utils.escape_markdown(
+                    discord.utils.escape_mentions(str(item["nombre"]))
+                ).replace("\n", " ")[:90]
+                line = f"• {name} — x{item['cantidad']}"
+                if sum(map(len, lines)) + len(line) + len(lines) + 35 > 1024:
+                    lines.append(f"… y {len(user['items']) - index} artículo(s) más.")
+                    break
+                lines.append(line)
+            user_id = user["user_id"]
+            nick = cache.get_member_name(user_id) or f"ID {user_id}"
+            nick = discord.utils.escape_markdown(
+                discord.utils.escape_mentions(nick)
+            ).replace("\n", " ")[:120]
+            embed.add_field(
+                name=f"👤 {nick} · <@{user_id}>",
+                value="\n".join(lines),
+                inline=False,
+            )
+        embed.set_footer(text=f"Página {self.page + 1}/{pages} • {total} usuarios con artículos de Craft")
+        return embed
+
+    async def interaction_check(self, interaction: discord.Interaction) -> bool:
+        if interaction.user.id == self.author_id:
+            return True
+        await interaction.response.send_message(
+            "❌ Solo quien abrió este listado puede usar sus botones.", ephemeral=True,
+        )
+        return False
+
+    async def _change_page(self, interaction: discord.Interaction, direction: int) -> None:
+        previous_page = self.page
+        await interaction.response.defer()
+        self.page = max(0, self.page + direction)
+        try:
+            await interaction.edit_original_response(embed=await self.get_embed(), view=self)
+        except Exception:
+            self.page = previous_page
+            logger.exception("No se pudo cambiar la página de inventarios Craft")
+            await interaction.followup.send(
+                "❌ No pude actualizar los inventarios de Craft.", ephemeral=True,
             )
 
     @discord.ui.button(label="Anterior", style=discord.ButtonStyle.secondary)
@@ -684,6 +773,27 @@ class Staff(commands.Cog):
             logger.exception("No se pudo abrir el ranking de dulces")
             await interaction.followup.send(
                 "❌ No pude consultar los saldos de dulces. Inténtalo de nuevo.",
+                ephemeral=True,
+            )
+
+    @app_commands.command(name="inventarios_craft", description="Lista artículos de Craft por usuario")
+    @is_staff()
+    async def inventarios_craft(self, interaction: discord.Interaction):
+        await interaction.response.defer(ephemeral=True)
+        view = CraftInventoryPaginationView(interaction.user.id)
+        try:
+            embed = await view.get_embed()
+            view.message = await interaction.followup.send(
+                embed=embed,
+                view=view,
+                ephemeral=True,
+                wait=True,
+                allowed_mentions=discord.AllowedMentions.none(),
+            )
+        except Exception:
+            logger.exception("No se pudo abrir /inventarios_craft")
+            await interaction.followup.send(
+                "❌ No pude consultar los inventarios de Craft en este momento.",
                 ephemeral=True,
             )
 
