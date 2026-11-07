@@ -78,8 +78,7 @@ NAVE_COMMAND_PAGES = (
             "/jugar {apuesta}             Ruleta, Dados, BJ y Memo.\n"
             "/carrera {apuesta}           Convoca una carrera.\n"
             "/retar {usuario} {apuesta}   Desafía a un jugador.\n"
-            "/rob {usuario}              Intenta robarlo.\n"
-            "Apps > Robar                Roba al autor de un mensaje."
+            "/rob                        Elige un objetivo del Top 10 para robar."
         ),
     ),
 )

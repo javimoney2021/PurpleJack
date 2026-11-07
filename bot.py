@@ -176,7 +176,7 @@ class PurpleJackCommandTree(app_commands.CommandTree):
                 return False
         if command_name in {
             "jugar", "trabajar", "consultar", "work", "crime", "collect",
-            "tienda", "rob", "Robar", "carrera", "retar",
+            "tienda", "rob", "carrera", "retar",
         }:
             return await check_player_access(interaction)
         if command_name in {"ayuda_nave", "eliminar_mis_datos"}:
@@ -638,7 +638,7 @@ async def shutdown():
 
 _REQUIRED_PLAYER_COMMANDS = {
     "jugar", "consultar", "trabajar", "work", "crime", "collect",
-    "tienda", "rob", "Robar", "carrera", "retar",
+    "tienda", "rob", "carrera", "retar",
 }
 
 

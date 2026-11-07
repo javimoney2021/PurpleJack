@@ -510,14 +510,13 @@ class PanelTests(unittest.IsolatedAsyncioTestCase):
             await asyncio.sleep(0)
         send.assert_awaited_once_with(interaction, 42, "trabajar", 9999999999)
 
-    def test_standalone_commands_and_message_context_registered(self):
-        from modules.player_commands import PlayerCommands, robar_mensaje
-        from discord import app_commands
+    def test_standalone_commands_registered_without_rob_message_context(self):
+        from modules.player_commands import PlayerCommands
         self.assertEqual(
             {command.name for command in PlayerCommands.__cog_app_commands__},
             {"work", "crime", "collect", "tienda", "rob", "carrera", "retar"},
         )
-        self.assertIsInstance(robar_mensaje, app_commands.ContextMenu)
+        self.assertEqual(PlayerCommands.rob.parameters, [])
 
     def test_rob_no_longer_uses_top_positions(self):
         root = Path(__file__).resolve().parents[1]
@@ -525,22 +524,78 @@ class PanelTests(unittest.IsolatedAsyncioTestCase):
         self.assertNotIn("get_balance_ranking", source)
         self.assertNotIn("_get_top_target", source)
 
-    async def test_message_context_targets_message_author(self):
-        from modules.player_commands import robar_mensaje
-        target = SimpleNamespace(id=42)
-        guild = SimpleNamespace(fetch_member=AsyncMock(return_value=target))
+    async def test_rob_opens_private_top_ten_selector_without_member_http(self):
+        from modules.player_commands import PlayerCommands, RobTargetView
+
+        player = PlayerCommands(None)
+        message = SimpleNamespace(edit=AsyncMock())
+        interaction = SimpleNamespace(
+            user=SimpleNamespace(id=1),
+            guild=SimpleNamespace(fetch_member=AsyncMock()),
+            response=SimpleNamespace(send_message=AsyncMock(), defer=AsyncMock()),
+            followup=SimpleNamespace(send=AsyncMock(return_value=message)),
+        )
+        top = [(1, 90000), (42, 80000), (43, 4000)]
+        with patch("modules.player_commands.get_balance_ranking", return_value=top) as ranking, \
+             patch("modules.player_commands.cache.get_member_name", return_value="Piloto"):
+            await PlayerCommands.rob.callback(player, interaction)
+        ranking.assert_called_once_with(limit=10)
+        interaction.response.defer.assert_awaited_once_with(ephemeral=True)
+        kwargs = interaction.followup.send.await_args.kwargs
+        self.assertTrue(kwargs["ephemeral"])
+        self.assertTrue(kwargs["wait"])
+        view = kwargs["view"]
+        self.assertIsInstance(view, RobTargetView)
+        self.assertEqual([option.value for option in view.children[0].options], ["42"])
+        self.assertIn("Piloto", view.children[0].options[0].label)
+        interaction.guild.fetch_member.assert_not_awaited()
+        view.stop()
+
+    async def test_rob_selector_resolves_only_chosen_member_and_cannot_repeat(self):
+        from modules.player_commands import RobTargetView
+
+        view = RobTargetView(1, [(1, 42, 80000), (2, 43, 70000)])
+        selector = view.children[0]
+        selector._values = ["42"]
+        target = SimpleNamespace(id=42, bot=False)
+        guild = SimpleNamespace(
+            get_member=Mock(return_value=None),
+            fetch_member=AsyncMock(return_value=target),
+        )
         executor = SimpleNamespace(_execute=AsyncMock())
         interaction = SimpleNamespace(
+            user=SimpleNamespace(id=1),
             guild=guild,
-            response=SimpleNamespace(defer=AsyncMock()),
-            client=SimpleNamespace(get_cog=lambda name: executor),
+            response=SimpleNamespace(edit_message=AsyncMock(), send_message=AsyncMock()),
+            followup=SimpleNamespace(send=AsyncMock()),
+            client=SimpleNamespace(get_cog=Mock(return_value=executor)),
         )
-        message = SimpleNamespace(author=SimpleNamespace(id=42))
-        await robar_mensaje.callback(interaction, message)
+        with patch("bot.check_player_access", new=AsyncMock(return_value=True)), \
+             patch("modules.player_commands.get_balance_ranking",
+                   return_value=[(42, 80000), (43, 70000)]):
+            await selector.callback(interaction)
+            await selector.callback(interaction)
         guild.fetch_member.assert_awaited_once_with(42)
-        executor._execute.assert_awaited_once_with(
-            interaction, "Rob", "rob", target,
+        executor._execute.assert_awaited_once_with(interaction, "Rob", "rob", target)
+        self.assertEqual(interaction.response.send_message.await_count, 1)
+
+    async def test_rob_selector_rejects_target_that_left_live_top(self):
+        from modules.player_commands import RobTargetView
+
+        view = RobTargetView(1, [(1, 42, 80000)])
+        selector = view.children[0]
+        selector._values = ["42"]
+        interaction = SimpleNamespace(
+            user=SimpleNamespace(id=1),
+            response=SimpleNamespace(edit_message=AsyncMock()),
+            guild=SimpleNamespace(fetch_member=AsyncMock()),
         )
+        with patch("bot.check_player_access", new=AsyncMock(return_value=True)), \
+             patch("modules.player_commands.get_balance_ranking", return_value=[(43, 90000)]):
+            await selector.callback(interaction)
+        self.assertFalse(view.used)
+        interaction.guild.fetch_member.assert_not_awaited()
+        self.assertIn("Top cambió", interaction.response.edit_message.await_args.kwargs["content"])
 
     def test_legacy_message_dispatch_disabled(self):
         root = Path(__file__).resolve().parents[1]

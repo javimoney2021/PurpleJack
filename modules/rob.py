@@ -16,7 +16,6 @@ from core.config import rob_config, COIN, ROB_VICTIM_PROTECTION_SECONDS
 from core import cache
 from core.cache import get_rob_cooldown, set_rob_cooldown
 from core.cd_boost import resolve_cd_boost, send_cd_boost_notice
-from core.member_resolution import resolve_explicit_member
 
 SABOTEADOR_EXITO_PROB = 0.60
 SABOTEADOR_ROBO_PORCENTAJE = 0.20
@@ -57,27 +56,18 @@ class Rob(commands.Cog):
         await set_command_cooldown("user", user_id, "rob", expira_en)
         return cd_boost
 
-    async def rob(self, ctx, target_input: discord.Member | str | None = None):
+    async def rob(self, ctx, target_input: discord.Member | None = None):
         if not rob_config["activa"]:
             return await ctx.send(
                 "🔫 Las calles están llenas de Sheriffs y Veteranos, "
                 "está siendo imposible atracar a alguien."
             )
 
-        if isinstance(target_input, discord.Member):
-            target = target_input
-        elif target_input is not None:
-            target = await resolve_explicit_member(ctx.guild, target_input)
-            if target is None:
-                return await ctx.send(
-                    "❌ No se pudo encontrar a ese usuario. Usa /rob usuario o "
-                    "selecciona Apps → Robar en su mensaje."
-                )
-        else:
+        if not isinstance(target_input, discord.Member):
             return await ctx.send(
-                "❌ Indica un usuario con **/rob usuario** o selecciona "
-                "**Apps → Robar** sobre su mensaje."
+                "❌ Usa /rob y elige un objetivo del Top 10 en el selector privado."
             )
+        target = target_input
 
         if target == ctx.author:
             return await ctx.send(
