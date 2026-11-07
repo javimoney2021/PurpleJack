@@ -36,7 +36,7 @@ def _format_rob_cooldown(seconds: int) -> str:
 
 async def _reply_recent_victim(ctx, target: discord.Member) -> None:
     await ctx.message.reply(
-        f"🥺 **{target.display_name}** fue víctima de la delincuencia recientemente, "
+        f"🥺 {ctx.author.mention}, {target.mention} fue víctima de la delincuencia recientemente, "
         "un poquito de porfavor...",
         mention_author=False,
     )
@@ -116,7 +116,8 @@ class Rob(commands.Cog):
                     await update_bank(author_id, -proteccion_veterano["monto"])
                     cd_boost = await self._set_rob_cooldown(author_id)
                     response_message = await ctx.send(
-                        f"🖐️ Lo siento tanto {ctx.author.mention} {proteccion_veterano['msj']}"
+                        f"🖐️ {ctx.author.mention} intentó robar a {target.mention}, "
+                        f"pero su protección de Veterano lo impidió. {proteccion_veterano['msj']}"
                     )
                     await send_cd_boost_notice(
                         response_message,
@@ -129,14 +130,13 @@ class Rob(commands.Cog):
         if target_user["balance"] < 5000:
             cd_boost = await self._set_rob_cooldown(author_id)
             response_message = await ctx.message.reply(
-                f"😳 No te avergüenza robar a alguien que no tiene ni para una Tarjeta de Rol? "
+                f"😳 {ctx.author.mention}, {target.mention} no tiene ni para una Tarjeta de Rol. "
                 f"Atrévete a por los más grandes."
             )
             await send_cd_boost_notice(response_message, ctx.author, cd_boost)
             return
 
         if robo_saboteador:
-            target_nick = target.nick or target.display_name
             success = random.random() <= SABOTEADOR_EXITO_PROB
             if success:
                 monto_robo = int(target_user["balance"] * SABOTEADOR_ROBO_PORCENTAJE)
@@ -151,19 +151,22 @@ class Rob(commands.Cog):
                     if transfer.get("reason") == "victim_protected":
                         return await _reply_recent_victim(ctx, target)
                     return await ctx.send(
-                        "⚠️ El saldo del objetivo cambió durante el robo. Inténtalo de nuevo."
+                        f"⚠️ {ctx.author.mention}, el saldo de {target.mention} cambió durante "
+                        "el robo. Inténtalo de nuevo."
                     )
                 response_message = await ctx.message.reply(
-                    f"😈 Logras romper la Protección del **Veterano** de {target_nick} "
-                    f"y le sacas **{monto_robo:,}** {COIN}.",
+                    f"😈 {ctx.author.mention} le has sacado **{monto_robo:,}** {COIN} "
+                    f"exitosamente a {target.mention}, superando su protección de Veterano. "
+                    "¡Huye antes de que llegue la policía!",
                     mention_author=False,
                 )
             else:
                 penalizacion = int(target_user["balance"] * SABOTEADOR_FALLO_PORCENTAJE)
                 await update_balance(author_id, -penalizacion)
                 response_message = await ctx.message.reply(
-                    f"☠️ Ese **Veterano** de {target_nick} al parecer está en Ultra... "
-                    f"Fallas el robo y pierdes **{penalizacion:,}** {COIN}.",
+                    f"☠️ {ctx.author.mention} Robo fallido 🤡 pierdes "
+                    f"**{penalizacion:,}** {COIN} al intentar robar a {target.mention}. "
+                    "¿Cómo se te ocurre robar delante de un Veterano...?",
                     mention_author=False,
                 )
         else:
@@ -182,19 +185,21 @@ class Rob(commands.Cog):
                     if transfer.get("reason") == "victim_protected":
                         return await _reply_recent_victim(ctx, target)
                     return await ctx.send(
-                        "⚠️ El saldo del objetivo cambió durante el robo. Inténtalo de nuevo."
+                        f"⚠️ {ctx.author.mention}, el saldo de {target.mention} cambió durante "
+                        "el robo. Inténtalo de nuevo."
                     )
                 response_message = await ctx.message.reply(
-                    f"✅ Robo exitoso. Le sacaste **{monto_robo:,}** {COIN} a {target.mention} "
-                    f"sin que se diera cuenta."
+                    f"✅ {ctx.author.mention} le has sacado **{monto_robo:,}** {COIN} "
+                    f"exitosamente a {target.mention}. "
+                    "¡Huye antes de que llegue la policía!"
                 )
             else:
                 penalizacion = int(target_user["balance"] * 0.08)
                 await update_balance(author_id, -penalizacion)
-                target_nick = target.nick or target.display_name
                 response_message = await ctx.message.reply(
-                    f"🚔 Tu robo falló. Perdiste **{penalizacion:,}** {COIN} intentando "
-                    f"robar a {target_nick}."
+                    f"🚔 {ctx.author.mention} Robo fallido 🤡 pierdes "
+                    f"**{penalizacion:,}** {COIN} al intentar robar a {target.mention}. "
+                    "¿Cómo se te ocurre robar delante de un sheriff...?"
                 )
 
         cd_boost = await self._set_rob_cooldown(author_id)
