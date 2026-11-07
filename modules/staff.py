@@ -34,6 +34,7 @@ from core.halloween import (
     get_candy_ranking_page,
     get_craft_inventory_page,
     get_craft_items,
+    purge_craft_inventories,
 )
 from core.config import (
     ruleta_config, game_config, dados_config, memo_config,
@@ -122,6 +123,45 @@ class ResetExpLaboralGlobalModal(discord.ui.Modal, title="Confirmar Reset de XP 
         _EMPLEOS_CACHE.clear()
         await interaction.response.send_message(
             f"✅ Se reinició la XP Laboral de **{len(rows)}** usuarios.",
+            ephemeral=True,
+        )
+
+
+class PurgeCraftModal(discord.ui.Modal, title="Confirmar purga de Craft"):
+    confirmacion = discord.ui.TextInput(
+        label='Escribe "PURGAR" para eliminar los artículos',
+        placeholder="PURGAR",
+        max_length=6,
+    )
+
+    def __init__(self, owner_id: int):
+        super().__init__()
+        self.owner_id = owner_id
+
+    async def on_submit(self, interaction: discord.Interaction):
+        if interaction.user.id != self.owner_id:
+            return await interaction.response.send_message(
+                "❌ Esta confirmación no te pertenece.", ephemeral=True,
+            )
+        if self.confirmacion.value != "PURGAR":
+            return await interaction.response.send_message(
+                "❌ Confirmación incorrecta. No se eliminó ningún artículo.",
+                ephemeral=True,
+            )
+        await interaction.response.defer(ephemeral=True)
+        try:
+            result = await purge_craft_inventories()
+        except Exception:
+            logger.exception("No se pudo completar /purga_craft")
+            return await interaction.followup.send(
+                "❌ No se pudo completar la purga. Revisa los logs antes de reintentar.",
+                ephemeral=True,
+            )
+        await interaction.followup.send(
+            f"✅ Purga de Craft completada: **{result['units']}** unidad(es) de "
+            f"**{result['items']}** artículo(s) retiradas de "
+            f"**{result['users']}** usuario(s). "
+            "Los dulces y el catálogo de Craft no se modificaron.",
             ephemeral=True,
         )
 
@@ -796,6 +836,11 @@ class Staff(commands.Cog):
                 "❌ No pude consultar los inventarios de Craft en este momento.",
                 ephemeral=True,
             )
+
+    @app_commands.command(name="purga_craft", description="Elimina todos los artículos canjeados de Craft")
+    @is_staff()
+    async def purga_craft(self, interaction: discord.Interaction):
+        await interaction.response.send_modal(PurgeCraftModal(interaction.user.id))
 
     @app_commands.command(name="addcoins", description="Añade PurpleCoins a un miembro")
     @app_commands.describe(usuario="Miembro", cantidad="Cantidad a añadir", destino="Balance o Banco")

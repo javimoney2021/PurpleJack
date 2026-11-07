@@ -9,7 +9,7 @@ os.environ.setdefault("DATABASE_URL", "postgresql://test:test@localhost/test")
 from core import halloween
 from modules.craft import CraftBuyButton, CraftConfirmButton, CraftLayout
 from modules.economy import FinanceView
-from modules.staff import CandyRankingView, CraftInventoryPaginationView, Staff
+from modules.staff import CandyRankingView, CraftInventoryPaginationView, PurgeCraftModal, Staff
 
 
 class _AsyncContext:
@@ -113,6 +113,52 @@ class HalloweenTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("ID 6", second.fields[0].name)
         self.assertIn("Página 2/2", second.footer.text)
         self.assertTrue(view.siguiente.disabled)
+
+    async def test_purge_craft_deletes_only_craft_inventory_and_invalidates_users(self):
+        conn = MagicMock()
+        conn.execute = AsyncMock()
+        conn.fetch = AsyncMock(return_value=[
+            {"user_id": 42, "cantidad": 2},
+            {"user_id": 42, "cantidad": 1},
+            {"user_id": 43, "cantidad": 3},
+        ])
+        with patch.object(halloween.database, "pool", self._pool(conn)), \
+             patch.object(halloween.database.cache, "invalidate_inventory_cache") as invalidate:
+            result = await halloween.purge_craft_inventories()
+        self.assertEqual(result, {"users": 2, "items": 3, "units": 6})
+        self.assertEqual(conn.fetch.await_args.args[0],
+                         "DELETE FROM halloween_craft_inventory RETURNING user_id, cantidad")
+        self.assertIn("LOCK TABLE halloween_craft_inventory", conn.execute.await_args.args[0])
+        self.assertEqual({call.args[0] for call in invalidate.call_args_list}, {42, 43})
+
+    async def test_purge_craft_failure_preserves_inventory_cache(self):
+        conn = MagicMock()
+        conn.execute = AsyncMock()
+        conn.fetch = AsyncMock(side_effect=RuntimeError("database unavailable"))
+        with patch.object(halloween.database, "pool", self._pool(conn)), \
+             patch.object(halloween.database.cache, "invalidate_inventory_cache") as invalidate:
+            with self.assertRaises(RuntimeError):
+                await halloween.purge_craft_inventories()
+        invalidate.assert_not_called()
+
+    async def test_staff_purge_requires_typed_confirmation(self):
+        self.assertIn("purga_craft", [command.name for command in Staff.__cog_app_commands__])
+        modal = PurgeCraftModal(7)
+        interaction = MagicMock()
+        interaction.user.id = 7
+        interaction.response.send_message = AsyncMock()
+        interaction.response.defer = AsyncMock()
+        interaction.followup.send = AsyncMock()
+        with patch("modules.staff.purge_craft_inventories", new=AsyncMock(return_value={
+            "users": 2, "items": 3, "units": 6,
+        })) as purge:
+            modal.confirmacion._value = "NO"
+            await modal.on_submit(interaction)
+            purge.assert_not_awaited()
+            modal.confirmacion._value = "PURGAR"
+            await modal.on_submit(interaction)
+            purge.assert_awaited_once()
+            interaction.followup.send.assert_awaited_once()
 
     async def test_craft_purchase_is_atomic_and_capped(self):
         conn = MagicMock()

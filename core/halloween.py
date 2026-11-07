@@ -130,6 +130,26 @@ async def get_craft_inventory_page(offset: int, limit: int = 5) -> tuple[list[di
     return list(users.values()), int(total or 0)
 
 
+async def purge_craft_inventories() -> dict[str, int]:
+    """Borra solo artículos canjeados; invalida RAM después del commit."""
+    async with database.pool.acquire() as conn:
+        async with conn.transaction():
+            await conn.execute(
+                "LOCK TABLE halloween_craft_inventory IN SHARE ROW EXCLUSIVE MODE"
+            )
+            rows = await conn.fetch(
+                "DELETE FROM halloween_craft_inventory RETURNING user_id, cantidad"
+            )
+    affected_users = {int(row["user_id"]) for row in rows}
+    for user_id in affected_users:
+        database.cache.invalidate_inventory_cache(user_id)
+    return {
+        "users": len(affected_users),
+        "items": len(rows),
+        "units": sum(int(row["cantidad"]) for row in rows),
+    }
+
+
 async def add_craft_item(nombre: str, precio: int, icono: str, descripcion: str) -> bool:
     async with database.pool.acquire() as conn:
         item_id = await conn.fetchval(
