@@ -32,6 +32,20 @@ def item(quantity=1):
 
 
 class InventoryRefreshTests(unittest.IsolatedAsyncioTestCase):
+    def test_balance_and_staff_no_longer_expose_craft_or_candy(self):
+        from modules.economy import FinanceView
+        from modules.staff import Staff
+
+        self.assertEqual(
+            [button.label for button in FinanceView(42).children],
+            ["Depositar", "Retirar", "Salir"],
+        )
+        staff_commands = {command.name for command in Staff.__cog_app_commands__}
+        self.assertFalse(staff_commands & {
+            "add_craft", "delete_craft", "dulces_balance",
+            "inventarios_craft", "purga_craft", "add_candy",
+        })
+
     def setUp(self):
         access_patch = patch("bot.check_player_access", new=AsyncMock(return_value=True))
         access_patch.start()
@@ -134,47 +148,6 @@ class InventoryRefreshTests(unittest.IsolatedAsyncioTestCase):
         finally:
             lock.release()
 
-    async def test_craft_edits_saved_ephemeral_balance_message(self):
-        from modules.craft import CraftConfirmButton, CraftLayout
-
-        craft_item = {
-            "id": 9, "nombre": "Premio", "icono": "🎁", "precio": 10,
-            "descripcion": "Premio de prueba",
-        }
-        balance_embed = discord.Embed(title="Balance")
-        for value in ("100", "200", "20"):
-            balance_embed.add_field(name="Campo", value=value, inline=True)
-        balance_message = SimpleNamespace(
-            embeds=[balance_embed], edit=AsyncMock(),
-        )
-        view = CraftLayout([craft_item], 42, 20, balance_message)
-        view.message = SimpleNamespace(edit=AsyncMock())
-        view.pending_item = craft_item
-        view.build()
-        button = next(child for child in view.walk_children()
-                      if isinstance(child, CraftConfirmButton) and child.accept)
-        interaction = SimpleNamespace(
-            user=SimpleNamespace(id=42),
-            response=SimpleNamespace(defer=AsyncMock()),
-            edit_original_response=AsyncMock(),
-            followup=SimpleNamespace(send=AsyncMock()),
-        )
-        result = {"ok": True, "balance": 10, "item_name": "Premio"}
-        with patch("modules.craft.purchase_craft_item", new=AsyncMock(return_value=result)):
-            await button.callback(interaction)
-        view.message.edit.assert_awaited_once_with(view=view)
-        balance_message.edit.assert_awaited_once()
-        interaction.edit_original_response.assert_not_awaited()
-
-    async def test_finance_craft_passes_its_webhook_message(self):
-        from modules.economy import FinanceView
-
-        view = FinanceView(42)
-        view.message = SimpleNamespace(edit=AsyncMock())
-        interaction = SimpleNamespace(user=SimpleNamespace(id=42))
-        with patch("modules.craft.open_craft_panel", new=AsyncMock()) as open_panel:
-            await view.craft.callback(interaction)
-        open_panel.assert_awaited_once_with(interaction, balance_message=view.message)
 
     async def test_processed_purchase_is_not_reported_as_failed_when_ui_is_missing(self):
         purchase_item = {

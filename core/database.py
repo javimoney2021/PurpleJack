@@ -24,6 +24,18 @@ _purchase_locks = {}
 _economy_locks = {}
 
 
+async def drop_halloween_tables() -> None:
+    """Retira únicamente los datos persistidos del sistema de dulces y Craft."""
+    async with pool.acquire() as conn:
+        async with conn.transaction():
+            await conn.execute("DROP TABLE IF EXISTS halloween_craft_inventory")
+            await conn.execute("DROP TABLE IF EXISTS halloween_craft_items")
+            await conn.execute("DROP TABLE IF EXISTS halloween_candy_balances")
+            await conn.execute("DROP TABLE IF EXISTS halloween_candy_awards")
+    cache._inventory_cache.clear()
+    logger.info("Tablas de dulces y Craft retiradas.")
+
+
 def _get_purchase_lock(user_id):
     lock = _purchase_locks.get(user_id)
     if lock is None:
@@ -566,8 +578,6 @@ async def purge_user_data(user_id: int, inactive_before: float | None = None):
 
                 await conn.execute("DELETE FROM item_use_log_outbox WHERE user_id=$1", user_id)
                 await conn.execute("DELETE FROM item_uso_diario WHERE user_id=$1", user_id)
-                await conn.execute("DELETE FROM halloween_craft_inventory WHERE user_id=$1", user_id)
-                await conn.execute("DELETE FROM halloween_candy_balances WHERE user_id=$1", user_id)
                 inventory_rows = await conn.fetch(
                     "SELECT item_id, cantidad FROM inventario WHERE user_id=$1 FOR UPDATE",
                     user_id,
@@ -612,8 +622,6 @@ async def purge_user_data(user_id: int, inactive_before: float | None = None):
                 await conn.execute("DELETE FROM user_activity WHERE user_id=$1", user_id)
 
         cache.purge_user_cache(user_id)
-        from core.halloween import purge_candy_cache
-        purge_candy_cache(user_id)
         _purchase_locks.pop(user_id, None)
         try:
             from modules.Empleos import (
@@ -1984,22 +1992,7 @@ async def get_inventory_from_db(user_id):
             GROUP BY i.id, inv.cantidad
             ORDER BY i.nombre
         """, user_id)
-        craft_rows = await conn.fetch("""
-            SELECT c.id, c.nombre, c.icono, inv.cantidad
-            FROM halloween_craft_inventory inv
-            JOIN halloween_craft_items c ON c.id=inv.item_id
-            WHERE inv.user_id=$1
-            ORDER BY c.nombre
-        """, user_id)
     items = [dict(row) for row in rows]
-    items.extend({
-        "id": -int(row["id"]),
-        "nombre": row["nombre"],
-        "icono": row["icono"],
-        "cantidad": row["cantidad"],
-        "utilizable": False,
-        "expira_en": None,
-    } for row in craft_rows)
     return sorted(items, key=lambda item: item["nombre"].casefold())
 
 async def get_inventory(user_id):

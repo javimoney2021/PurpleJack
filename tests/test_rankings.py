@@ -7,7 +7,7 @@ os.environ.setdefault("DATABASE_URL", "postgresql://test:test@localhost/test")
 
 from core import cache
 from core.rankings import get_balance_ranking
-from modules.staff import CandyRankingView, EconomiaView, ExperienciaLaboralPaginationView
+from modules.staff import EconomiaView, ExperienciaLaboralPaginationView
 
 
 class RankingTests(unittest.IsolatedAsyncioTestCase):
@@ -24,15 +24,6 @@ class RankingTests(unittest.IsolatedAsyncioTestCase):
         cache._set_balance_index_value(11, 300)
         self.assertEqual(get_balance_ranking(2), [(11, 300), (12, 200)])
 
-    async def test_candy_name_uses_snapshot_without_http(self):
-        cache.set_member_name(11, "Piloto")
-        view = CandyRankingView(7)
-        with patch("modules.staff.get_candy_ranking_page", new=AsyncMock(
-            return_value=([{"user_id": 11, "balance": 5}], 1)
-        )):
-            embed = await view.get_embed()
-        self.assertIn("Piloto", embed.description)
-        self.assertEqual(view._display_name(12), "<@12>")
 
     async def test_labor_ranking_uses_saved_names_or_ids_without_http(self):
         cache.set_member_name(11, "Piloto")

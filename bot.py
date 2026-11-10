@@ -51,7 +51,7 @@ logger = logging.getLogger("purplejack")
 from settings import TOKEN, DATABASE_URL, GUILD_ID, TEST_MODE
 
 from core.database import (
-    init_db, load_items_to_cache, load_cargos_to_cache,
+    init_db, drop_halloween_tables, load_items_to_cache, load_cargos_to_cache,
     load_balance_index, load_member_names, remember_member_name,
     load_collect_config_to_cache, claim_expired_cargos,
     get_cargo_temporal_by_id, mark_cargo_removal_failed,
@@ -66,7 +66,6 @@ from core.database import (
     delete_expired_failed_item_use_logs,
 )
 from core import cache
-from core.halloween import init_halloween_tables
 from core.game_reminders import init_game_reminders, game_reminder_worker
 from core.config import (
     AYUDA_CHANNEL_ID, LOG_CHANNEL_ID, STAFF_ROLE_ID, PUNISHMENT_ROLE_ID,
@@ -776,7 +775,7 @@ def run_bot():
         _register_shutdown_signal(loop)
 
         await _startup_step("PostgreSQL y esquema", init_db())
-        await _startup_step("Tablas Halloween", init_halloween_tables())
+        await _startup_step("Retiro de tablas Halloween", drop_halloween_tables())
         await _startup_step("Tabla de recordatorios", init_game_reminders())
         reembolsadas = await _startup_step("Apuestas pendientes", recover_pending_wagers())
         if reembolsadas:
