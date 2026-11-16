@@ -11,7 +11,7 @@ from discord.ext import commands
 from discord import app_commands
 from openpyxl import Workbook
 from core.database import (
-    get_user, update_balance, update_bank, pool,
+    get_user, update_balance, update_bank,
     add_item, edit_item, delete_item,
     get_item_by_name, add_to_inventory, get_all_users_net_worth,
     get_all_inventarios, get_stock_inventory_summary, load_items_to_cache,
@@ -25,6 +25,10 @@ from core.database import (
     set_duel_cooldown_config, get_duel_active_config,
     set_duel_active_config, clear_command_cooldowns, set_system_toggle,
     add_cargo_temporal, delete_cargo_temporal, get_cargo_temporal,
+    reset_all_balances,
+    get_all_experiencia_laboral, add_experiencia_laboral,
+    reset_experiencia_laboral, reset_experiencia_laboral_global,
+    reset_todos_los_empleos,
 )
 from core import cache
 from core.config import (
@@ -33,10 +37,6 @@ from core.config import (
     STAFF_ROLE_ID, COORDINADOR_ROLE_ID, PUNISHMENT_ROLE_ID
 )
 from modules.memo import _memo_cooldowns
-from modules.Empleos import (
-    _EMPLEOS_CACHE, get_empleo_user, save_empleo_user,
-    get_all_experiencia_laboral,
-)
 
 
 
@@ -68,15 +68,7 @@ class ResetAllModal(discord.ui.Modal, title="Confirmar Reset Global"):
     async def on_submit(self, interaction: discord.Interaction):
         if self.confirmacion.value != "Reset":
             return await interaction.response.send_message("❌ Confirmación incorrecta.", ephemeral=True)
-        async with pool.acquire() as conn:
-            async with conn.transaction():
-                await conn.execute("UPDATE users SET balance=0, bank=0")
-                await conn.execute(
-                    """
-                    UPDATE wagers SET status='lost', payout=0
-                    WHERE status='pending'
-                    """
-                )
+        await reset_all_balances()
         cache._cache.clear()
         cache._dirty.clear()
         cache.reset_balance_index(0)
@@ -105,15 +97,10 @@ class ResetExpLaboralGlobalModal(discord.ui.Modal, title="Confirmar Reset de XP 
                 "❌ Confirmación incorrecta.", ephemeral=True
             )
 
-        async with pool.acquire() as conn:
-            rows = await conn.fetch(
-                "UPDATE empleos_users SET exp_laboral=0 "
-                "WHERE exp_laboral <> 0 RETURNING user_id"
-            )
+        reiniciados = await reset_experiencia_laboral_global()
 
-        _EMPLEOS_CACHE.clear()
         await interaction.response.send_message(
-            f"✅ Se reinició la XP Laboral de **{len(rows)}** usuarios.",
+            f"✅ Se reinició la XP Laboral de **{reiniciados}** usuarios.",
             ephemeral=True,
         )
 
@@ -631,30 +618,7 @@ class Staff(commands.Cog):
 
         await interaction.response.defer(ephemeral=False)
 
-        data = await get_empleo_user(usuario.id) or {
-            "user_id": usuario.id,
-            "empleo_actual": None,
-            "dificultad": None,
-            "fecha_contratacion": 0,
-            "ultimo_trabajo": 0,
-            "historial_reciente_de_jornadas": [],
-            "cooldown_renuncia": 0,
-            "progreso_permanencia": 0,
-            "ultimo_empleo": None,
-            "progreso_requisito": 0,
-            "despedido_inactividad": False,
-            "exp_laboral": 0,
-            "trabajos_exitosos": 0,
-            "trabajos_fallidos": 0,
-            "total_generado": 0,
-            "racha_exitos": 0,
-        }
-
-        data["exp_laboral"] = data.get("exp_laboral", 0) + xp
-        await save_empleo_user(data)
-        _EMPLEOS_CACHE.pop(usuario.id, None)
-        data = await get_empleo_user(usuario.id, force_refresh=True) or data
-        _EMPLEOS_CACHE[usuario.id] = data
+        await add_experiencia_laboral(usuario.id, xp)
 
         await interaction.followup.send(
             f"✅ Se otorgaron **{xp}** puntos de XP Laboral a {usuario.mention}.",
@@ -704,14 +668,7 @@ class Staff(commands.Cog):
                 ephemeral=True,
             )
 
-        async with pool.acquire() as conn:
-            user_id = await conn.fetchval(
-                "UPDATE empleos_users SET exp_laboral=0 "
-                "WHERE user_id=$1 AND exp_laboral <> 0 RETURNING user_id",
-                usuario.id,
-            )
-
-        _EMPLEOS_CACHE.pop(usuario.id, None)
+        user_id = await reset_experiencia_laboral(usuario.id)
         if user_id is None:
             return await interaction.response.send_message(
                 f"ℹ️ {usuario.mention} no tiene XP Laboral para reiniciar.",
@@ -727,18 +684,12 @@ class Staff(commands.Cog):
     async def reset_empleos(self, interaction: discord.Interaction):
         await interaction.response.defer(ephemeral=True)
         try:
-            async with pool.acquire() as conn:
-                users_deleted = await conn.fetchval("SELECT COUNT(*) FROM empleos_users")
-                historial_deleted = await conn.fetchval("SELECT COUNT(*) FROM empleos_historial")
-                await conn.execute("DELETE FROM empleos_users")
-                await conn.execute("DELETE FROM empleos_historial")
-
-            _EMPLEOS_CACHE.clear()
+            counts = await reset_todos_los_empleos()
 
             await interaction.followup.send(
                 "✅ Limpieza temporal de empleos completada.\n"
-                f"• Usuarios con empleo limpiados: **{users_deleted or 0}**\n"
-                f"• Registros de historial eliminados: **{historial_deleted or 0}**\n"
+                f"• Usuarios con empleo limpiados: **{counts['users']}**\n"
+                f"• Registros de historial eliminados: **{counts['historial']}**\n"
                 "• Caché RAM de empleos reiniciada.",
                 ephemeral=True,
             )
@@ -1766,6 +1717,18 @@ class Staff(commands.Cog):
             return await interaction.response.send_message(
                 "❌ Formato inválido. Usa ejemplos como: 6h o 30m", ephemeral=True
             )
+        if seconds <= 0:
+            return await interaction.response.send_message(
+                "❌ El cooldown debe ser mayor a 0.", ephemeral=True
+            )
+        if minimo < 0 or maximo < 0:
+            return await interaction.response.send_message(
+                "❌ El mínimo y el máximo no pueden ser negativos.", ephemeral=True
+            )
+        if minimo > maximo:
+            return await interaction.response.send_message(
+                "❌ El mínimo no puede ser mayor que el máximo.", ephemeral=True
+            )
         game_config["work"]["min"] = minimo
         game_config["work"]["max"] = maximo
         game_config["work"]["cooldown"] = seconds
@@ -1792,17 +1755,18 @@ class Staff(commands.Cog):
             return await interaction.response.send_message(
                 "❌ Formato inválido. Usa ejemplos como: 6h o 30m", ephemeral=True
             )
-
-        def parse_cooldown(value):
-            """Parsea formato 45m o 2h a segundos"""
-            match = re.match(r'^(\d+)([mh])$', value.lower())
-            if not match:
-                raise ValueError("Formato inválido. Usa: 45m o 2h")
-            amount, unit = int(match.group(1)), match.group(2)
-            if unit == 'm':
-                return amount * 60
-            else:
-                return amount * 3600
+        if seconds <= 0:
+            return await interaction.response.send_message(
+                "❌ El cooldown debe ser mayor a 0.", ephemeral=True
+            )
+        if minimo < 0 or maximo < 0:
+            return await interaction.response.send_message(
+                "❌ El mínimo y el máximo no pueden ser negativos.", ephemeral=True
+            )
+        if minimo > maximo:
+            return await interaction.response.send_message(
+                "❌ El mínimo no puede ser mayor que el máximo.", ephemeral=True
+            )
 
         def parse_prob(value):
             if value is None:

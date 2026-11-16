@@ -23,6 +23,15 @@ pool = None
 _purchase_locks = {}
 _economy_locks = {}
 
+MAX_BICHOS_PER_USER = 5
+BICHOS_ITEM_EFFECTS = ("regeneracion", "power", "vitamina")
+BICHOS_ITEM_ICONS = {"regeneracion": "💚", "power": "⚡", "vitamina": "💊"}
+BICHOS_POWER_ATTACK = 5
+BICHOS_POWER_DEFENSE = 5
+BICHOS_POWER_HOURS = 3
+BICHOS_VITAMIN_TRAINING_PCT = 30
+BICHOS_VITAMIN_HOURS = 1
+
 
 async def drop_halloween_tables() -> None:
     """Retira únicamente los datos persistidos del sistema de dulces y Craft."""
@@ -34,6 +43,612 @@ async def drop_halloween_tables() -> None:
             await conn.execute("DROP TABLE IF EXISTS halloween_candy_awards")
     cache._inventory_cache.clear()
     logger.info("Tablas de dulces y Craft retiradas.")
+
+
+async def init_bichos_tables() -> None:
+    """Crea únicamente la base persistente de Bichos World."""
+    async with pool.acquire() as conn:
+        async with conn.transaction():
+            await conn.execute("""
+                CREATE TABLE IF NOT EXISTS bichos_players (
+                    user_id BIGINT PRIMARY KEY,
+                    nickname TEXT NOT NULL,
+                    bcoin_balance BIGINT NOT NULL DEFAULT 0 CHECK (bcoin_balance >= 0),
+                    registered_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+                )
+            """)
+            await conn.execute(
+                "ALTER TABLE bichos_players ADD COLUMN IF NOT EXISTS "
+                "bcoin_balance BIGINT NOT NULL DEFAULT 0 CHECK (bcoin_balance >= 0)"
+            )
+            await conn.execute("""
+                CREATE TABLE IF NOT EXISTS bichos_owned (
+                    id BIGSERIAL PRIMARY KEY,
+                    user_id BIGINT NOT NULL REFERENCES bichos_players(user_id) ON DELETE CASCADE,
+                    species_key TEXT NOT NULL,
+                    nickname TEXT,
+                    level INTEGER NOT NULL DEFAULT 1 CHECK (level >= 1),
+                    acquired_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+                )
+            """)
+            await conn.execute("""
+                CREATE TABLE IF NOT EXISTS bichos_objects (
+                    id BIGSERIAL PRIMARY KEY,
+                    user_id BIGINT NOT NULL REFERENCES bichos_players(user_id) ON DELETE CASCADE,
+                    item_key TEXT NOT NULL,
+                    quantity INTEGER NOT NULL DEFAULT 1 CHECK (quantity > 0),
+                    UNIQUE (user_id, item_key)
+                )
+            """)
+            await conn.execute("""
+                CREATE TABLE IF NOT EXISTS bichos_catalog (
+                    id BIGSERIAL PRIMARY KEY,
+                    name TEXT NOT NULL UNIQUE,
+                    description TEXT NOT NULL DEFAULT '',
+                    image_url TEXT NOT NULL,
+                    attack INTEGER NOT NULL CHECK (attack >= 0),
+                    defense INTEGER NOT NULL CHECK (defense >= 0),
+                    price INTEGER NOT NULL CHECK (price >= 0),
+                    active BOOLEAN NOT NULL DEFAULT TRUE
+                )
+            """)
+            await conn.execute(
+                "ALTER TABLE bichos_catalog ADD COLUMN IF NOT EXISTS "
+                "description TEXT NOT NULL DEFAULT ''"
+            )
+            await conn.execute("""
+                CREATE TABLE IF NOT EXISTS bichos_item_catalog (
+                    id BIGSERIAL PRIMARY KEY,
+                    name TEXT NOT NULL UNIQUE,
+                    description TEXT NOT NULL,
+                    icon TEXT NOT NULL,
+                    image_url TEXT NOT NULL DEFAULT '',
+                    boost TEXT NOT NULL DEFAULT '',
+                    price INTEGER NOT NULL CHECK (price >= 0),
+                    consumable BOOLEAN NOT NULL DEFAULT TRUE,
+                    active BOOLEAN NOT NULL DEFAULT TRUE
+                )
+            """)
+            await conn.execute(
+                "ALTER TABLE bichos_item_catalog ADD COLUMN IF NOT EXISTS "
+                "consumable BOOLEAN NOT NULL DEFAULT TRUE"
+            )
+            await conn.execute(
+                "ALTER TABLE bichos_item_catalog ADD COLUMN IF NOT EXISTS "
+                "image_url TEXT NOT NULL DEFAULT ''"
+            )
+            await conn.execute(
+                "ALTER TABLE bichos_item_catalog ADD COLUMN IF NOT EXISTS "
+                "boost TEXT NOT NULL DEFAULT ''"
+            )
+            await conn.execute(
+                "ALTER TABLE bichos_owned ADD COLUMN IF NOT EXISTS lives "
+                "INTEGER NOT NULL DEFAULT 3 CHECK (lives BETWEEN 0 AND 3)"
+            )
+            await conn.execute(
+                "ALTER TABLE bichos_owned ADD COLUMN IF NOT EXISTS equipped "
+                "BOOLEAN NOT NULL DEFAULT FALSE"
+            )
+            await conn.execute(
+                "ALTER TABLE bichos_owned ADD COLUMN IF NOT EXISTS boost_attack "
+                "INTEGER NOT NULL DEFAULT 0 CHECK (boost_attack >= 0)"
+            )
+            await conn.execute(
+                "ALTER TABLE bichos_owned ADD COLUMN IF NOT EXISTS boost_defense "
+                "INTEGER NOT NULL DEFAULT 0 CHECK (boost_defense >= 0)"
+            )
+            await conn.execute(
+                "ALTER TABLE bichos_owned ADD COLUMN IF NOT EXISTS boost_expires_at "
+                "TIMESTAMPTZ"
+            )
+            await conn.execute(
+                "ALTER TABLE bichos_owned ADD COLUMN IF NOT EXISTS training_boost_pct "
+                "INTEGER NOT NULL DEFAULT 0 CHECK (training_boost_pct >= 0)"
+            )
+            await conn.execute(
+                "ALTER TABLE bichos_owned ADD COLUMN IF NOT EXISTS training_boost_expires_at "
+                "TIMESTAMPTZ"
+            )
+            await conn.execute("""
+                CREATE UNIQUE INDEX IF NOT EXISTS bichos_one_equipped_per_player
+                ON bichos_owned (user_id) WHERE equipped
+            """)
+            await conn.execute("""
+                CREATE TABLE IF NOT EXISTS bichos_purchases (
+                    token TEXT PRIMARY KEY,
+                    user_id BIGINT NOT NULL,
+                    catalog_id BIGINT NOT NULL,
+                    price INTEGER NOT NULL CHECK (price >= 0),
+                    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+                )
+            """)
+            await conn.execute("""
+                CREATE TABLE IF NOT EXISTS bichos_item_purchases (
+                    token TEXT PRIMARY KEY,
+                    user_id BIGINT NOT NULL,
+                    item_id BIGINT NOT NULL,
+                    price INTEGER NOT NULL CHECK (price >= 0),
+                    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+                )
+            """)
+            await conn.execute("""
+                CREATE TABLE IF NOT EXISTS bichos_item_uses (
+                    token TEXT PRIMARY KEY,
+                    user_id BIGINT NOT NULL,
+                    item_key TEXT NOT NULL,
+                    owned_bicho_id BIGINT,
+                    effect TEXT NOT NULL,
+                    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+                )
+            """)
+
+
+async def get_bichos_registration(user_id: int) -> bool:
+    async with pool.acquire() as conn:
+        return bool(await conn.fetchval(
+            "SELECT 1 FROM bichos_players WHERE user_id=$1", user_id,
+        ))
+
+
+async def get_bichos_balance(user_id: int) -> int:
+    async with pool.acquire() as conn:
+        balance = await conn.fetchval(
+            "SELECT bcoin_balance FROM bichos_players WHERE user_id=$1", user_id,
+        )
+    return int(balance or 0)
+
+
+async def register_bichos_player(user_id: int, nickname: str) -> bool:
+    nickname = " ".join(nickname.split())[:80] or f"Usuario {user_id}"
+    async with pool.acquire() as conn:
+        inserted = await conn.fetchval("""
+            INSERT INTO bichos_players (user_id, nickname)
+            VALUES ($1, $2)
+            ON CONFLICT (user_id) DO NOTHING
+            RETURNING user_id
+        """, user_id, nickname)
+    return inserted is not None
+
+
+async def get_owned_bichos(user_id: int) -> list[dict]:
+    async with pool.acquire() as conn:
+        rows = await conn.fetch("""
+            SELECT owned.id, owned.species_key, owned.nickname, owned.level,
+                   owned.lives, owned.equipped,
+                   CASE WHEN owned.training_boost_expires_at > NOW()
+                        THEN owned.training_boost_pct ELSE 0 END AS training_boost_pct,
+                   owned.training_boost_expires_at,
+                   owned.boost_expires_at,
+                   catalog.image_url,
+                   catalog.attack AS base_attack,
+                   catalog.defense AS base_defense,
+                   CASE WHEN owned.boost_expires_at > NOW()
+                        THEN owned.boost_attack ELSE 0 END AS active_attack_boost,
+                   CASE WHEN owned.boost_expires_at > NOW()
+                        THEN owned.boost_defense ELSE 0 END AS active_defense_boost,
+                   catalog.attack + CASE WHEN owned.boost_expires_at > NOW()
+                        THEN owned.boost_attack ELSE 0 END AS attack,
+                   catalog.defense + CASE WHEN owned.boost_expires_at > NOW()
+                        THEN owned.boost_defense ELSE 0 END AS defense
+            FROM bichos_owned AS owned
+            LEFT JOIN bichos_catalog AS catalog ON catalog.name=owned.species_key
+            WHERE owned.user_id=$1
+            ORDER BY owned.equipped DESC, owned.id ASC
+            LIMIT 5
+        """, user_id)
+    return [dict(row) for row in rows]
+
+
+async def get_bichos_objects(user_id: int) -> list[dict]:
+    async with pool.acquire() as conn:
+        rows = await conn.fetch("""
+            SELECT owned.item_key, owned.quantity,
+                   catalog.icon, catalog.description, catalog.image_url,
+                   catalog.boost, catalog.price
+            FROM bichos_objects AS owned
+            LEFT JOIN bichos_item_catalog AS catalog ON catalog.name=owned.item_key
+            WHERE owned.user_id=$1 AND owned.quantity > 0
+            ORDER BY owned.item_key
+        """, user_id)
+    return [dict(row) for row in rows]
+
+
+async def get_bichos_players_page(exclude_user_id: int, offset: int, limit: int = 10):
+    async with pool.acquire() as conn:
+        total = await conn.fetchval(
+            "SELECT COUNT(*) FROM bichos_players WHERE user_id<>$1", exclude_user_id,
+        )
+        rows = await conn.fetch("""
+            SELECT players.user_id, players.nickname,
+                   COUNT(owned.id)::INTEGER AS bichos_count
+            FROM bichos_players AS players
+            LEFT JOIN bichos_owned AS owned ON owned.user_id=players.user_id
+            WHERE players.user_id<>$1
+            GROUP BY players.user_id, players.nickname
+            ORDER BY LOWER(players.nickname), players.user_id
+            LIMIT $2 OFFSET $3
+        """, exclude_user_id, limit, offset)
+    return [dict(row) for row in rows], int(total or 0)
+
+
+async def get_bichos_catalog() -> list[dict]:
+    """Devuelve el catálogo activo usando la caché RAM cuando está disponible."""
+    cached = cache.get_bichos_catalog_cache()
+    if cached is not None:
+        return cached
+    async with pool.acquire() as conn:
+        rows = await conn.fetch("""
+            SELECT id, name, description, image_url, attack, defense, price
+            FROM bichos_catalog
+            WHERE active
+            ORDER BY id
+        """)
+    catalog = [dict(row) for row in rows]
+    cache.set_bichos_catalog_cache(catalog)
+    return catalog
+
+
+async def add_bichos_catalog(name: str, description: str, image_url: str,
+                             attack: int, defense: int, price: int):
+    async with pool.acquire() as conn:
+        created = await conn.fetchval("""
+            INSERT INTO bichos_catalog (
+                name, description, image_url, attack, defense, price
+            )
+            VALUES ($1, $2, $3, $4, $5, $6)
+            ON CONFLICT (name) DO NOTHING RETURNING id
+        """, name, description, image_url, attack, defense, price)
+    cache.clear_bichos_catalog_cache()
+    return created
+
+
+async def purchase_bicho(user_id: int, catalog_id: int, token: str) -> dict:
+    """Compra un bicho de forma atómica e idempotente.
+
+    El token identifica una intención de compra concreta. Si la misma
+    interacción se repite, la fila única de ``bichos_purchases`` evita
+    descontar Bcoins o registrar el bicho por segunda vez.
+    """
+    if not token:
+        return {"ok": False, "reason": "invalid_token"}
+
+    lock = _get_purchase_lock(user_id)
+    async with lock:
+        async with pool.acquire() as conn:
+            async with conn.transaction():
+                player = await conn.fetchrow(
+                    "SELECT bcoin_balance FROM bichos_players "
+                    "WHERE user_id=$1 FOR UPDATE",
+                    user_id,
+                )
+                if not player:
+                    return {"ok": False, "reason": "not_registered"}
+
+                bicho = await conn.fetchrow(
+                    "SELECT id, name, price FROM bichos_catalog "
+                    "WHERE id=$1 AND active",
+                    catalog_id,
+                )
+                if not bicho:
+                    return {"ok": False, "reason": "not_found"}
+
+                owned = await conn.fetchval(
+                    "SELECT COUNT(*) FROM bichos_owned WHERE user_id=$1",
+                    user_id,
+                )
+                if int(owned or 0) >= MAX_BICHOS_PER_USER:
+                    return {
+                        "ok": False,
+                        "reason": "max_owned",
+                        "limit": MAX_BICHOS_PER_USER,
+                        "owned": int(owned or 0),
+                    }
+
+                price = int(bicho["price"])
+                balance = int(player["bcoin_balance"] or 0)
+                if balance < price:
+                    return {
+                        "ok": False,
+                        "reason": "insufficient_balance",
+                        "balance": balance,
+                        "price": price,
+                    }
+
+                registered = await conn.fetchval(
+                    """
+                    INSERT INTO bichos_purchases (token, user_id, catalog_id, price)
+                    VALUES ($1, $2, $3, $4)
+                    ON CONFLICT (token) DO NOTHING
+                    RETURNING token
+                    """,
+                    token,
+                    user_id,
+                    catalog_id,
+                    price,
+                )
+                if registered is None:
+                    return {"ok": False, "reason": "duplicate"}
+
+                new_balance = await conn.fetchval(
+                    """
+                    UPDATE bichos_players
+                    SET bcoin_balance = bcoin_balance - $2
+                    WHERE user_id=$1
+                    RETURNING bcoin_balance
+                    """,
+                    user_id,
+                    price,
+                )
+                owned_id = await conn.fetchval(
+                    """
+                    INSERT INTO bichos_owned (user_id, species_key)
+                    VALUES ($1, $2)
+                    RETURNING id
+                    """,
+                    user_id,
+                    bicho["name"],
+                )
+
+    return {
+        "ok": True,
+        "owned_id": owned_id,
+        "name": bicho["name"],
+        "price": price,
+        "balance": int(new_balance or 0),
+    }
+
+
+async def get_bichos_item_catalog() -> list[dict]:
+    """Devuelve el catálogo activo de ítems usando la caché RAM."""
+    cached = cache.get_bichos_item_catalog_cache()
+    if cached is not None:
+        return cached
+    async with pool.acquire() as conn:
+        rows = await conn.fetch("""
+            SELECT id, name, description, image_url, boost, icon, price
+            FROM bichos_item_catalog
+            WHERE active
+            ORDER BY id
+        """)
+    catalog = [dict(row) for row in rows]
+    cache.set_bichos_item_catalog_cache(catalog)
+    return catalog
+
+
+async def add_bichos_item_catalog(name: str, description: str, image_url: str,
+                                  boost: str, price: int):
+    icon = BICHOS_ITEM_ICONS.get(boost, "🎁")
+    async with pool.acquire() as conn:
+        created = await conn.fetchval("""
+            INSERT INTO bichos_item_catalog (
+                name, description, icon, image_url, boost, price
+            )
+            VALUES ($1, $2, $3, $4, $5, $6)
+            ON CONFLICT (name) DO NOTHING RETURNING id
+        """, name, description, icon, image_url, boost, price)
+    cache.clear_bichos_item_catalog_cache()
+    return created
+
+
+async def purchase_bicho_item(user_id: int, item_id: int, token: str) -> dict:
+    """Compra un ítem de Bichos de forma atómica e idempotente."""
+    if not token:
+        return {"ok": False, "reason": "invalid_token"}
+
+    lock = _get_purchase_lock(user_id)
+    async with lock:
+        async with pool.acquire() as conn:
+            async with conn.transaction():
+                player = await conn.fetchrow(
+                    "SELECT bcoin_balance FROM bichos_players "
+                    "WHERE user_id=$1 FOR UPDATE",
+                    user_id,
+                )
+                if not player:
+                    return {"ok": False, "reason": "not_registered"}
+
+                item = await conn.fetchrow(
+                    "SELECT id, name, price FROM bichos_item_catalog "
+                    "WHERE id=$1 AND active",
+                    item_id,
+                )
+                if not item:
+                    return {"ok": False, "reason": "not_found"}
+
+                price = int(item["price"])
+                balance = int(player["bcoin_balance"] or 0)
+                if balance < price:
+                    return {
+                        "ok": False,
+                        "reason": "insufficient_balance",
+                        "balance": balance,
+                        "price": price,
+                    }
+
+                registered = await conn.fetchval(
+                    """
+                    INSERT INTO bichos_item_purchases (token, user_id, item_id, price)
+                    VALUES ($1, $2, $3, $4)
+                    ON CONFLICT (token) DO NOTHING
+                    RETURNING token
+                    """,
+                    token,
+                    user_id,
+                    item_id,
+                    price,
+                )
+                if registered is None:
+                    return {"ok": False, "reason": "duplicate"}
+
+                new_balance = await conn.fetchval(
+                    """
+                    UPDATE bichos_players
+                    SET bcoin_balance = bcoin_balance - $2
+                    WHERE user_id=$1
+                    RETURNING bcoin_balance
+                    """,
+                    user_id,
+                    price,
+                )
+                quantity = await conn.fetchval(
+                    """
+                    INSERT INTO bichos_objects (user_id, item_key, quantity)
+                    VALUES ($1, $2, 1)
+                    ON CONFLICT (user_id, item_key)
+                    DO UPDATE SET quantity = bichos_objects.quantity + 1
+                    RETURNING quantity
+                    """,
+                    user_id,
+                    item["name"],
+                )
+
+    return {
+        "ok": True,
+        "name": item["name"],
+        "price": price,
+        "balance": int(new_balance or 0),
+        "quantity": int(quantity or 0),
+    }
+
+
+async def use_bicho_item(user_id: int, item_key: str, token: str) -> dict:
+    """Consume un ítem y aplica su efecto al Bicho equipado.
+
+    El token hace que un doble clic en ``Usar`` no consuma dos unidades.
+    """
+    if not token:
+        return {"ok": False, "reason": "invalid_token"}
+
+    lock = _get_purchase_lock(user_id)
+    async with lock:
+        async with pool.acquire() as conn:
+            async with conn.transaction():
+                owned = await conn.fetchrow(
+                    """
+                    SELECT id, species_key, nickname, lives
+                    FROM bichos_owned
+                    WHERE user_id=$1 AND equipped
+                    FOR UPDATE
+                    """,
+                    user_id,
+                )
+                if not owned:
+                    return {"ok": False, "reason": "no_equipped"}
+
+                item = await conn.fetchrow(
+                    "SELECT name, boost FROM bichos_item_catalog "
+                    "WHERE name=$1 AND active",
+                    item_key,
+                )
+                if not item:
+                    return {"ok": False, "reason": "not_found"}
+
+                effect = item["boost"]
+                if effect not in BICHOS_ITEM_EFFECTS:
+                    return {"ok": False, "reason": "invalid_boost"}
+
+                inventory = await conn.fetchrow(
+                    "SELECT quantity FROM bichos_objects "
+                    "WHERE user_id=$1 AND item_key=$2 FOR UPDATE",
+                    user_id,
+                    item_key,
+                )
+                if not inventory or int(inventory["quantity"] or 0) <= 0:
+                    return {"ok": False, "reason": "out_of_owned"}
+
+                current_lives = int(owned["lives"] or 0)
+                if effect == "regeneracion" and current_lives >= 3:
+                    return {"ok": False, "reason": "full_lives"}
+
+                used = await conn.fetchval(
+                    """
+                    INSERT INTO bichos_item_uses (
+                        token, user_id, item_key, owned_bicho_id, effect
+                    )
+                    VALUES ($1, $2, $3, $4, $5)
+                    ON CONFLICT (token) DO NOTHING
+                    RETURNING token
+                    """,
+                    token,
+                    user_id,
+                    item_key,
+                    owned["id"],
+                    effect,
+                )
+                if used is None:
+                    return {"ok": False, "reason": "duplicate"}
+
+                if int(inventory["quantity"]) <= 1:
+                    await conn.execute(
+                        "DELETE FROM bichos_objects WHERE user_id=$1 AND item_key=$2",
+                        user_id,
+                        item_key,
+                    )
+                    remaining = 0
+                else:
+                    remaining = await conn.fetchval(
+                        "UPDATE bichos_objects SET quantity = quantity - 1 "
+                        "WHERE user_id=$1 AND item_key=$2 RETURNING quantity",
+                        user_id,
+                        item_key,
+                    )
+
+                result = {
+                    "ok": True,
+                    "name": item["name"],
+                    "effect": effect,
+                    "bicho_name": owned["nickname"] or owned["species_key"],
+                    "quantity": int(remaining or 0),
+                }
+                if effect == "regeneracion":
+                    result["lives"] = int(await conn.fetchval(
+                        "UPDATE bichos_owned SET lives=3 WHERE id=$1 RETURNING lives",
+                        owned["id"],
+                    ))
+                elif effect == "power":
+                    boost = await conn.fetchrow(
+                        """
+                        UPDATE bichos_owned
+                        SET boost_attack=$2, boost_defense=$3,
+                            boost_expires_at=NOW() + INTERVAL '3 hours'
+                        WHERE id=$1
+                        RETURNING boost_attack, boost_defense, boost_expires_at
+                        """,
+                        owned["id"],
+                        BICHOS_POWER_ATTACK,
+                        BICHOS_POWER_DEFENSE,
+                    )
+                    result.update(dict(boost))
+                else:
+                    training = await conn.fetchrow(
+                        """
+                        UPDATE bichos_owned
+                        SET training_boost_pct=$2,
+                            training_boost_expires_at=NOW() + INTERVAL '1 hour'
+                        WHERE id=$1
+                        RETURNING training_boost_pct, training_boost_expires_at
+                        """,
+                        owned["id"],
+                        BICHOS_VITAMIN_TRAINING_PCT,
+                    )
+                    result.update(dict(training))
+
+    return result
+
+
+async def get_bichos_users_page(offset: int, limit: int = 10):
+    async with pool.acquire() as conn:
+        total = await conn.fetchval("SELECT COUNT(*) FROM bichos_players")
+        rows = await conn.fetch("""
+            SELECT players.user_id, players.nickname,
+                   COUNT(owned.id)::INTEGER AS bichos_count
+            FROM bichos_players AS players
+            LEFT JOIN bichos_owned AS owned ON owned.user_id=players.user_id
+            GROUP BY players.user_id, players.nickname
+            ORDER BY LOWER(players.nickname), players.user_id
+            LIMIT $1 OFFSET $2
+        """, limit, offset)
+    return [dict(row) for row in rows], int(total or 0)
 
 
 def _get_purchase_lock(user_id):
@@ -51,6 +666,110 @@ def _get_economy_lock(user_id):
         lock = asyncio.Lock()
         _economy_locks[user_id] = lock
     return lock
+
+async def _ensure_empleos_schema(conn) -> None:
+    """Crea/actualiza el esquema persistente del sistema de Empleos."""
+    await conn.execute("""
+    CREATE TABLE IF NOT EXISTS empleos_users (
+        user_id BIGINT PRIMARY KEY,
+        empleo_actual TEXT DEFAULT NULL,
+        dificultad TEXT DEFAULT NULL,
+        fecha_contratacion DOUBLE PRECISION DEFAULT 0,
+        ultimo_trabajo DOUBLE PRECISION DEFAULT 0,
+        historial_reciente_de_jornadas TEXT DEFAULT '[]',
+        cooldown_renuncia DOUBLE PRECISION DEFAULT 0,
+        progreso_permanencia DOUBLE PRECISION DEFAULT 0,
+        ultimo_empleo TEXT DEFAULT NULL,
+        progreso_requisito DOUBLE PRECISION DEFAULT 0,
+        despedido_inactividad BOOLEAN DEFAULT FALSE,
+        exp_laboral INTEGER DEFAULT 0,
+        maestrias INTEGER DEFAULT 0,
+        trabajos_exitosos INTEGER DEFAULT 0,
+        trabajos_fallidos INTEGER DEFAULT 0,
+        total_generado INTEGER DEFAULT 0,
+        racha_exitos INTEGER DEFAULT 0,
+        ingresos_empleo_actual INTEGER DEFAULT 0,
+        exitosos_empleo_actual INTEGER DEFAULT 0,
+        fallidos_empleo_actual INTEGER DEFAULT 0
+    )
+    """)
+    for column, definition in [
+        ("exp_laboral", "INTEGER DEFAULT 0"),
+        ("maestrias", "INTEGER DEFAULT 0"),
+        ("trabajos_exitosos", "INTEGER DEFAULT 0"),
+        ("trabajos_fallidos", "INTEGER DEFAULT 0"),
+        ("total_generado", "INTEGER DEFAULT 0"),
+        ("racha_exitos", "INTEGER DEFAULT 0"),
+        ("ingresos_empleo_actual", "INTEGER DEFAULT 0"),
+        ("exitosos_empleo_actual", "INTEGER DEFAULT 0"),
+        ("fallidos_empleo_actual", "INTEGER DEFAULT 0"),
+    ]:
+        await conn.execute(
+            f"ALTER TABLE empleos_users ADD COLUMN IF NOT EXISTS {column} {definition}"
+        )
+    await conn.execute("""
+    CREATE TABLE IF NOT EXISTS empleos_historial (
+        id SERIAL PRIMARY KEY,
+        user_id BIGINT NOT NULL,
+        empleo TEXT NOT NULL,
+        timestamp DOUBLE PRECISION NOT NULL,
+        exito BOOLEAN NOT NULL,
+        pago INTEGER NOT NULL,
+        motivo TEXT NOT NULL
+    )
+    """)
+    await conn.execute("""
+    CREATE TABLE IF NOT EXISTS empleos_jornadas (
+        session_id TEXT PRIMARY KEY,
+        request_id TEXT NOT NULL UNIQUE,
+        user_id BIGINT NOT NULL,
+        empleo TEXT NOT NULL,
+        status TEXT NOT NULL DEFAULT 'active',
+        guild_id BIGINT,
+        channel_id BIGINT,
+        message_id BIGINT,
+        created_at DOUBLE PRECISION NOT NULL,
+        expires_at DOUBLE PRECISION NOT NULL,
+        finalized_at DOUBLE PRECISION,
+        exito BOOLEAN,
+        pago INTEGER NOT NULL DEFAULT 0
+    )
+    """)
+    await conn.execute("""
+    CREATE UNIQUE INDEX IF NOT EXISTS empleos_una_jornada_activa_idx
+    ON empleos_jornadas (user_id)
+    WHERE status='active'
+    """)
+    await conn.execute("""
+    CREATE INDEX IF NOT EXISTS empleos_jornadas_estado_idx
+    ON empleos_jornadas (status, expires_at)
+    """)
+
+
+async def init_empleos_tables() -> None:
+    """Crea el esquema de Empleos y sincroniza la actividad de sus usuarios."""
+    if not pool:
+        return
+    async with pool.acquire() as conn:
+        await _ensure_empleos_schema(conn)
+        await conn.execute("""
+        INSERT INTO user_activity (user_id, last_activity)
+        SELECT user_id, $1 FROM empleos_users
+        ON CONFLICT (user_id) DO NOTHING
+        """, time.time())
+
+
+def _invalidate_empleos_cache(user_id=None) -> None:
+    """Invalida la caché RAM de Empleos sin acoplar el módulo al arranque."""
+    try:
+        from modules.Empleos import _EMPLEOS_CACHE
+    except ImportError:
+        return
+    if user_id is None:
+        _EMPLEOS_CACHE.clear()
+    else:
+        _EMPLEOS_CACHE.pop(user_id, None)
+
 
 async def init_db():
     global pool
@@ -404,7 +1123,95 @@ async def init_db():
         ON user_activity (last_activity)
         """)
 
+    await init_empleos_tables()
+
     logger.info("Base de datos conectada y tablas verificadas.")
+
+
+# ── EMPLEOS ───────────────────────────────────────────
+
+async def get_all_experiencia_laboral():
+    """Devuelve el ranking completo de EXP laboral directamente desde la DB."""
+    if not pool:
+        return []
+    async with pool.acquire() as conn:
+        rows = await conn.fetch("""
+            SELECT user_id, empleo_actual, exp_laboral
+            FROM empleos_users
+            ORDER BY exp_laboral DESC, user_id ASC
+        """)
+    return [dict(row) for row in rows]
+
+
+async def add_experiencia_laboral(user_id: int, xp: int) -> None:
+    """Suma XP laboral de forma atómica e invalida la caché del usuario."""
+    if not pool:
+        return
+    async with pool.acquire() as conn:
+        await conn.execute(
+            """
+            INSERT INTO empleos_users (user_id, exp_laboral)
+            VALUES ($1, $2)
+            ON CONFLICT (user_id) DO UPDATE SET
+                exp_laboral = COALESCE(empleos_users.exp_laboral, 0) + $2
+            """,
+            user_id,
+            xp,
+        )
+    _invalidate_empleos_cache(user_id)
+
+
+async def reset_experiencia_laboral(user_id: int):
+    """Reinicia la XP laboral de un usuario y devuelve su id si cambió."""
+    if not pool:
+        return None
+    async with pool.acquire() as conn:
+        updated = await conn.fetchval(
+            "UPDATE empleos_users SET exp_laboral=0 "
+            "WHERE user_id=$1 AND exp_laboral <> 0 RETURNING user_id",
+            user_id,
+        )
+    _invalidate_empleos_cache(user_id)
+    return updated
+
+
+async def reset_experiencia_laboral_global() -> int:
+    """Reinicia la XP laboral de todos los usuarios y devuelve cuántos cambió."""
+    if not pool:
+        return 0
+    async with pool.acquire() as conn:
+        rows = await conn.fetch(
+            "UPDATE empleos_users SET exp_laboral=0 "
+            "WHERE exp_laboral <> 0 RETURNING user_id"
+        )
+    _invalidate_empleos_cache()
+    return len(rows)
+
+
+async def reset_todos_los_empleos() -> dict:
+    """Vacía empleos e historial, devolviendo los conteos eliminados."""
+    if not pool:
+        return {"users": 0, "historial": 0}
+    async with pool.acquire() as conn:
+        users_deleted = await conn.fetchval("SELECT COUNT(*) FROM empleos_users")
+        historial_deleted = await conn.fetchval("SELECT COUNT(*) FROM empleos_historial")
+        await conn.execute("DELETE FROM empleos_users")
+        await conn.execute("DELETE FROM empleos_historial")
+    _invalidate_empleos_cache()
+    return {
+        "users": users_deleted or 0,
+        "historial": historial_deleted or 0,
+    }
+
+
+async def reset_all_balances() -> None:
+    """Resetea los saldos globales y anula las apuestas pendientes."""
+    async with pool.acquire() as conn:
+        async with conn.transaction():
+            await conn.execute("UPDATE users SET balance=0, bank=0")
+            await conn.execute(
+                "UPDATE wagers SET status='lost', payout=0 WHERE status='pending'"
+            )
 
 
 # ── USUARIOS ───────────────────────────────────────────
@@ -578,6 +1385,7 @@ async def purge_user_data(user_id: int, inactive_before: float | None = None):
 
                 await conn.execute("DELETE FROM item_use_log_outbox WHERE user_id=$1", user_id)
                 await conn.execute("DELETE FROM item_uso_diario WHERE user_id=$1", user_id)
+                await conn.execute("DELETE FROM bichos_players WHERE user_id=$1", user_id)
                 inventory_rows = await conn.fetch(
                     "SELECT item_id, cantidad FROM inventario WHERE user_id=$1 FOR UPDATE",
                     user_id,

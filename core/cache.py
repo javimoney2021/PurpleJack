@@ -237,6 +237,34 @@ def set_items_cache(items):
 def get_items_cache():
     return _items_cache
 
+# ── CATÁLOGO DE BICHOS ─────────────────────────────────
+_bichos_catalog_cache = None  # None = sin cargar; [] = catálogo vacío
+
+def get_bichos_catalog_cache():
+    return _bichos_catalog_cache
+
+def set_bichos_catalog_cache(rows):
+    global _bichos_catalog_cache
+    _bichos_catalog_cache = rows
+
+def clear_bichos_catalog_cache():
+    global _bichos_catalog_cache
+    _bichos_catalog_cache = None
+
+# ── CATÁLOGO DE ÍTEMS DE BICHOS ────────────────────────
+_bichos_item_catalog_cache = None
+
+def get_bichos_item_catalog_cache():
+    return _bichos_item_catalog_cache
+
+def set_bichos_item_catalog_cache(rows):
+    global _bichos_item_catalog_cache
+    _bichos_item_catalog_cache = rows
+
+def clear_bichos_item_catalog_cache():
+    global _bichos_item_catalog_cache
+    _bichos_item_catalog_cache = None
+
 # ── INVENTARIO POR USUARIO ─────────────────────────────
 _inventory_cache = {}
 

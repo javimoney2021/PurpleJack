@@ -14,6 +14,8 @@ from discord.ext import commands
 from core.config import COIN, COORDINADOR_ROLE_ID
 from core.database import (
     pool, _get_economy_lock, _flush_user_to_db_unlocked, get_system_toggle,
+    init_empleos_tables as _init_empleos_tables_db,
+    get_all_experiencia_laboral as _get_all_experiencia_laboral_db,
 )
 from core import cache as economy_cache
 from core.game_reminders import send_game_reminder_prompt
@@ -398,87 +400,8 @@ def normalizar_empleo(nombre: str) -> str:
 
 
 async def init_empleos_tables():
-    if not pool:
-        return
-    async with pool.acquire() as conn:
-        await conn.execute("""
-        CREATE TABLE IF NOT EXISTS empleos_users (
-            user_id BIGINT PRIMARY KEY,
-            empleo_actual TEXT DEFAULT NULL,
-            dificultad TEXT DEFAULT NULL,
-            fecha_contratacion DOUBLE PRECISION DEFAULT 0,
-            ultimo_trabajo DOUBLE PRECISION DEFAULT 0,
-            historial_reciente_de_jornadas TEXT DEFAULT '[]',
-            cooldown_renuncia DOUBLE PRECISION DEFAULT 0,
-            progreso_permanencia DOUBLE PRECISION DEFAULT 0,
-            ultimo_empleo TEXT DEFAULT NULL,
-            progreso_requisito DOUBLE PRECISION DEFAULT 0,
-            despedido_inactividad BOOLEAN DEFAULT FALSE,
-            exp_laboral INTEGER DEFAULT 0,
-            maestrias INTEGER DEFAULT 0,
-            trabajos_exitosos INTEGER DEFAULT 0,
-            trabajos_fallidos INTEGER DEFAULT 0,
-            total_generado INTEGER DEFAULT 0,
-            racha_exitos INTEGER DEFAULT 0,
-            ingresos_empleo_actual INTEGER DEFAULT 0,
-            exitosos_empleo_actual INTEGER DEFAULT 0,
-            fallidos_empleo_actual INTEGER DEFAULT 0
-        )
-        """)
-        for column, definition in [
-            ("exp_laboral", "INTEGER DEFAULT 0"),
-            ("maestrias", "INTEGER DEFAULT 0"),
-            ("trabajos_exitosos", "INTEGER DEFAULT 0"),
-            ("trabajos_fallidos", "INTEGER DEFAULT 0"),
-            ("total_generado", "INTEGER DEFAULT 0"),
-            ("racha_exitos", "INTEGER DEFAULT 0"),
-            ("ingresos_empleo_actual", "INTEGER DEFAULT 0"),
-            ("exitosos_empleo_actual", "INTEGER DEFAULT 0"),
-            ("fallidos_empleo_actual", "INTEGER DEFAULT 0"),
-        ]:
-            await conn.execute(f"ALTER TABLE empleos_users ADD COLUMN IF NOT EXISTS {column} {definition}")
-        await conn.execute("""
-        CREATE TABLE IF NOT EXISTS empleos_historial (
-            id SERIAL PRIMARY KEY,
-            user_id BIGINT NOT NULL,
-            empleo TEXT NOT NULL,
-            timestamp DOUBLE PRECISION NOT NULL,
-            exito BOOLEAN NOT NULL,
-            pago INTEGER NOT NULL,
-            motivo TEXT NOT NULL
-        )
-        """)
-        await conn.execute("""
-        CREATE TABLE IF NOT EXISTS empleos_jornadas (
-            session_id TEXT PRIMARY KEY,
-            request_id TEXT NOT NULL UNIQUE,
-            user_id BIGINT NOT NULL,
-            empleo TEXT NOT NULL,
-            status TEXT NOT NULL DEFAULT 'active',
-            guild_id BIGINT,
-            channel_id BIGINT,
-            message_id BIGINT,
-            created_at DOUBLE PRECISION NOT NULL,
-            expires_at DOUBLE PRECISION NOT NULL,
-            finalized_at DOUBLE PRECISION,
-            exito BOOLEAN,
-            pago INTEGER NOT NULL DEFAULT 0
-        )
-        """)
-        await conn.execute("""
-        CREATE UNIQUE INDEX IF NOT EXISTS empleos_una_jornada_activa_idx
-        ON empleos_jornadas (user_id)
-        WHERE status='active'
-        """)
-        await conn.execute("""
-        CREATE INDEX IF NOT EXISTS empleos_jornadas_estado_idx
-        ON empleos_jornadas (status, expires_at)
-        """)
-        await conn.execute("""
-        INSERT INTO user_activity (user_id, last_activity)
-        SELECT user_id, $1 FROM empleos_users
-        ON CONFLICT (user_id) DO NOTHING
-        """, time.time())
+    """Compatibilidad: el esquema se crea desde core.database.init_db()."""
+    await _init_empleos_tables_db()
 
 
 async def get_jornada_activa(user_id: int):
@@ -1171,16 +1094,8 @@ async def append_historial(user_id, empleo, exito, pago, motivo):
 
 
 async def get_all_experiencia_laboral():
-    """Devuelve el ranking completo de EXP laboral directamente desde la DB."""
-    if not pool:
-        return []
-    async with pool.acquire() as conn:
-        rows = await conn.fetch("""
-            SELECT user_id, empleo_actual, exp_laboral
-            FROM empleos_users
-            ORDER BY exp_laboral DESC, user_id ASC
-        """)
-    return [dict(row) for row in rows]
+    """Compatibilidad: el ranking se consulta desde core.database."""
+    return await _get_all_experiencia_laboral_db()
 
 
 async def limpiar_progreso(user_id):
@@ -1823,7 +1738,6 @@ class Empleos(commands.Cog):
         self._jornadas_worker_task: asyncio.Task | None = None
 
     async def cog_load(self):
-        await init_empleos_tables()
         _despidos_config["activo"] = await get_system_toggle("despidos", False)
         self._jornadas_huerfanas = await cancelar_jornadas_de_ejecucion_anterior()
 

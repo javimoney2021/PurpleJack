@@ -74,11 +74,18 @@ async def _cooldown(user_id: int, game: str) -> float:
 
 
 class _SourceMessage:
+    """Mensaje sintético que emula el mensaje de invocación de un comando."""
+
     def __init__(self, context, message_id: int):
         self.context = context
         self.id = message_id
         self.reference = None
         self.created_at = datetime.now(timezone.utc)
+        # Los callbacks existentes leen autor/canal/guild desde ctx.message.
+        self.author = context.author
+        self.channel = context.channel
+        self.guild = context.guild
+        self.bot = context.bot
 
     async def reply(self, *args, **kwargs):
         return await self.context.reply(*args, **kwargs)
@@ -88,7 +95,16 @@ class _SourceMessage:
 
 
 class PanelContext:
-    """Compatibilidad transitoria con callbacks existentes, sin procesar mensajes !."""
+    """Adaptador de compatibilidad entre interacciones slash y callbacks legacy.
+
+    Contrato:
+    - Reproduce los atributos de comando que consumen los callbacks
+      (``author``, ``channel``, ``guild``, ``bot``, ``message``, ``command``).
+    - ``send``/``reply`` enrutan a ``followup.send`` o ``channel.send`` según
+      ``private`` y ``first_followup``.
+    - ``auto_delete_after``, cuando está definido, tiene prioridad sobre el
+      ``delete_after`` que envíe el callback. Si no, se respeta el del callback.
+    """
 
     def __init__(self, interaction: discord.Interaction, *, private: bool,
                  first_followup: bool = False, auto_delete_after: int | None = None):
@@ -107,19 +123,21 @@ class PanelContext:
 
     async def send(self, *args, **kwargs):
         kwargs.pop("mention_author", None)
-        kwargs.pop("delete_after", None)
+        delete_after = kwargs.pop("delete_after", None)
+        if self.auto_delete_after is not None:
+            delete_after = self.auto_delete_after
+        if delete_after is not None:
+            kwargs["delete_after"] = delete_after
         if self.private:
             self.replied = True
-            return await self.interaction.followup.send(
-                *args, ephemeral=True, wait=True, **kwargs,
-            )
-        if self.auto_delete_after is not None:
-            kwargs["delete_after"] = self.auto_delete_after
+            kwargs["ephemeral"] = True
+            kwargs["wait"] = True
+            return await self.interaction.followup.send(*args, **kwargs)
         if self.first_followup and not self.replied:
             self.replied = True
-            result = await self.interaction.followup.send(
-                *args, ephemeral=False, wait=True, **kwargs,
-            )
+            kwargs["ephemeral"] = False
+            kwargs["wait"] = True
+            result = await self.interaction.followup.send(*args, **kwargs)
             if kwargs.get("view") is not None:
                 self.board_created = True
             return result

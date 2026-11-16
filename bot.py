@@ -51,7 +51,9 @@ logger = logging.getLogger("purplejack")
 from settings import TOKEN, DATABASE_URL, GUILD_ID, TEST_MODE
 
 from core.database import (
-    init_db, drop_halloween_tables, load_items_to_cache, load_cargos_to_cache,
+    init_db, drop_halloween_tables, init_bichos_tables,
+    get_bichos_catalog, get_bichos_item_catalog,
+    load_items_to_cache, load_cargos_to_cache,
     load_balance_index, load_member_names, remember_member_name,
     load_collect_config_to_cache, claim_expired_cargos,
     get_cargo_temporal_by_id, mark_cargo_removal_failed,
@@ -175,7 +177,7 @@ class PurpleJackCommandTree(app_commands.CommandTree):
                 return False
         if command_name in {
             "jugar", "trabajar", "consultar", "work", "crime", "collect",
-            "tienda", "rob", "carrera", "retar",
+            "tienda", "rob", "carrera", "retar", "bichos",
         }:
             return await check_player_access(interaction)
         if command_name in {"ayuda_nave", "eliminar_mis_datos"}:
@@ -243,7 +245,7 @@ async def load_modules():
         "modules.Empleos", "modules.collect", "modules.dados",
         "modules.duels", "modules.golpear", "modules.carrera",
         "modules.memo", "modules.blackjack", "modules.player_panels",
-        "modules.player_commands",
+        "modules.player_commands", "modules.bichos",
     ):
         await _startup_step(f"Extensión {extension}", bot.load_extension(extension))
 
@@ -637,7 +639,7 @@ async def shutdown():
 
 _REQUIRED_PLAYER_COMMANDS = {
     "jugar", "consultar", "trabajar", "work", "crime", "collect",
-    "tienda", "rob", "carrera", "retar",
+    "tienda", "rob", "carrera", "retar", "bichos",
 }
 
 
@@ -776,6 +778,19 @@ def run_bot():
 
         await _startup_step("PostgreSQL y esquema", init_db())
         await _startup_step("Retiro de tablas Halloween", drop_halloween_tables())
+        await _startup_step("Tablas Bichos World", init_bichos_tables())
+        bichos_catalogo = await _startup_step("Catálogo de Bichos", get_bichos_catalog())
+        logger.info(
+            "Catálogo de Bichos en RAM iniciado con %s Bicho(s).",
+            len(bichos_catalogo or []),
+        )
+        bichos_items = await _startup_step(
+            "Catálogo de ítems de Bichos", get_bichos_item_catalog(),
+        )
+        logger.info(
+            "Catálogo de ítems de Bichos en RAM iniciado con %s ítem(s).",
+            len(bichos_items or []),
+        )
         await _startup_step("Tabla de recordatorios", init_game_reminders())
         reembolsadas = await _startup_step("Apuestas pendientes", recover_pending_wagers())
         if reembolsadas:
