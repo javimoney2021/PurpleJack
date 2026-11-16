@@ -51,7 +51,7 @@ logger = logging.getLogger("purplejack")
 from settings import TOKEN, DATABASE_URL, GUILD_ID, TEST_MODE
 
 from core.database import (
-    init_db, drop_halloween_tables, init_bichos_tables,
+    init_db, init_bichos_tables,
     get_bichos_catalog, get_bichos_item_catalog,
     load_items_to_cache, load_cargos_to_cache,
     load_balance_index, load_member_names, remember_member_name,
@@ -777,7 +777,6 @@ def run_bot():
         _register_shutdown_signal(loop)
 
         await _startup_step("PostgreSQL y esquema", init_db())
-        await _startup_step("Retiro de tablas Halloween", drop_halloween_tables())
         await _startup_step("Tablas Bichos World", init_bichos_tables())
         bichos_catalogo = await _startup_step("Catálogo de Bichos", get_bichos_catalog())
         logger.info(

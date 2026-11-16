@@ -35,23 +35,6 @@ class PurgeInventoryTests(unittest.IsolatedAsyncioTestCase):
         conn.fetch.assert_awaited_once()
         self.assertNotIn("halloween", conn.fetch.await_args.args[0].lower())
 
-    async def test_halloween_cleanup_drops_only_retired_tables_and_clears_inventory_cache(self):
-        conn = MagicMock()
-        conn.execute = AsyncMock()
-        conn.transaction.return_value = _AsyncContext(None)
-        pool = MagicMock()
-        pool.acquire.return_value = _AsyncContext(conn)
-        with patch.object(database, "pool", pool), \
-             patch.object(database.cache, "_inventory_cache", {42: ["old-craft"]}) as inventory_cache:
-            await database.drop_halloween_tables()
-            self.assertEqual(inventory_cache, {})
-        self.assertEqual([call.args[0] for call in conn.execute.await_args_list], [
-            "DROP TABLE IF EXISTS halloween_craft_inventory",
-            "DROP TABLE IF EXISTS halloween_craft_items",
-            "DROP TABLE IF EXISTS halloween_candy_balances",
-            "DROP TABLE IF EXISTS halloween_candy_awards",
-        ])
-
     async def _purge(self, inventory, lots, fail_stock=False):
         conn = MagicMock()
         statements = []

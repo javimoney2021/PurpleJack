@@ -1053,18 +1053,6 @@ class Bichos(commands.Cog):
             interaction, nombre, descripcion, imagen_url, ataque, defensa, precio,
         )
 
-    @app_commands.command(
-        name="add_bichos", description="Alias de /add_bicho para catálogos existentes",
-    )
-    @app_commands.describe(nombre="Nombre único", imagen="URL HTTPS de la imagen",
-                           ataque="Ataque base", defensa="Defensa base", precio="Precio de tienda")
-    @coordinator_only()
-    async def add_bichos(self, interaction: discord.Interaction, nombre: str, imagen: str,
-                         ataque: int, defensa: int, precio: int):
-        await self._add_bicho_impl(
-            interaction, nombre, "Sin descripción.", imagen, ataque, defensa, precio,
-        )
-
     async def _add_item_bicho_impl(self, interaction: discord.Interaction, nombre: str,
                                    descripcion: str, imagen_url: str, boost: str,
                                    precio: int):
@@ -1124,30 +1112,6 @@ class Bichos(commands.Cog):
     async def add_item_bicho(self, interaction: discord.Interaction, nombre: str,
                              descripcion: str, precio: int, imagen_url: str,
                              boost: app_commands.Choice[str]):
-        await self._add_item_bicho_impl(
-            interaction, nombre, descripcion, imagen_url, boost.value, precio,
-        )
-
-    @app_commands.command(
-        name="add_items_bichos", description="Alias de /add_item_bicho para catálogos existentes",
-    )
-    @app_commands.describe(
-        nombre="Nombre único del ítem",
-        descripcion="Descripción visible en la tienda",
-        precio="Precio de tienda en Bcoin",
-        imagen_url="URL HTTPS de la imagen del ítem",
-        boost="Efecto que aplica el ítem al usarlo",
-    )
-    @app_commands.choices(boost=[
-        app_commands.Choice(name="Regeneración", value="regeneracion"),
-        app_commands.Choice(name="Power", value="power"),
-        app_commands.Choice(name="Vitamina", value="vitamina"),
-        app_commands.Choice(name="Sin efecto", value="none"),
-    ])
-    @coordinator_only()
-    async def add_items_bichos(self, interaction: discord.Interaction, nombre: str,
-                               descripcion: str, precio: int, imagen_url: str,
-                               boost: app_commands.Choice[str]):
         await self._add_item_bicho_impl(
             interaction, nombre, descripcion, imagen_url, boost.value, precio,
         )

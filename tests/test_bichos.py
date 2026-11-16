@@ -692,8 +692,10 @@ class BichosTests(unittest.IsolatedAsyncioTestCase):
 
     def test_coordinator_commands_registered(self):
         names = {command.name for command in Bichos.__cog_app_commands__}
-        self.assertTrue({"bichos", "add_bicho", "add_bichos", "add_item_bicho",
-                         "add_items_bichos", "usuarios_bichos"} <= names)
+        self.assertTrue({"bichos", "add_bicho", "add_item_bicho",
+                         "usuarios_bichos"} <= names)
+        self.assertNotIn("add_bichos", names)
+        self.assertNotIn("add_items_bichos", names)
 
 
 if __name__ == "__main__":

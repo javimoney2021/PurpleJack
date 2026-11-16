@@ -33,18 +33,6 @@ BICHOS_VITAMIN_TRAINING_PCT = 30
 BICHOS_VITAMIN_HOURS = 1
 
 
-async def drop_halloween_tables() -> None:
-    """Retira únicamente los datos persistidos del sistema de dulces y Craft."""
-    async with pool.acquire() as conn:
-        async with conn.transaction():
-            await conn.execute("DROP TABLE IF EXISTS halloween_craft_inventory")
-            await conn.execute("DROP TABLE IF EXISTS halloween_craft_items")
-            await conn.execute("DROP TABLE IF EXISTS halloween_candy_balances")
-            await conn.execute("DROP TABLE IF EXISTS halloween_candy_awards")
-    cache._inventory_cache.clear()
-    logger.info("Tablas de dulces y Craft retiradas.")
-
-
 async def init_bichos_tables() -> None:
     """Crea únicamente la base persistente de Bichos World."""
     async with pool.acquire() as conn:
