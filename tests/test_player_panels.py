@@ -477,6 +477,54 @@ class PanelTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(interaction.channel.send.await_args.kwargs["delete_after"], 15)
         interaction.followup.send.assert_not_awaited()
 
+    async def test_private_followup_never_receives_delete_after(self):
+        message = SimpleNamespace(delete=AsyncMock())
+        interaction = SimpleNamespace(
+            id=1234, user=SimpleNamespace(id=1), guild=object(), client=object(),
+            channel=SimpleNamespace(send=AsyncMock()),
+            followup=SimpleNamespace(send=AsyncMock(return_value=message)),
+        )
+        context = PanelContext(interaction, private=True)
+        self.assertIs(await context.send("balance", delete_after=0), message)
+        kwargs = interaction.followup.send.await_args.kwargs
+        self.assertNotIn("delete_after", kwargs)
+        self.assertTrue(kwargs["wait"])
+        self.assertTrue(kwargs["ephemeral"])
+        await asyncio.sleep(0.05)
+        message.delete.assert_awaited_once()
+        interaction.channel.send.assert_not_awaited()
+
+    async def test_first_followup_never_receives_delete_after(self):
+        message = SimpleNamespace(delete=AsyncMock())
+        interaction = SimpleNamespace(
+            id=4321, user=SimpleNamespace(id=1), guild=object(), client=object(),
+            channel=SimpleNamespace(send=AsyncMock()),
+            followup=SimpleNamespace(send=AsyncMock(return_value=message)),
+        )
+        context = PanelContext(interaction, private=False, first_followup=True)
+        self.assertIs(await context.send("tablero", delete_after=0), message)
+        kwargs = interaction.followup.send.await_args.kwargs
+        self.assertNotIn("delete_after", kwargs)
+        self.assertFalse(kwargs["ephemeral"])
+        await asyncio.sleep(0.05)
+        message.delete.assert_awaited_once()
+
+    async def test_followup_delete_failure_is_ignored(self):
+        import discord
+
+        message = SimpleNamespace(delete=AsyncMock(side_effect=discord.NotFound(
+            SimpleNamespace(status=404, reason="Not Found"), "unknown message",
+        )))
+        interaction = SimpleNamespace(
+            id=5678, user=SimpleNamespace(id=1), guild=object(), client=object(),
+            channel=SimpleNamespace(send=AsyncMock()),
+            followup=SimpleNamespace(send=AsyncMock(return_value=message)),
+        )
+        context = PanelContext(interaction, private=True)
+        self.assertIs(await context.send("balance", delete_after=0), message)
+        await asyncio.sleep(0.05)
+        message.delete.assert_awaited_once()
+
     async def test_work_reminder_uses_settled_cooldown(self):
         from modules.Empleos import _ofrecer_recordatorio_trabajo
         from core.game_reminders import _current_cooldown_expiry, ReminderPrompt

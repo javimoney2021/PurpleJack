@@ -67,6 +67,25 @@ async def _delete_roulette_options_after(view: "RouletteOptions") -> None:
             pass
 
 
+async def _delete_message_later(message, delay: float) -> None:
+    """Borra un mensaje tras ``delay`` segundos.
+
+    ``Webhook.send`` no acepta ``delete_after``, así que los envíos por
+    followup programan el borrado con esta tarea.
+    """
+    try:
+        await asyncio.sleep(delay)
+        await message.delete()
+    except (discord.HTTPException, discord.NotFound):
+        pass
+
+
+def _schedule_message_delete(message, delay: float | None) -> None:
+    if delay is None or message is None:
+        return
+    asyncio.create_task(_delete_message_later(message, delay))
+
+
 async def _cooldown(user_id: int, game: str) -> float:
     if game == "memo":
         return await get_command_cooldown("user", user_id, "memo")
@@ -104,6 +123,8 @@ class PanelContext:
       ``private`` y ``first_followup``.
     - ``auto_delete_after``, cuando está definido, tiene prioridad sobre el
       ``delete_after`` que envíe el callback. Si no, se respeta el del callback.
+      Los envíos por followup programan el borrado manualmente porque
+      ``Webhook.send`` no admite ``delete_after``.
     """
 
     def __init__(self, interaction: discord.Interaction, *, private: bool,
@@ -126,21 +147,24 @@ class PanelContext:
         delete_after = kwargs.pop("delete_after", None)
         if self.auto_delete_after is not None:
             delete_after = self.auto_delete_after
-        if delete_after is not None:
-            kwargs["delete_after"] = delete_after
         if self.private:
             self.replied = True
             kwargs["ephemeral"] = True
             kwargs["wait"] = True
-            return await self.interaction.followup.send(*args, **kwargs)
+            result = await self.interaction.followup.send(*args, **kwargs)
+            _schedule_message_delete(result, delete_after)
+            return result
         if self.first_followup and not self.replied:
             self.replied = True
             kwargs["ephemeral"] = False
             kwargs["wait"] = True
             result = await self.interaction.followup.send(*args, **kwargs)
+            _schedule_message_delete(result, delete_after)
             if kwargs.get("view") is not None:
                 self.board_created = True
             return result
+        if delete_after is not None:
+            kwargs["delete_after"] = delete_after
         result = await self.channel.send(*args, **kwargs)
         self.replied = True
         if kwargs.get("view") is not None:
